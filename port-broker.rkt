@@ -13,6 +13,7 @@
 (require
  racket/match
  data/gvector
+ "util.rkt"
  )
 
 (struct port-broker
@@ -244,12 +245,8 @@ A wrapped port should be able to give a handle to the broker it is wrapping.
 (define broker-cache
   (make-weak-hasheq))
 
-(define (cache-port-broker p)
-  (if (hash-has-key? broker-cache p)
-      (ephemeron-value (hash-ref broker-cache p))
-      (let ([pb (make-port-broker p)])
-        (hash-set! broker-cache p (make-ephemeron p pb))
-        pb)))
+(define cache-port-broker
+  (make-ephemeron-cache-lookup broker-cache make-port-broker))
 
 ;; wrapper port -> port broker
 (define wrapper-cache

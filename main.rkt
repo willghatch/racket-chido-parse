@@ -2,10 +2,15 @@
 
 (require
  "port-broker.rkt"
+ "util.rkt"
  racket/struct
  )
 
 ;; TODO - explanation from notes about the big picture of how this parsing library works
+
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;; Structs
 
 (struct parse-derivation
   ;; TODO - document from notes
@@ -26,34 +31,51 @@
   ;; TODO - use a prefix trie for the parsers
   (name parsers)
   #:transparent)
-
 (define (new-alt-parser #:name [name #f] . parsers)
   (alt-parser name parsers))
 
+(struct parse-stream
+  (result next-job)
+  #:methods gen:stream
+  [(define (stream-empty? s) #f)
+   (define (stream-first s)
+     (parse-stream-result s))
+   (define (stream-rest s)
+     ;; look up/schedule next-job
+     TODO
+     )])
+
 #|
 Schedulers keep track of parse work that needs to be done.
-The job-list can contain:
-* parser-jobs, which contain all the info to run a parser and cache its results
+
+The demand stack can contain:
 * scheduled-continuations, which have an outer job that they represent (or #f for the original outside caller) and a single dependency.
 * alt-workers, which are special workers for alt-parsers.  Alt-workers are spawned instead of normal continuations for alt-parsers.
+The job-cache is a multi-tier hash of parser->extra-args-list->start-position->result-number->parser-job
+The job->result-cache is a map from parser-job structs -> parser-stream OR parse-error
 |#
 (struct scheduler
   ;; TODO - document
-  (job-list demand-stack)
+  (port-broker demand-stack job-info->job-cache job->result-cache)
   #:mutable
   #:transparent)
-(define (make-scheduler '() '()))
+(define (make-scheduler port-broker)
+  (scheduler port-broker '() (hash) (hasheq)))
 
 (struct parser-job
   ;; TODO - document from notes
-  (id-number
+  (
+   ;; parser is either a parser struct or an alt-parser struct
    parser
    extra-arguments
+   start-position
    result-index
    [continuation/worker #:mutable]
    [dependents #:mutable]
    )
   #:transparent)
+(define (make-parser-job p extra-args start result-index)
+  (parser-job p extra-args start result-index #f '()))
 
 (struct alt-worker
   (job remaining-jobs failures successful?)
@@ -63,49 +85,24 @@ The job-list can contain:
   (job k dependency [ready? #:mutable])
   #:transparent)
 
-(define job-id-counter 0)
-(define (fresh-id-number!)
-  (set! job-id-counter (add1 job-id-counter))
-  job-id-counter)
-(define (make-bare-continuation-job k deps)
-  (job (fresh-id-number!) #f #f #f k deps))
-(define (job->k-job j k deps)
-  (struct-copy job j
-               [continuation k]
-               [dependencies deps]))
-
-(define (cache-thunk->job ct)
-  (job (fresh-id-number!) (cache-thunk-parser ct) (cache-thunk-extra-args ct)
-       (cache-thunk-start-position ct) (cache-thunk-result-number ct)
-       '() '()))
+(define (job->scheduled-continuation j k dep)
+  (scheduled-continuation j k dep #f))
+(define (fresh-scheduled-continuation k dep)
+  (scheduled-continuation #f k dep #f))
 
 
 
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;;; Caches
 
 #|
-TODO - parser constructors
--- they should all have an optional #:name argument
-- sequence parser
-- alternative parser -- the alternative parser should turn the prefix into tries
-- biased alternative parser -- PEG style -- try in order until just one succeeds
-- repetition parser
-- literal parser -- takes a string
-|#
-
-#|
-Result cache:
-A multi-tier hash of port-broker->parser->extra-args-list->start-position->result-number->result.
-The top level of the cache is a weak hash.
-
 Scheduler cache:
-A weak hash port-broker->scheduler.
+A weak hash port-broker->ephemeron with scheduler.
 |#
-(define cache-empty-flag (gensym))
-(define the-result-cache (make-weak-hasheq))
 (define the-scheduler-cache (make-weak-hasheq))
-
-(define (result-cache port-broker)
-  (hash-ref! result-cache port-broker (hash)))
+(define port-broker-scheduler
+  (make-ephemeron-cache-lookup the-scheduler-cache make-scheduler))
 
 (define (hash-set+ h k1 k2 . args)
   (if (null? args)
@@ -119,74 +116,74 @@ A weak hash port-broker->scheduler.
       (hash-ref h k1 fail-thunk)
       (apply hash-ref+ fail-thunk (hash-ref h k1 fail-thunk) args)))
 
-(define (set-result-cache! port-broker parser
-                           extra-args start-position
-                           result-number result)
-  (define new-parser-cache
-    (hash-set+ (hash-ref (result-cache port-broker) parser (λ (hash)))
-               extra-args start-position result-number result))
-  (hash-set! (result-cache port-broker) new-parser-cache))
+(define (scheduler-set-result! s job result)
+  (set-scheduler-job->result-cache!
+   s
+   (hash-set (scheduler-job->result-cache s) job result)))
 
-(define (result-cache-ref port-broker parser
-                          extra-args start-position
-                          result-number)
-  (hash-ref+ cache-empty-flag
-             (result-cache port-broker)
-             parser extra-args start-position result-number))
+(define (scheduler-get-result s job)
+  (hash-ref (scheduler-job->result-cache s) job #f))
+
+(define (get-job! s parser extra-args start-position result-number)
+  (define existing (hash-ref+ #f (scheduler-job-info->job-cache s)
+                              parser extra-args start-position result-number))
+  (or existing
+      (let ([fresh-job (make-parser-job parser extra-args
+                                        start-position result-number)])
+        (set-scheduler-job-info->job-cache!
+         s
+         (hash-set+ (scheduler-job-info->job-cache s)
+                    parser extra-args start-position result-number fresh-job))
+        fresh-job)))
+
+(define (schedule-demand! s demand)
+  (set-scheduler-demand-stack! s (cons demand (scheduler-demand-stack s))))
 
 
-
-#|
-cache thunk
-- contains all the info to access the cache (or schedule an update to it)
-- checks the cache, and if there is a result just return it
-- else schedule a new job with the procedure and other cache info and also schedule a the current continuation as a job that depends on the new procedure.  Put the continuation job on the priority stack.  Also if there is a continuation mark denoting that this was done within another job, mark that anti-dependency on the new thunk job.
-|#
-(struct cache-thunk
-  (port-broker parser extra-args start-position result-number)
-  #:transparent)
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;; Scheduling
 
 (define chido-parse-prompt (make-continuation-prompt-tag 'chido-parse-prompt))
 (define chido-parse-k-mark (make-continuation-mark-key 'chido-parse-k-mark))
 
-(define (force-cache-thunk! ct)
-  TODO
-  ;; TODO - this is all a mess!!  I wrote most of this before I made a bunch of changes to all the relevant structs and rewrote the run-scheduler function.
+(define (enter-the-parser port-broker parser extra-args start-position)
+  (enter-the-parser/n port-broker parser extra-args start-position 0))
 
-  (define try-cache (apply result-cache-ref (struct->list ct)))
-  (if (eq? try-cache cache-empty-flag)
-      (let ([scheduler (hash-ref! the-scheduler-cache
-                                  (cache-thunk-port-broker ct)
-                                  (λ () (make-scheduler)))])
-        (call-with-current-continuation
-         (λ (k)
-           (define k-marks (continuation-marks k))
-           (define outer-job-marks (continuation-mark-set->list k-marks
-                                                                chido-parse-k-mark
-                                                                chido-parse-prompt))
-           (define parent-job (match outer-job-marks
-                                ['() #f]
-                                [(list j) j]
-                                [else (error
-                                       'chido-parse
-                                       "internal error -- bad continuation marks")]))
-           (define parser-job (cache-thunk->job ct))
-           (schedule-job! scheduler parser-job)
-           (define k-job (if parent-job
-                             (job->k-job parent-job k)
-                             (make-bare-continuation-job k
-                                                         (list parser-job))))
-           (when parent-job
-             (set-job-dependencies! parent-job
-                                    (cons k-job (job-dependencies parent-job))))
-           (schedule-job! scheduler k-job)
-           (demand-job! scheduler k-job)
-           (run-scheduler scheduler))
-         chido-parse-prompt))
-      try-cache))
+(define (enter-the-parser/n port-broker parser extra-args
+                            start-position result-number)
+  (define s (port-broker-scheduler port-broker))
+  (define j (get-job! s parser extra-args start-position result-number))
+  (enter-the-parser/job s j))
+
+(define (enter-the-parser/job scheduler job)
+  (or (scheduler-get-result scheduler job)
+      (call-with-current-continuation
+       (λ (k)
+         (define k-marks (continuation-marks k))
+         (define outer-job-marks (continuation-mark-set->list k-marks
+                                                              chido-parse-k-mark
+                                                              chido-parse-prompt))
+         (define parent-job (match outer-job-marks
+                              ['() #f]
+                              [(list j) j]
+                              [else (error
+                                     'chido-parse
+                                     "internal error -- bad continuation marks")]))
+         (define k-job (if parent-job
+                           (job->scheduled-continuation parent-job k parser-job)
+                           (fresh-scheduled-continuation k parser-job)))
+         (when parent-job
+           (set-parser-job-continuation/worker! parent-job k-job))
+         (set-parser-job-dependents! job (cons k-job (parser-job-dependents job)))
+         (schedule-demand! scheduler k-job)
+         (run-scheduler scheduler))
+       chido-parse-prompt)))
+
 
 (define (find-work s job-list)
   ;; Returns an actionable job or #f.
+  ;; s is a scheduler
+  ;; job-list is a list of parser-job structs
   (define demands (scheduler-demand-stack s))
   (let loop ([jobs job-list]
              [blocked '()])
@@ -225,18 +222,14 @@ cache thunk
                (run-actionable-job actionable-job))))]
     [(alt-worker job remaining-jobs failures successful?)
      (cond [(and (null? remaining-jobs) successful?)
-            ;; * cache the result for the job as an empty stream
-            ;; * mark all of its dependents as ready
-            ;; * pop the demand stack
-            ;; * recur into run-scheduler
-            TODO]
+            (cache-result-and-ready-dependents! job empty-stream)
+            (pop-demand!)
+            (run-scheduler s)]
            [(null? remaining-jobs)
-            ;; * make a failure result that encapsulates the failures list
-            ;; * cache the result of the job as a failure
-            ;; * mark all of its dependents as ready
-            ;; * pop the demand stack
-            ;; * recur into run-scheduler
-            TODO]
+            (define result (alt-worker->failure demanded))
+            (cache-result-and-ready-dependents! job result)
+            (pop-demand!)
+            (run-scheduler s)]
            [else (let ([actionable-job (find-work s remaining-jobs)])
                    (if (not actionable-job)
                        (begin
@@ -264,11 +257,22 @@ cache thunk
   ;; --- if the result is an empty stream, treat it as an error.  If it is otherwise a stream, the way to get the next result is stream-next.... TODO - I need to take a break and come back to this.
   )
 
+(define (cache-result-and-ready-dependents! job result)
+  ;; TODO - validate result and transform it into an error if it is bad?
+  ;; TODO - schedule the successor job to this job if the result is a success.
+  ;; TODO - if the result is an opaque stream, wrap it with a custom stream such that forcing the stream will call the successor job to force the underlying stream
+  TODO)
+
+(define (alt-worker->failure aw)
+  TODO)
 
 
 
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;;; Parsing outer API
 
 #|
+TODO
 parse-*/prefix is not a public API, but all the other parse API functions are built on top of it.
 |#
 ;(define (parse-*/prefix TODO) TODO)
@@ -278,3 +282,14 @@ parse-*/prefix is not a public API, but all the other parse API functions are bu
 
 
 
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;;; Derived parser contsructors
+#|
+TODO - derived parser constructors
+-- they should all have an optional #:name argument
+- sequence parser
+- biased alternative parser -- PEG style -- try in order until just one succeeds
+- repetition parser
+- literal parser -- takes a string
+|#
