@@ -1,9 +1,13 @@
 #lang racket/base
 
 (provide
- make-port-broker
+ (rename-out
+  [cache-port-broker port-broker]
+  [port-broker->wrapped-port/cached port-broker->port]
+  )
+ port->port-broker
+ close-port-broker
  ;port-broker-commit-bytes
- port-broker->wrapped-port
  )
 
 (require
@@ -224,6 +228,43 @@
    ;; buffer-mode
    #f
    ))
+
+(define (close-port-broker pb)
+  (close-input-port (port-broker-port pb)))
+
+
+
+#|
+Caching
+A port should only have one port broker.
+A wrapped port should be able to give a handle to the broker it is wrapping.
+|#
+
+;; broker -> original port (via ephemeron)
+(define broker-cache
+  (make-weak-hasheq))
+
+(define (cache-port-broker p)
+  (if (hash-has-key? broker-cache p)
+      (ephemeron-value (hash-ref broker-cache p))
+      (let ([pb (make-port-broker p)])
+        (hash-set! broker-cache p (make-ephemeron p pb))
+        pb)))
+
+;; wrapper port -> port broker
+(define wrapper-cache
+  (make-weak-hasheq))
+
+(define (port-broker->wrapped-port/cached pb)
+  (define p (port-broker->wrapped-port pb))
+  (hash-set! wrapper-cache p pb)
+  p)
+
+(define (port->port-broker p)
+  (hash-ref wrapper-cache p (λ () (error
+                                   'port->port-broker
+                                   "not a port created by port-broker->port"))))
+
 
 
 (module+ test
