@@ -252,8 +252,8 @@ A wrapped port should be able to give a handle to the broker it is wrapping.
 (define wrapper-cache
   (make-weak-hasheq))
 
-(define (port-broker->wrapped-port/cached pb)
-  (define p (port-broker->wrapped-port pb))
+(define (port-broker->wrapped-port/cached pb offset)
+  (define p (port-broker->wrapped-port pb offset))
   (hash-set! wrapper-cache p pb)
   p)
 
