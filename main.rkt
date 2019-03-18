@@ -227,12 +227,12 @@ A weak hash port-broker->ephemeron with scheduler.
                (run-actionable-job s actionable-job))))]
     [(alt-worker job remaining-jobs failures successful?)
      (cond [(and (null? remaining-jobs) successful?)
-            (cache-result-and-ready-dependents! job empty-stream)
+            (cache-result-and-ready-dependents! s job empty-stream)
             (pop-demand!)
             (run-scheduler s)]
            [(null? remaining-jobs)
             (define result (alt-worker->failure demanded))
-            (cache-result-and-ready-dependents! job result)
+            (cache-result-and-ready-dependents! s job result)
             (pop-demand!)
             (run-scheduler s)]
            [else (let ([actionable-job (find-work s remaining-jobs)])
@@ -242,7 +242,7 @@ A weak hash port-broker->ephemeron with scheduler.
                                                    (cons cycle-fail failures))
                          (pop-demand!)
                          (cache-result-and-ready-dependents!
-                          job (alt-worker->failure demanded))
+                          s job (alt-worker->failure demanded))
                          (run-scheduler s))
                        (run-actionable-job s actionable-job)))])]))
 
@@ -263,7 +263,7 @@ A weak hash port-broker->ephemeron with scheduler.
           (with-continuation-mark chido-parse-k-mark job
             (with-handlers ([(λ (e) #t) (λ (e) (exn->failure e))])
               (apply procedure port extra-args))))
-        (cache-result-and-ready-dependents! job result)
+        (cache-result-and-ready-dependents! scheduler job result)
         (run-scheduler scheduler)]
        [(alt-parser name parsers extra-arg-lists)
         (define (mk-dep parser extra-args)
@@ -274,13 +274,37 @@ A weak hash port-broker->ephemeron with scheduler.
         (schedule-demand! scheduler worker)
         (run-scheduler scheduler)])]))
 
-(define (cache-result-and-ready-dependents! job result)
+(define (cache-result-and-ready-dependents! scheduler job result)
   ;; TODO - validate result and transform it into an error if it is bad?
   ;; TODO - all results should end up being a parse-stream or parse-failure object.
   ;; TODO - schedule the successor job to this job if the result is a success.
   ;; TODO - if the result is an opaque stream, wrap it with a custom stream such that forcing the stream will call the successor job to force the underlying stream
   ;; TODO - if the result is an empty stream, turn it into a failure result.
-  ;; TODO - if a dependent is an alt-worker, recursively cache-and-ready its job, and create a new job and alt-worker for the next result
+
+  ;; The result ought to be a derivation, a parse-stream with a derivation inside,
+  ;; a parse-failure, or some other kind of stream that has a derivation inside.
+  ;; TODO - if the result is not a derivation what should happen?
+  (if (parse-stream? result)
+      TODO
+      TODO)
+  TODO
+
+  (define worker (let ([w (parser-job-continuation/worker job)])
+                   (and (alt-worker? w) w)))
+  (set-parser-job-continuation/worker! job #f)
+  (scheduler-set-result! scheduler job validated-result)
+
+  (for ([dep (parser-job-dependents job)])
+    (match dep
+      [(scheduled-continuation job k dependency ready?)
+       TODO]
+      [(alt-worker alt-job remaining-jobs failures successful?)
+       (when (not (parse-failure? result))
+         (set-alt-worker-successful? dep #t))
+       (set-alt-worker-remaining-jobs! dep (remove job remaining-jobs eq?))
+       ;; TODO - if the result is not a failure, I need to ADD a new version of the job to the deps...
+       ;; TODO - if a dependent is an alt-worker, recursively cache-and-ready its job, create a new job with the same alt-worker for the next result
+       TODO]))
   TODO)
 
 (define (alt-worker->failure aw)
