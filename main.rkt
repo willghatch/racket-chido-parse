@@ -237,16 +237,14 @@ A weak hash port-broker->ephemeron with scheduler.
             (run-scheduler s)]
            [else (let ([actionable-job (find-work s remaining-jobs)])
                    (if (not actionable-job)
-                       (begin
-                         (make-cycle-failure job)
+                       (let ([cycle-fail (make-cycle-failure job)])
+                         (set-alt-worker-failures! demanded
+                                                   (cons cycle-fail failures))
                          (pop-demand!)
+                         (cache-result-and-ready-dependents!
+                          job (alt-worker->failure demanded))
                          (run-scheduler s))
                        (run-actionable-job s actionable-job)))])]))
-
-(define (make-cycle-failure job)
-  ;; * cache a cycle failure for the result of the job
-  ;; * mark its dependents as ready
-  TODO)
 
 (define (run-actionable-job scheduler job)
   (match job
@@ -263,7 +261,8 @@ A weak hash port-broker->ephemeron with scheduler.
         ;; TODO - this interface should maybe be different...
         (define result
           (with-continuation-mark chido-parse-k-mark job
-            (apply procedure port extra-args)))
+            (with-handlers ([(λ (e) #t) (λ (e) (exn->failure e))])
+              (apply procedure port extra-args))))
         (cache-result-and-ready-dependents! job result)
         (run-scheduler scheduler)]
        [(alt-parser name parsers extra-arg-lists)
@@ -285,6 +284,12 @@ A weak hash port-broker->ephemeron with scheduler.
   TODO)
 
 (define (alt-worker->failure aw)
+  TODO)
+
+(define (exn->failure e)
+  TODO)
+
+(define (make-cycle-failure job)
   TODO)
 
 
