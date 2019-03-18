@@ -162,6 +162,9 @@ A weak hash port-broker->ephemeron with scheduler.
 
 (define (enter-the-parser/job scheduler job)
   (or (scheduler-get-result scheduler job)
+      #|
+      TODO - there is no scheduler done-k iff there is no chido-parse continuation prompt and no chido-parse mark.  In this case I want to capture the whole continuation as done-k and set it on the scheduler.  Otherwise I want to capture a composable continuation, set it as the continuation of whatever job was in the mark, and just re-run the scheduler (probably with new hints).
+      |#
       (call-with-current-continuation
        (λ (k)
          (define k-marks (continuation-marks k))
@@ -211,6 +214,19 @@ A weak hash port-broker->ephemeron with scheduler.
 
 (define (run-scheduler s)
   (define demanded (car (scheduler-demand-stack s)))
+  #|
+  TODO - my implementation of the demand stack is not quite right.
+  The top demand is to get the final result.
+  Later demands are recursive calls within procedural parsers.
+  If a demand wants the result of an alternative, the alternative might first choose a procedure that recursively wants the same alternative.  That continuation should not be placed on the demand stack, but should just be attached to the job as the way to finish it.  The scheduler should look again for work with the SAME demand since that original job is blocked.  When the demand is finally satisfied (by a different alternative or with [cycle] failure), that continuation will be readied, and if that job is subsequently chosen by something on the demand stack then the continuation will be called.
+  Only the original demand is the real demand -- a 3-down recursive call could block on a 1-down recursive call, so the right decision is to schedule an alternative to the 1-down call, but the stack model wil say there is a cycle prematurely.  All cycles should just block until the original demand has no actionable work.  When there is no actionable work at the top level then the smallest innermost cycle should be detected and failed (eg. a biased OR at the bottom could have a cycle as its first choice but its second choice might succeed).
+  So there should just be one demand and there is a HINT stack.
+  If the demand is ready just return it, otherwise check the bottom (closest to demand) hint for readiness, if ready pop it and all its children off the stack and return.  Otherwise check the next hint.
+  The hints are just an optimization.  So what's a better version?  If something fails or becomes blocked the best thing is to pop it off the stack and try a different alternative at the next level of the stack.  If something succeeds maybe it is best to check things higher on the stack to see if they've also become ready.
+
+  TODO - every time I start a job I need to install a continuation prompt and mark.
+  TODO - this includes returning to scheduled continuations except for the done-k.
+  |#
   (define (pop-demand!)
     (set-scheduler-demand-stack! s (cdr (scheduler-demand-stack s))))
   (match demanded
@@ -247,6 +263,7 @@ A weak hash port-broker->ephemeron with scheduler.
                        (run-actionable-job s actionable-job)))])]))
 
 (define (run-actionable-job scheduler job)
+  ;; TODO - in each branch of this I need to install a prompt and mark.
   (match job
     [(parser-job parser extra-arguments start-position
                  result-index k/worker dependents)
