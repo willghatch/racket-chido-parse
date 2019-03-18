@@ -24,10 +24,8 @@
 
 (struct alt-parser
   ;; TODO - use a prefix trie for the parsers
-  (name parsers)
+  (name parsers extra-arg-lists)
   #:transparent)
-(define (new-alt-parser #:name [name #f] . parsers)
-  (alt-parser name parsers))
 
 (struct parse-stream
   (result next-job scheduler)
@@ -268,11 +266,14 @@ A weak hash port-broker->ephemeron with scheduler.
             (apply procedure port extra-args)))
         (cache-result-and-ready-dependents! job result)
         (run-scheduler scheduler)]
-       [(alt-parser name parsers)
-        ;; * Create an alt-worker for the job and set it.
-        ;; * add the alt-worker to the demand stack
-        ;; * recur into run-scheduler
-        TODO])]))
+       [(alt-parser name parsers extra-arg-lists)
+        (define (mk-dep parser extra-args)
+          (make-parser-job parser extra-args start-position result-index))
+        (define worker
+          (alt-worker job (map mk-dep parsers extra-arg-lists) '() #f))
+        (set-parser-job-continuation/worker! job worker)
+        (schedule-demand! scheduler worker)
+        (run-scheduler scheduler)])]))
 
 (define (cache-result-and-ready-dependents! job result)
   ;; TODO - validate result and transform it into an error if it is bad?
