@@ -61,11 +61,11 @@ The job->result-cache is a map from parser-job structs -> parser-stream OR parse
 |#
 (struct scheduler
   ;; TODO - document
-  (port-broker demand-stack job-info->job-cache job->result-cache)
+  (port-broker done-k hint-stack job-info->job-cache job->result-cache)
   #:mutable
   #:transparent)
 (define (make-scheduler port-broker)
-  (scheduler port-broker '() (hash) (hasheq)))
+  (scheduler port-broker #f '() (hash) (hasheq)))
 
 (struct parser-job
   ;; TODO - document from notes
@@ -83,7 +83,7 @@ The job->result-cache is a map from parser-job structs -> parser-stream OR parse
   (parser-job p extra-args start result-index #f '()))
 
 (struct alt-worker
-  (job remaining-jobs failures successful?)
+  (job remaining-jobs ready-jobs failures successful?)
   #:mutable #:transparent)
 
 (struct scheduled-continuation
@@ -141,8 +141,6 @@ A weak hash port-broker->ephemeron with scheduler.
                     parser extra-args start-position result-number fresh-job))
         fresh-job)))
 
-(define (schedule-demand! s demand)
-  (set-scheduler-demand-stack! s (cons demand (scheduler-demand-stack s))))
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -150,6 +148,7 @@ A weak hash port-broker->ephemeron with scheduler.
 
 (define chido-parse-prompt (make-continuation-prompt-tag 'chido-parse-prompt))
 (define chido-parse-k-mark (make-continuation-mark-key 'chido-parse-k-mark))
+(define recursive-enter-flag (gensym))
 
 (define (enter-the-parser port-broker parser extra-args start-position)
   (enter-the-parser/n port-broker parser extra-args start-position 0))
@@ -165,55 +164,83 @@ A weak hash port-broker->ephemeron with scheduler.
       #|
       TODO - there is no scheduler done-k iff there is no chido-parse continuation prompt and no chido-parse mark.  In this case I want to capture the whole continuation as done-k and set it on the scheduler.  Otherwise I want to capture a composable continuation, set it as the continuation of whatever job was in the mark, and just re-run the scheduler (probably with new hints).
       |#
-      (call-with-current-continuation
-       (λ (k)
-         (define k-marks (continuation-marks k))
-         (define outer-job-marks (continuation-mark-set->list k-marks
-                                                              chido-parse-k-mark
-                                                              chido-parse-prompt))
-         (define parent-job (match outer-job-marks
-                              ['() #f]
-                              [(list j) j]
-                              [else (error
-                                     'chido-parse
-                                     "internal error -- bad continuation marks")]))
-         (define k-job (if parent-job
-                           (job->scheduled-continuation parent-job k parser-job)
-                           (fresh-scheduled-continuation k parser-job)))
-         (when parent-job
-           (set-parser-job-continuation/worker! parent-job k-job))
-         (set-parser-job-dependents! job (cons k-job (parser-job-dependents job)))
-         (schedule-demand! scheduler k-job)
-         (run-scheduler scheduler))
-       chido-parse-prompt)))
+      (if (scheduler-done-k scheduler)
+          ;; This is a recursive call.
+          ;; So we de-schedule the current work by capturing its continuation,
+          ;; we schedule its dependency, and then we abort back to the
+          ;; scheduler loop.
+          (call-with-composable-continuation
+           (λ (k)
+             (define k-marks (continuation-marks k))
+             (define outer-job-marks (continuation-mark-set->list k-marks
+                                                                  chido-parse-k-mark
+                                                                  chido-parse-prompt))
+             (define parent-job (match outer-job-marks
+                                  ['() (error
+                                        'chido-parse
+                                        "internal error -- no continuation mark in recursive call")]
+                                  [(list j) j]
+                                  [else (error
+                                         'chido-parse
+                                         "internal error -- bad continuation marks")]))
+             (define k-job (job->scheduled-continuation parent-job k parser-job))
+             (set-parser-job-continuation/worker! parent-job k-job)
+             (set-parser-job-dependents! job (cons k-job (parser-job-dependents job)))
+             (push-hint! scheduler k-job)
+             ;; Launch the scheduler by being "done" with a flag value.
+             ((scheduler-done-k scheduler) recursive-enter-flag))
+           chido-parse-prompt)
+          (let loop ()
+            ;; This is the original entry into the parser machinery.
+            ;; In this branch we want to capture the full continuation.
+            ;; But we do it in this loop to keep from growing a little bit
+            ;; of extra continuation on each recursive call.
+            (define result
+              (call-with-current-continuation
+               (λ (full-k)
+                 (define k-job (fresh-scheduled-continuation full-k parser-job))
+                 (set-parser-job-dependents!
+                  job
+                  (cons k-job (parser-job-dependents job)))
+                 ;; As a fresh entry into the parser, we start a fresh hint stack.
+                 (set-scheduler-hint-stack! scheduler (list k-job))
+                 (run-scheduler scheduler))))
+            (if (eq? recursive-enter-flag result)
+                (loop)
+                result)))))
 
 
 (define (find-work s job-list)
   ;; Returns an actionable job or #f.
   ;; s is a scheduler
   ;; job-list is a list of parser-job structs
-  (define demands (scheduler-demand-stack s))
+  ;; TODO - this is probably the best place to detect cycles.  I should maybe return some sort of flag object containing the job that contains the smallest dependency cycle so I know which job to return a cycle error for.
   (let loop ([jobs job-list]
              [blocked '()])
     (if (null? jobs)
         #f
         (let ([j (car jobs)])
           (cond [(member j blocked) (loop (cdr jobs) blocked)]
-                [(member (parser-job-continuation/worker j) demands)
-                 (loop (cdr jobs) blocked)]
                 ;; if it has a continuation/worker, add dependencies to jobs
                 [else (match (parser-job-continuation/worker j)
                         [(scheduled-continuation job k dependency ready?)
                          (cond [ready? j]
                                [else (loop (cons dependency (cdr jobs))
                                            (cons j blocked))])]
-                        [(alt-worker job remaining-jobs failures successful?)
-                         (loop (append remaining-jobs jobs)
-                               (cons j blocked))]
+                        [(alt-worker job remaining-jobs ready-jobs
+                                     failures successful?)
+                         (cond [(not (null? ready-jobs)) (car ready-jobs)]
+                               [(null? remaining-jobs) j]
+                               [else (loop (append remaining-jobs jobs)
+                                           (cons j blocked))])]
                         [#f j])])))))
 
 (define (run-scheduler s)
-  (define demanded (car (scheduler-demand-stack s)))
+  (define using-hint? #t)
+  (when (null? (scheduler-hint-stack s))
+    (set! using-hint? #f)
+    (set-scheduler-hint-stack s (list (scheduler-done-k s))))
+  (define hinted (car hints))
   #|
   TODO - my implementation of the demand stack is not quite right.
   The top demand is to get the final result.
@@ -227,69 +254,95 @@ A weak hash port-broker->ephemeron with scheduler.
   TODO - every time I start a job I need to install a continuation prompt and mark.
   TODO - this includes returning to scheduled continuations except for the done-k.
   |#
-  (define (pop-demand!)
-    (set-scheduler-demand-stack! s (cdr (scheduler-demand-stack s))))
-  (match demanded
+  (define (pop-hint!)
+    (set-scheduler-hint-stack! s (cdr (scheduler-hint-stack s))))
+  (match hinted
+    [(scheduled-continuation #f done-k dep #t)
+     ;; done-k is ready.
+     (set-scheduler-done-k! s #f)
+     (done-k (lookup-job-result dep))]
+    [(scheduled-continuation job k dependency #t)
+     ;; also ready
+     (pop-hint!)
+     (run-actionable-job s job)]
     [(scheduled-continuation job k dependency ready?)
-     (define (return! ret)
-       (pop-demand!)
-       (k result))
-     (if ready?
-         (let ([result (lookup-job-result dependency)])
-           (return! result))
-         (let ([actionable-job (find-work s (list dependency))])
-           (if (not actionable-job)
-               (return (make-cycle-failure job))
-               (run-actionable-job s actionable-job))))]
-    [(alt-worker job remaining-jobs failures successful?)
-     (cond [(and (null? remaining-jobs) successful?)
-            (cache-result-and-ready-dependents! s job empty-stream)
-            (pop-demand!)
-            (run-scheduler s)]
-           [(null? remaining-jobs)
-            (define result (alt-worker->failure demanded))
-            (cache-result-and-ready-dependents! s job result)
-            (pop-demand!)
-            (run-scheduler s)]
-           [else (let ([actionable-job (find-work s remaining-jobs)])
-                   (if (not actionable-job)
-                       (let ([cycle-fail (make-cycle-failure job)])
-                         (set-alt-worker-failures! demanded
-                                                   (cons cycle-fail failures))
-                         (pop-demand!)
-                         (cache-result-and-ready-dependents!
-                          s job (alt-worker->failure demanded))
-                         (run-scheduler s))
-                       (run-actionable-job s actionable-job)))])]))
+     ;; Not ready
+     (let ([actionable-job (find-work s (list dependency))])
+       (cond [actionable-job (run-actionable-job s actionable-job)]
+             [using-hint? (set-scheduler-hint-stack! s '())
+                          (run-scheduler s)]
+             [else (fail-smallest-cycle! s)
+                   (run-scheduler s)]))]
+    [(alt-worker job remaining-jobs (list ready-job rjs ...) failures successful?)
+     (pop-hint!)
+     (run-actionable-job s job)]
+    [(alt-worker job (list) (list) failures successful?)
+     (pop-hint!)
+     (run-actionable-job s job)]
+    [(alt-worker job remaining-jobs ready-jobs failures successful?)
+     (let ([actionable-job (find-work s remaining-jobs)])
+       (cond [actionable-job
+              (run-actionable-job s actionable-job)]
+             ;; Try finding an actionable job without following hints
+             [using-hint? (set-scheduler-hint-stack! s '())
+                          (run-scheduler s)]
+             [else (fail-smallest-cycle! s)
+                   (run-scheduler s)]))]))
+
+(define (fail-smallest-cycle! scheduler)
+  ;; TODO - find the smallest cycle, make a failure object for the job, cache-and-ready, then maybe try to set up a hint stack (probably the list of continuations/workers up to the failed cycle)?
+  ;; old code from alt-worker demand running
+  #;(let ([cycle-fail (make-cycle-failure job)])
+      (set-alt-worker-failures! hinted
+                                (cons cycle-fail failures))
+      (cache-result-and-ready-dependents!
+       s job (alt-worker->failure hinted)))
+  TODO)
 
 (define (run-actionable-job scheduler job)
-  ;; TODO - in each branch of this I need to install a prompt and mark.
   (match job
     [(parser-job parser extra-arguments start-position
                  result-index k/worker dependents)
-     ;; TODO - validate the parser-job, but without losing the names in the match.
-     ;; * k/worker must be #f
-     ;; * ... etc
-     (match parser
-       [(parser name prefix procedure)
-        (define port (port-broker->port (scheduler-port-broker scheduler)
-                                        start-position))
-        ;; TODO - check prefix
-        ;; TODO - this interface should maybe be different...
-        (define result
-          (with-continuation-mark chido-parse-k-mark job
-            (with-handlers ([(λ (e) #t) (λ (e) (exn->failure e))])
-              (apply procedure port extra-args))))
+     (match k/worker
+       [(scheduled-continuation job k dependency (and ready? #t))
+        (do-run! scheduler (λ () (k (lookup-job-result dep))) job)]
+       [(alt-worker job remaining-jobs (list ready-job rjs ...) failures successful?)
+        ;; TODO - remove ready-job from ready-jobs and remaining-jobs, if it's a success cache the result, set success flag, and add the next iteration of the job to the remaining jobs (this should check if it's also ready and add it to the ready list as appropriate), if failure add to failures.
+        TODO]
+       [(alt-worker job (list) (list) failures successful?)
+        ;; Finished alt-worker.
+        ;; TODO - Right now a failure object is also an empty stream,
+        ;;        so it can serve both cases.  Should this change?
+        (define result (alt-worker->failure hinted))
         (cache-result-and-ready-dependents! scheduler job result)
         (run-scheduler scheduler)]
-       [(alt-parser name parsers extra-arg-lists)
-        (define (mk-dep parser extra-args)
-          (make-parser-job parser extra-args start-position result-index))
-        (define worker
-          (alt-worker job (map mk-dep parsers extra-arg-lists) '() #f))
-        (set-parser-job-continuation/worker! job worker)
-        (schedule-demand! scheduler worker)
-        (run-scheduler scheduler)])]))
+       [else
+        (match parser
+          [(parser name prefix procedure)
+           (define port (port-broker->port (scheduler-port-broker scheduler)
+                                           start-position))
+           ;; TODO - check prefix.  All parsers that fail the prefix check can be logged as failures immediately, then the remaining parsers can be prioritized by length of prefix.
+           ;; TODO - this interface should maybe be different...
+           (do-run! scheduler (λ () (apply procedure port extra-args)) job)]
+          [(alt-parser name parsers extra-arg-lists)
+           (define (mk-dep parser extra-args)
+             (make-parser-job parser extra-args start-position result-index))
+           (define worker
+             (alt-worker job (map mk-dep parsers extra-arg-lists) '() '() #f))
+           (set-parser-job-continuation/worker! job worker)
+           (push-hint! scheduler worker)
+           (run-scheduler scheduler)])])]))
+
+(define (do-run! scheduler thunk job)
+  (define result
+    (call-with-continuation-prompt
+     (λ ()
+       (with-handlers ([(λ (e) #t) (λ (e) (exn->failure e job))])
+         (with-continuation-mark chido-parse-mark job
+           (thunk))))
+     chido-parse-prompt))
+  (cache-result-and-ready-dependents! scheduler job result)
+  (run-scheduler scheduler))
 
 (define (cache-result-and-ready-dependents! scheduler job result)
   ;; TODO - validate result and transform it into an error if it is bad?
@@ -315,7 +368,7 @@ A weak hash port-broker->ephemeron with scheduler.
     (match dep
       [(scheduled-continuation job k dependency ready?)
        TODO]
-      [(alt-worker alt-job remaining-jobs failures successful?)
+      [(alt-worker alt-job remaining-jobs ready-jobs failures successful?)
        (when (not (parse-failure? result))
          (set-alt-worker-successful? dep #t))
        (set-alt-worker-remaining-jobs! dep (remove job remaining-jobs eq?))
@@ -327,7 +380,7 @@ A weak hash port-broker->ephemeron with scheduler.
 (define (alt-worker->failure aw)
   TODO)
 
-(define (exn->failure e)
+(define (exn->failure e job)
   TODO)
 
 (define (make-cycle-failure job)
