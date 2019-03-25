@@ -388,10 +388,16 @@ A weak hash port-broker->ephemeron with scheduler.
 (define (cache-result-and-ready-dependents!/procedure-job
          scheduler job result [stream-stack '()])
   (match result
-    [(parse-failure aoeu)
-     aoeu
-     TODO]
-    [(parse-stream aoeu)
+    [(parse-failure name start-position fail-position message sub-failures)
+     (match stream-stack
+       [(list stream1 streams ...)
+        ;; pop the stream stack and start working on the next one.
+        (set-job-stream-stack! job stream-stack)
+        (run-actionable-job scheduler job)]
+       [else
+        (scheduler-set-result! scheduler job result)
+        (ready-dependents! job)])]
+    [(parse-stream inner-result next-job sched)
      ;; TODO
      ;; If this parse stream comes from the same job family
      ;; (same parser, position, etc, just different index number),
@@ -399,32 +405,39 @@ A weak hash port-broker->ephemeron with scheduler.
      ;; and we want to kill that.
      ;; Otherwise it should be treated as an ordinary stream.
      (cache-result-and-ready-dependents!/procedure-job
-      scheduler job (stream-first result) (cons result stream-stack))]
+      scheduler job inner-result (cons result stream-stack))]
     [(? (λ (x) (and (stream? x) (stream-empty? x))))
-     ;; Pop up the stream stack or make a parse-failure.
-     TODO]
+     ;; Turn it into a parse failure and recur.
+     (match job
+       [(parser-job parser extra-arguments start-position
+                    result-index continuation/worker
+                    dependents job-stream-stack)
+        (match parser
+          [(parser name prefix procedure)
+           (cache-result-and-ready-dependents!/procedure-job
+            scheduler
+            job
+            (parse-failure name start-position start-position
+                           "parse returned empty stream" '())
+            stream-stack)])])]
     [(? stream?)
      ;; Recur with stream-first, adding the stream to the stream-stack.
      (cache-result-and-ready-dependents!/procedure-job
       scheduler job (stream-first result) (cons result stream-stack))]
-    [(parse-derivation aoeu)
+    [(parse-derivation result parser start-position end-position derivation-list)
      ;; This is the main branch.
      ;; Use the stream-stack to determine the continuation to get the next result.
      ;; Package it up in a parse-stream object.
      TODO]
     [else
      ;; Turn the result into a parse-derivation and recur.
-     TODO])
-  ;; TODO - validate result and transform it into an error if it is bad?
-  ;; TODO - all results should end up being a parse-stream or parse-failure object.
-  ;; TODO - schedule the successor job to this job if the result is a success.
-  ;; TODO - if the result is an opaque stream, wrap it with a custom stream such that forcing the stream will call the successor job to force the underlying stream
-  ;; TODO - if the result is an empty stream, turn it into a failure result.
-
-  ;; The result ought to be a derivation, a parse-stream with a derivation inside,
-  ;; a parse-failure, or some other kind of stream that has a derivation inside.
-  ;; TODO - if the result is not a derivation what should happen?
-  TODO)
+     (define parser (parser-job-parser job))
+     (define start-position (parser-job-start-position job))
+     (define end-position TODO)
+     (define new-result
+       (parse-derivation result parser start-position end-position '()))
+     (cache-result-and-ready-dependents!/procedure-job
+      scheduler job new-result stream-stack)]))
 
 (define (alt-worker->failure aw)
   TODO)
