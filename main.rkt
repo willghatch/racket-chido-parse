@@ -14,7 +14,7 @@
 
 (struct parse-derivation
   ;; TODO - document from notes
-  (result parser start-index end-index derivation-list)
+  (result parser start-position end-position derivation-list)
   #:transparent)
 
 (struct parser
@@ -39,7 +39,7 @@
 
 (struct parse-failure
   ;; TODO -- what should this contain?
-  ()
+  (name start-position fail-position message sub-failures)
   #:transparent
   #:methods gen:stream
   [(define (stream-empty? s) #t)
@@ -48,6 +48,16 @@
      (error 'stream-first "empty stream"))
    (define (stream-rest s)
      (error 'stream-rest "empty stream"))])
+
+(define (exn->failure e job)
+  (let ([message (format "Exception while parsing: ~a\n" (exn->string e))])
+    (match job
+      [(parser-job parser extra-arguments start-position
+                   result-index continuation/worker dependents stream-stack)
+       (match parser
+         ;; TODO - it should only be possible to get a procedural parser here, not an alt-parser.
+         [(parser name prefix procedure)
+          (parse-failure name start-position start-position message '())])])))
 
 #|
 Schedulers keep track of parse work that needs to be done and have caches of results.
@@ -77,10 +87,11 @@ The job->result-cache is a map from parser-job structs -> parser-stream OR parse
    result-index
    [continuation/worker #:mutable]
    [dependents #:mutable]
+   [stream-stack #:mutable]
    )
   #:transparent)
 (define (make-parser-job p extra-args start result-index)
-  (parser-job p extra-args start result-index #f '()))
+  (parser-job p extra-args start result-index #f '() '()))
 
 (struct alt-worker
   (job remaining-jobs ready-jobs failures successful?)
@@ -140,6 +151,11 @@ A weak hash port-broker->ephemeron with scheduler.
          (hash-set+ (scheduler-job-info->job-cache s)
                     parser extra-args start-position result-number fresh-job))
         fresh-job)))
+
+(define (get-next-job! s job)
+  (match job
+    [(parser-job parser extra-args start-position result-index k/w deps s-stack)
+     (get-job! s parser extra-args start-position (add1 result-index))]))
 
 
 
@@ -241,19 +257,6 @@ A weak hash port-broker->ephemeron with scheduler.
     (set! using-hint? #f)
     (set-scheduler-hint-stack s (list (scheduler-done-k s))))
   (define hinted (car hints))
-  #|
-  TODO - my implementation of the demand stack is not quite right.
-  The top demand is to get the final result.
-  Later demands are recursive calls within procedural parsers.
-  If a demand wants the result of an alternative, the alternative might first choose a procedure that recursively wants the same alternative.  That continuation should not be placed on the demand stack, but should just be attached to the job as the way to finish it.  The scheduler should look again for work with the SAME demand since that original job is blocked.  When the demand is finally satisfied (by a different alternative or with [cycle] failure), that continuation will be readied, and if that job is subsequently chosen by something on the demand stack then the continuation will be called.
-  Only the original demand is the real demand -- a 3-down recursive call could block on a 1-down recursive call, so the right decision is to schedule an alternative to the 1-down call, but the stack model wil say there is a cycle prematurely.  All cycles should just block until the original demand has no actionable work.  When there is no actionable work at the top level then the smallest innermost cycle should be detected and failed (eg. a biased OR at the bottom could have a cycle as its first choice but its second choice might succeed).
-  So there should just be one demand and there is a HINT stack.
-  If the demand is ready just return it, otherwise check the bottom (closest to demand) hint for readiness, if ready pop it and all its children off the stack and return.  Otherwise check the next hint.
-  The hints are just an optimization.  So what's a better version?  If something fails or becomes blocked the best thing is to pop it off the stack and try a different alternative at the next level of the stack.  If something succeeds maybe it is best to check things higher on the stack to see if they've also become ready.
-
-  TODO - every time I start a job I need to install a continuation prompt and mark.
-  TODO - this includes returning to scheduled continuations except for the done-k.
-  |#
   (define (pop-hint!)
     (set-scheduler-hint-stack! s (cdr (scheduler-hint-stack s))))
   (match hinted
@@ -297,18 +300,37 @@ A weak hash port-broker->ephemeron with scheduler.
                                 (cons cycle-fail failures))
       (cache-result-and-ready-dependents!
        s job (alt-worker->failure hinted)))
-  TODO)
+  (error 'fail-smallest-cycle "TODO - not yet implemented"))
 
 (define (run-actionable-job scheduler job)
   (match job
     [(parser-job parser extra-arguments start-position
-                 result-index k/worker dependents)
+                 result-index k/worker dependents s-stack)
      (match k/worker
        [(scheduled-continuation job k dependency (and ready? #t))
-        (do-run! scheduler (λ () (k (lookup-job-result dep))) job)]
+        (do-run! scheduler (λ () (k (lookup-job-result dep))) job s-stack)]
        [(alt-worker job remaining-jobs (list ready-job rjs ...) failures successful?)
         ;; TODO - remove ready-job from ready-jobs and remaining-jobs, if it's a success cache the result, set success flag, and add the next iteration of the job to the remaining jobs (this should check if it's also ready and add it to the ready list as appropriate), if failure add to failures.
-        TODO]
+        (set-alt-worker-remaining-jobs! k/worker (remove ready-job remaining-jobs))
+        (set-alt-worker-ready-jobs! k/worker rjs)
+        ;; TODO - be sure I'm getting the raw result, not the stream
+        (define result (lookup-job-result ready-job))
+        (if (parse-failure? result)
+            (set-alt-worker-failures! k/worker (cons result failures))
+            (let ([this-next-job (get-next-job! scheduler job)]
+                  [dep-next-job (get-next-job! scheduler ready-job)])
+              (set-alt-worker-successful?! k/worker #t)
+              (cache-result-and-ready-dependents! scheduler job result)
+              (set-alt-worker-job! k/worker this-next-job)
+              (set-parser-job-continuation/worker! this-next-job k/worker)
+              (set-alt-worker-remaining-jobs!
+               k/worker
+               (cons dep-next-job (alt-worker-remaining-jobs k/worker)))
+              (when (parser-job-ready? dep-next-job)
+                (set-alt-worker-ready-jobs!
+                 k/worker
+                 (cons dep-next-job (alt-worker-ready-jobs k/worker))))))
+        (run-scheduler scheduler)]
        [(alt-worker job (list) (list) failures successful?)
         ;; Finished alt-worker.
         ;; TODO - Right now a failure object is also an empty stream,
@@ -317,23 +339,28 @@ A weak hash port-broker->ephemeron with scheduler.
         (cache-result-and-ready-dependents! scheduler job result)
         (run-scheduler scheduler)]
        [else
-        (match parser
-          [(parser name prefix procedure)
-           (define port (port-broker->port (scheduler-port-broker scheduler)
-                                           start-position))
-           ;; TODO - check prefix.  All parsers that fail the prefix check can be logged as failures immediately, then the remaining parsers can be prioritized by length of prefix.
-           ;; TODO - this interface should maybe be different...
-           (do-run! scheduler (λ () (apply procedure port extra-args)) job)]
-          [(alt-parser name parsers extra-arg-lists)
-           (define (mk-dep parser extra-args)
-             (make-parser-job parser extra-args start-position result-index))
-           (define worker
-             (alt-worker job (map mk-dep parsers extra-arg-lists) '() '() #f))
-           (set-parser-job-continuation/worker! job worker)
-           (push-hint! scheduler worker)
-           (run-scheduler scheduler)])])]))
+        (match s-stack
+          [(list stream1 stack-rest ...)
+           (set-parser-job-stream-stack! job stack-rest)
+           (do-run! scheduler (λ () (stream-next stream1)) job stack-rest)]
+          [else
+           (match parser
+             [(parser name prefix procedure)
+              (define port (port-broker->port (scheduler-port-broker scheduler)
+                                              start-position))
+              ;; TODO - check prefix.  All parsers that fail the prefix check can be logged as failures immediately, then the remaining parsers can be prioritized by length of prefix.
+              ;; TODO - this interface should maybe be different...
+              (do-run! scheduler (λ () (apply procedure port extra-args)) job '())]
+             [(alt-parser name parsers extra-arg-lists)
+              (define (mk-dep parser extra-args)
+                (make-parser-job parser extra-args start-position result-index))
+              (define worker
+                (alt-worker job (map mk-dep parsers extra-arg-lists) '() '() #f))
+              (set-parser-job-continuation/worker! job worker)
+              (push-hint! scheduler worker)
+              (run-scheduler scheduler)])])])]))
 
-(define (do-run! scheduler thunk job)
+(define (do-run! scheduler thunk job stream-stack)
   (define result
     (call-with-continuation-prompt
      (λ ()
@@ -341,10 +368,53 @@ A weak hash port-broker->ephemeron with scheduler.
          (with-continuation-mark chido-parse-mark job
            (thunk))))
      chido-parse-prompt))
-  (cache-result-and-ready-dependents! scheduler job result)
+  (cache-result-and-ready-dependents! scheduler job result stream-stack)
   (run-scheduler scheduler))
 
-(define (cache-result-and-ready-dependents! scheduler job result)
+(define (ready-dependents! job)
+  (for ([dep (parser-job-dependents job)])
+    (match dep
+      [(alt-worker job remaining-jobs ready-jobs failures successful?)
+       (alt-worker-set-ready-jobs! dep (cons job ready-jobs))]
+      [(scheduled-continuation job k dependency ready?)
+       (set-scheduled-continuation-ready?! dep #t)]))
+  (set-job-dependents! job '()))
+
+(define (cache-result-and-ready-dependents!/alt-job scheduler job result)
+  ;; This version only gets pre-sanitized results, and is straightforward.
+  (scheduler-set-result! scheduler job result)
+  (ready-dependents! job))
+
+(define (cache-result-and-ready-dependents!/procedure-job
+         scheduler job result [stream-stack '()])
+  (match result
+    [(parse-failure aoeu)
+     aoeu
+     TODO]
+    [(parse-stream aoeu)
+     ;; TODO
+     ;; If this parse stream comes from the same job family
+     ;; (same parser, position, etc, just different index number),
+     ;; then this will cause a stupid infinite cycle of results,
+     ;; and we want to kill that.
+     ;; Otherwise it should be treated as an ordinary stream.
+     (cache-result-and-ready-dependents!/procedure-job
+      scheduler job (stream-first result) (cons result stream-stack))]
+    [(? (λ (x) (and (stream? x) (stream-empty? x))))
+     ;; Pop up the stream stack or make a parse-failure.
+     TODO]
+    [(? stream?)
+     ;; Recur with stream-first, adding the stream to the stream-stack.
+     (cache-result-and-ready-dependents!/procedure-job
+      scheduler job (stream-first result) (cons result stream-stack))]
+    [(parse-derivation aoeu)
+     ;; This is the main branch.
+     ;; Use the stream-stack to determine the continuation to get the next result.
+     ;; Package it up in a parse-stream object.
+     TODO]
+    [else
+     ;; Turn the result into a parse-derivation and recur.
+     TODO])
   ;; TODO - validate result and transform it into an error if it is bad?
   ;; TODO - all results should end up being a parse-stream or parse-failure object.
   ;; TODO - schedule the successor job to this job if the result is a success.
@@ -354,33 +424,9 @@ A weak hash port-broker->ephemeron with scheduler.
   ;; The result ought to be a derivation, a parse-stream with a derivation inside,
   ;; a parse-failure, or some other kind of stream that has a derivation inside.
   ;; TODO - if the result is not a derivation what should happen?
-  (if (parse-stream? result)
-      TODO
-      TODO)
-  TODO
-
-  (define worker (let ([w (parser-job-continuation/worker job)])
-                   (and (alt-worker? w) w)))
-  (set-parser-job-continuation/worker! job #f)
-  (scheduler-set-result! scheduler job validated-result)
-
-  (for ([dep (parser-job-dependents job)])
-    (match dep
-      [(scheduled-continuation job k dependency ready?)
-       TODO]
-      [(alt-worker alt-job remaining-jobs ready-jobs failures successful?)
-       (when (not (parse-failure? result))
-         (set-alt-worker-successful? dep #t))
-       (set-alt-worker-remaining-jobs! dep (remove job remaining-jobs eq?))
-       ;; TODO - if the result is not a failure, I need to ADD a new version of the job to the deps...
-       ;; TODO - if a dependent is an alt-worker, recursively cache-and-ready its job, create a new job with the same alt-worker for the next result
-       TODO]))
   TODO)
 
 (define (alt-worker->failure aw)
-  TODO)
-
-(define (exn->failure e job)
   TODO)
 
 (define (make-cycle-failure job)
