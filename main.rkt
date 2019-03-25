@@ -391,9 +391,12 @@ A weak hash port-broker->ephemeron with scheduler.
     [(parse-failure name start-position fail-position message sub-failures)
      (match stream-stack
        [(list stream1 streams ...)
-        ;; pop the stream stack and start working on the next one.
-        (set-job-stream-stack! job stream-stack)
-        (run-actionable-job scheduler job)]
+        ;; Pop the stream stack and start working on the next one.
+        ;; In this case we DON'T ready dependents!
+        ;; So the job will essentially re-run with a smaller stream stack.
+        ;; (The stream-stack that comes in is one smaller than the original
+        ;; stream-stack from the job.)
+        (set-job-stream-stack! job stream-stack)]
        [else
         (scheduler-set-result! scheduler job result)
         (ready-dependents! job)])]
@@ -428,12 +431,17 @@ A weak hash port-broker->ephemeron with scheduler.
      ;; This is the main branch.
      ;; Use the stream-stack to determine the continuation to get the next result.
      ;; Package it up in a parse-stream object.
-     TODO]
+     (define next-job (get-next-job! scheduler job))
+     (set-parser-job-stream-stack! next-job stream-stack)
+     (define wrapped-result
+       (parse-stream result next-job scheduler))
+     (scheduler-set-result! scheduler job wrapped-result)
+     (ready-dependents! job)]
     [else
      ;; Turn the result into a parse-derivation and recur.
      (define parser (parser-job-parser job))
      (define start-position (parser-job-start-position job))
-     (define end-position TODO)
+     (define end-position TODO-aoeu)
      (define new-result
        (parse-derivation result parser start-position end-position '()))
      (cache-result-and-ready-dependents!/procedure-job
