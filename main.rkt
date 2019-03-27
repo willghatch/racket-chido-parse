@@ -195,10 +195,16 @@ A weak hash port-broker->ephemeron with scheduler.
                             (hash-ref h k1 (λ () (hash)))
                             k2
                             args))))
+(define hash-ref+-flag (gensym))
 (define (hash-ref+ fail-thunk h k1 . args)
   (if (null? args)
       (hash-ref h k1 fail-thunk)
-      (apply hash-ref+ fail-thunk (hash-ref h k1 fail-thunk) args)))
+      (let ([hr1 (hash-ref h k1 hash-ref+-flag)])
+        (if (eq? hr1 hash-ref+-flag)
+            (if (procedure? fail-thunk)
+                (fail-thunk)
+                fail-thunk)
+            (apply hash-ref+ fail-thunk hr1 args)))))
 
 (define (scheduler-set-result! s job result)
   (set-scheduler-job->result-cache!
@@ -538,13 +544,13 @@ A weak hash port-broker->ephemeron with scheduler.
 (define (parse-*/prefix port parser
                         #:args [extra-args '()]
                         #:previous-derivation [prev-d #f])
-  (define port-broker (or (port->port-broker port)
-                          (port-broker port)))
+  (define pb (or (port->port-broker port)
+                 (port-broker port)))
   (define start-pos (if prev-d
                         (parse-derivation-end-position prev-d)
                         (let-values ([(line col pos) (port-next-location port)])
                           pos)))
-  (enter-the-parser port-broker parser extra-args start-pos))
+  (enter-the-parser pb parser extra-args start-pos))
 
 #|
 TODO
@@ -587,6 +593,10 @@ TODO
   )
 
 
+;; Temporarily
+(module+ main
+  (require (submod ".." test))
+  )
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
