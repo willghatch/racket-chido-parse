@@ -133,7 +133,8 @@ The job->result-cache is a map from parser-job structs -> parser-stream OR parse
   #:mutable #:transparent)
 
 (struct scheduled-continuation
-  (job k dependency [ready? #:mutable])
+  ;; The dependency is only mutated to break cycles.
+  (job k [dependency #:mutable] [ready? #:mutable])
   #:transparent)
 
 (define (job->scheduled-continuation j k dep)
@@ -343,20 +344,21 @@ A weak hash port-broker->ephemeron with scheduler.
        (rec (parser-job-continuation/worker next-job) (cons job jobs))]
       [(scheduled-continuation job k dependency ready?)
        (if (member dependency jobs)
-           (begin (set-scheduled-continuation-dependency! goal the-cycle-failure-job)
-                  (set-scheduled-continuation-ready? goal #t))
+           (begin (set-scheduled-continuation-dependency!
+                   goal (cycle-breaker-job dependency))
+                  (set-scheduled-continuation-ready?! goal #t))
            (rec (parser-job-continuation/worker dependency)
                 (cons job jobs)))]))
   (rec (scheduler-done-k scheduler) '()))
 
 (define (run-actionable-job scheduler job)
   (match job
-    [(parser-job parser extra-arguments start-position
+    [(parser-job parsador extra-args start-position
                  result-index k/worker dependents s-stack)
      (match k/worker
        [(scheduled-continuation job k dependency (and ready? #t))
         (do-run! scheduler
-                 (λ () (k (scheduler-get-result scheduler dep)))
+                 (λ () (k (scheduler-get-result scheduler dependency)))
                  job
                  s-stack)]
        [(alt-worker job remaining-jobs (list ready-job rjs ...) failures successful?)
@@ -364,7 +366,7 @@ A weak hash port-broker->ephemeron with scheduler.
         (set-alt-worker-remaining-jobs! k/worker (remove ready-job remaining-jobs))
         (set-alt-worker-ready-jobs! k/worker rjs)
         ;; TODO - be sure I'm getting the raw result, not the stream
-        (define result (lookup-job-result ready-job))
+        (define result (scheduler-get-result scheduler ready-job))
         (if (parse-failure? result)
             (set-alt-worker-failures! k/worker (cons result failures))
             (let ([this-next-job (get-next-job! scheduler job)]
@@ -376,7 +378,7 @@ A weak hash port-broker->ephemeron with scheduler.
               (set-alt-worker-remaining-jobs!
                k/worker
                (cons dep-next-job (alt-worker-remaining-jobs k/worker)))
-              (when (parser-job-ready? dep-next-job)
+              (when (scheduler-get-result scheduler dep-next-job)
                 (set-alt-worker-ready-jobs!
                  k/worker
                  (cons dep-next-job (alt-worker-ready-jobs k/worker))))))
@@ -385,25 +387,28 @@ A weak hash port-broker->ephemeron with scheduler.
         ;; Finished alt-worker.
         ;; TODO - Right now a failure object is also an empty stream,
         ;;        so it can serve both cases.  Should this change?
-        (define result (alt-worker->failure hinted))
+        (define result (alt-worker->failure k/worker))
         (cache-result-and-ready-dependents! scheduler job result)
         (run-scheduler scheduler)]
        [else
         (match s-stack
           [(list stream1 stack-rest ...)
            (set-parser-job-stream-stack! job stack-rest)
-           (do-run! scheduler (λ () (stream-next stream1)) job stack-rest)]
+           (do-run! scheduler (λ () (stream-rest stream1)) job stack-rest)]
           [else
-           (match parser
+           (match parsador
              [(parser name prefix procedure)
               (define port (port-broker->port (scheduler-port-broker scheduler)
                                               start-position))
               ;; TODO - check prefix.  All parsers that fail the prefix check can be logged as failures immediately, then the remaining parsers can be prioritized by length of prefix.
               ;; TODO - this interface should maybe be different...
-              (do-run! scheduler (λ () (apply procedure port extra-args)) job '())]
+              (do-run! scheduler
+                       (λ () (apply procedure port extra-args))
+                       job
+                       '())]
              [(alt-parser name parsers extra-arg-lists)
-              (define (mk-dep parser extra-args)
-                (make-parser-job parser extra-args start-position result-index))
+              (define (mk-dep parsador extra-args)
+                (make-parser-job parsador extra-args start-position result-index))
               (define worker
                 (alt-worker job (map mk-dep parsers extra-arg-lists) '() '() #f))
               (set-parser-job-continuation/worker! job worker)
@@ -415,7 +420,7 @@ A weak hash port-broker->ephemeron with scheduler.
     (call-with-continuation-prompt
      (λ ()
        (with-handlers ([(λ (e) #t) (λ (e) (exn->failure e job))])
-         (with-continuation-mark chido-parse-mark job
+         (with-continuation-mark chido-parse-k-mark job
            (thunk))))
      chido-parse-prompt))
   (cache-result-and-ready-dependents! scheduler job result stream-stack)
@@ -425,10 +430,16 @@ A weak hash port-broker->ephemeron with scheduler.
   (for ([dep (parser-job-dependents job)])
     (match dep
       [(alt-worker job remaining-jobs ready-jobs failures successful?)
-       (alt-worker-set-ready-jobs! dep (cons job ready-jobs))]
+       (set-alt-worker-ready-jobs! dep (cons job ready-jobs))]
       [(scheduled-continuation job k dependency ready?)
        (set-scheduled-continuation-ready?! dep #t)]))
-  (set-job-dependents! job '()))
+  (set-parser-job-dependents! job '()))
+
+(define (cache-result-and-ready-dependents! scheduler job result [stream-stack '()])
+  (if (alt-parser? (parser-job-parser job))
+      (cache-result-and-ready-dependents!/alt-job scheduler job result)
+      (cache-result-and-ready-dependents!/procedure-job
+       scheduler job result stream-stack)))
 
 (define (cache-result-and-ready-dependents!/alt-job scheduler job result)
   ;; This version only gets pre-sanitized results, and is straightforward.
@@ -446,7 +457,7 @@ A weak hash port-broker->ephemeron with scheduler.
         ;; So the job will essentially re-run with a smaller stream stack.
         ;; (The stream-stack that comes in is one smaller than the original
         ;; stream-stack from the job.)
-        (set-job-stream-stack! job stream-stack)]
+        (set-parser-job-stream-stack! job stream-stack)]
        [else
         (scheduler-set-result! scheduler job result)
         (ready-dependents! job)])]
@@ -462,10 +473,10 @@ A weak hash port-broker->ephemeron with scheduler.
     [(? (λ (x) (and (stream? x) (stream-empty? x))))
      ;; Turn it into a parse failure and recur.
      (match job
-       [(parser-job parser extra-arguments start-position
+       [(parser-job parse extra-arguments start-position
                     result-index continuation/worker
                     dependents job-stream-stack)
-        (match parser
+        (match parse
           [(parser name prefix procedure)
            (cache-result-and-ready-dependents!/procedure-job
             scheduler
