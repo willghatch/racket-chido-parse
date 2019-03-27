@@ -325,7 +325,7 @@ A weak hash port-broker->ephemeron with scheduler.
                                            (cons j blocked))])]
                         [(alt-worker job remaining-jobs ready-jobs
                                      failures successful?)
-                         (cond [(not (null? ready-jobs)) (car ready-jobs)]
+                         (cond [(not (null? ready-jobs)) j]
                                [(null? remaining-jobs) j]
                                [else (loop (append remaining-jobs jobs)
                                            (cons j blocked))])]
