@@ -9,8 +9,12 @@
  racket/exn
  )
 
-;; TODO - explanation from notes about the big picture of how this parsing library works
+(module+ test
+  (require
+   rackunit
+   ))
 
+;; TODO - explanation from notes about the big picture of how this parsing library works
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;; Structs
@@ -19,6 +23,21 @@
   ;; TODO - document from notes
   (result parser start-position end-position derivation-list)
   #:transparent)
+
+(define (make-parse-derivation result
+                               #:end [end #f]
+                               #:derivations [derivation-list '()])
+  (define job (current-chido-parse-job))
+  (match job
+    [(parser-job parser extra-arguments start-position result-index
+                 continuation/worker dependents stream-stack)
+     (define end-use (or end
+                         (and (not (null? derivation-list))
+                              (apply max
+                                     (map parse-derivation-end-position
+                                          derivation-list)))
+                         (error 'chido-parse "TODO - for now you have to supply an end location explicitly when making a derivation")))
+     (parse-derivation result parser start-position end-use derivation-list)]))
 
 (struct parser
   ;; TODO - document from notes
@@ -51,6 +70,19 @@
      (error 'stream-first "empty stream"))
    (define (stream-rest s)
      (error 'stream-rest "empty stream"))])
+
+(define (make-parse-failure message #:position [pos #f] #:failures [failures '()])
+  (define job (current-chido-parse-job))
+  (match job
+    [(parser-job parse extra-arguments start-position result-index
+                 continuation/worker dependents stream-stack)
+     (match parse
+       [(parser name prefix procedure)
+        (parse-failure name start-position (or pos start-position)
+                       message failures)]
+       [(alt-parser name parsers extra-arg-lists)
+        (parse-failure name start-position (or pos start-position)
+                       message failures)])]))
 
 (define (make-cycle-failure job)
   (match job
@@ -202,7 +234,7 @@ A weak hash port-broker->ephemeron with scheduler.
 ;;;; Scheduling
 
 (define chido-parse-prompt (make-continuation-prompt-tag 'chido-parse-prompt))
-(define chido-parse-k-mark (make-continuation-mark-key 'chido-parse-k-mark))
+(define current-chido-parse-job (make-parameter #f))
 (define recursive-enter-flag (gensym))
 
 (define (enter-the-parser port-broker parser extra-args start-position)
@@ -224,28 +256,17 @@ A weak hash port-broker->ephemeron with scheduler.
           ;; So we de-schedule the current work by capturing its continuation,
           ;; we schedule its dependency, and then we abort back to the
           ;; scheduler loop.
-          (call-with-composable-continuation
-           (λ (k)
-             (define k-marks (continuation-marks k))
-             (define outer-job-marks (continuation-mark-set->list k-marks
-                                                                  chido-parse-k-mark
-                                                                  chido-parse-prompt))
-             (define parent-job (match outer-job-marks
-                                  ['() (error
-                                        'chido-parse
-                                        "internal error -- no continuation mark in recursive call")]
-                                  [(list j) j]
-                                  [else (error
-                                         'chido-parse
-                                         "internal error -- bad continuation marks")]))
-             (define k-job (job->scheduled-continuation parent-job k parser-job))
-             (set-parser-job-continuation/worker! parent-job k-job)
-             (set-parser-job-dependents! job (cons k-job (parser-job-dependents job)))
-             (push-hint! scheduler k-job)
-             ;; Launch the scheduler by being "done" with a flag value.
-             ((scheduled-continuation-k (scheduler-done-k scheduler))
-              recursive-enter-flag))
-           chido-parse-prompt)
+          (let ([parent-job (current-chido-parse-job)])
+            (call-with-composable-continuation
+             (λ (k)
+               (define k-job (job->scheduled-continuation parent-job k parser-job))
+               (set-parser-job-continuation/worker! parent-job k-job)
+               (set-parser-job-dependents! job (cons k-job (parser-job-dependents job)))
+               (push-hint! scheduler k-job)
+               ;; Launch the scheduler by being "done" with a flag value.
+               ((scheduled-continuation-k (scheduler-done-k scheduler))
+                recursive-enter-flag))
+             chido-parse-prompt))
           (let loop ()
             ;; This is the original entry into the parser machinery.
             ;; In this branch we want to capture the full continuation.
@@ -420,7 +441,7 @@ A weak hash port-broker->ephemeron with scheduler.
     (call-with-continuation-prompt
      (λ ()
        (with-handlers ([(λ (e) #t) (λ (e) (exn->failure e job))])
-         (with-continuation-mark chido-parse-k-mark job
+         (parameterize ([current-chido-parse-job job])
            (thunk))))
      chido-parse-prompt))
   (cache-result-and-ready-dependents! scheduler job result stream-stack)
@@ -514,14 +535,56 @@ A weak hash port-broker->ephemeron with scheduler.
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;;; Parsing outer API
 
+(define (parse-*/prefix port parser
+                        #:args [extra-args '()]
+                        #:previous-derivation [prev-d #f])
+  (define port-broker (or (port->port-broker port)
+                          (port-broker port)))
+  (define start-pos (if prev-d
+                        (parse-derivation-end-position prev-d)
+                        (let-values ([(line col pos) (port-next-location port)])
+                          pos)))
+  (enter-the-parser port-broker parser extra-args start-pos))
+
 #|
 TODO
-parse-*/prefix is not a public API, but all the other parse API functions are built on top of it.
 |#
 ;(define (parse-*/prefix TODO) TODO)
 ;(define (parse-*/whole TODO) TODO)
 ;(define (parse-1/prefix TODO) TODO)
 ;(define (parse-1/whole TODO) TODO)
+
+(module+ test
+  (define s1 "aaa")
+  (define p1 (open-input-string s1))
+
+  (define (a1-parser-proc port)
+    (define-values (line col pos) (port-next-location port))
+    (define c (read-char port))
+    (if (equal? c #\a)
+        (make-parse-derivation "a"
+                               #:end (add1 pos)
+                               #:derivation-list '())
+        (make-parse-failure "Didn't match.")))
+  (define a1-parser-obj (parser "a" "" a1-parser-proc))
+  (define (Aa-parser-proc port)
+    (for/stream
+     ([d/A1 (parse-*/prefix port (get-A-parser))])
+     (for/stream
+      ([d/a (parse-*/prefix port a1-parser-obj
+                            #:previos-derivation d/A1)])
+      (make-parse-derivation (string-append (parse-derivation-result d/A1)
+                                            (parse-derivation-result d/a))
+                             #:derivations (list d/A1 d/a)))))
+  (define Aa-parser-obj (parser "Aa" "" Aa-parser-proc))
+
+
+  (define A-parser (alt-parser "A" (list a1-parser-obj Aa-parser-obj) '()))
+  (define (get-A-parser) A-parser)
+
+  (printf "~a\n" (parse-*/prefix p1 A-parser))
+
+  )
 
 
 

@@ -258,9 +258,7 @@ A wrapped port should be able to give a handle to the broker it is wrapping.
   p)
 
 (define (port->port-broker p)
-  (hash-ref wrapper-cache p (λ () (error
-                                   'port->port-broker
-                                   "not a port created by port-broker->port"))))
+  (hash-ref wrapper-cache p #f))
 
 
 
@@ -315,7 +313,8 @@ A wrapped port should be able to give a handle to the broker it is wrapping.
   (define r4 (oread))
 
   (define p-to-wrap (open-input-string test-str 'test-str))
-  (define pb1 (make-port-broker p-to-wrap))
+  ;(define pb1 (make-port-broker p-to-wrap))
+  (define pb1 (cache-port-broker p-to-wrap))
 
   (define wp1 (port-broker->wrapped-port pb1 0))
   (port-count-lines! wp1)
@@ -352,5 +351,7 @@ A wrapped port should be able to give a handle to the broker it is wrapping.
   |#
   ;(port-broker-commit-bytes pb1 15)
   ;(check-true (se? (wp3-read) r3))
+
+
 
 )
