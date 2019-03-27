@@ -485,7 +485,13 @@ A weak hash port-broker->ephemeron with scheduler.
         (match (list s-stack result-index)
           [(list (list stream1 stack-rest ...) r-index)
            (set-parser-job-stream-stack! job stack-rest)
-           (do-run! scheduler (λ () (stream-rest stream1)) job stack-rest)]
+           (do-run! scheduler
+                    (λ () (let ([result (stream-rest stream1)])
+                            ;; Force the stream to compute its first value.
+                            (stream-empty? result)
+                            result))
+                    job
+                    stack-rest)]
           ;;; TODO -- if there is no stream-stack but the index is >0, I need to fail
           [(list '() 0)
            (match parsador
@@ -495,7 +501,12 @@ A weak hash port-broker->ephemeron with scheduler.
               ;; TODO - check prefix.  All parsers that fail the prefix check can be logged as failures immediately, then the remaining parsers can be prioritized by length of prefix.
               ;; TODO - this interface should maybe be different...
               (do-run! scheduler
-                       (λ () (apply procedure port extra-args))
+                       (λ ()
+                         (let ([result (apply procedure port extra-args)])
+                           (when (stream? result)
+                             ;; Force streams to compute at least one value.
+                             (stream-empty? result))
+                           result))
                        job
                        '())]
              [(alt-parser name parsers extra-arg-lists)
