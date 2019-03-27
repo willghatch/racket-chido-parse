@@ -3,8 +3,9 @@
 (provide
  (rename-out
   [cache-port-broker port-broker]
-  [port-broker->wrapped-port/cached port-broker->port]
   )
+ port-broker->port/byte
+ port-broker->port/char
  port->port-broker
  close-port-broker
  ;port-broker-commit-bytes
@@ -256,6 +257,12 @@ A wrapped port should be able to give a handle to the broker it is wrapping.
   (define p (port-broker->wrapped-port pb offset))
   (hash-set! wrapper-cache p pb)
   p)
+
+(define (port-broker->port/char pb offset)
+  ;; TODO - this is grossly wrong!  But I'm using it to test something else for now...
+  (port-broker->port/byte pb (sub1 offset)))
+(define (port-broker->port/byte pb offset)
+  (port-broker->wrapped-port/cached pb offset))
 
 (define (port->port-broker p)
   (hash-ref wrapper-cache p #f))

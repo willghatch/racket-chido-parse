@@ -490,8 +490,8 @@ A weak hash port-broker->ephemeron with scheduler.
           [(list '() 0)
            (match parsador
              [(parser name prefix procedure)
-              (define port (port-broker->port (scheduler-port-broker scheduler)
-                                              start-position))
+              (define port (port-broker->port/char (scheduler-port-broker scheduler)
+                                                   start-position))
               ;; TODO - check prefix.  All parsers that fail the prefix check can be logged as failures immediately, then the remaining parsers can be prioritized by length of prefix.
               ;; TODO - this interface should maybe be different...
               (do-run! scheduler
@@ -668,6 +668,9 @@ TODO
 (module+ test
   (define s1 "aaa")
   (define p1 (open-input-string s1))
+  (port-count-lines! p1)
+  (define-values (line col pos) (port-next-location p1))
+  (eprintf "port-next-loc: ~a\n" pos)
 
   (define (a1-parser-proc port)
     (eprintf "At start of a1-parser-proc\n")
@@ -681,6 +684,8 @@ TODO
   (define a1-parser-obj (parser "a" "" a1-parser-proc))
   (define (Aa-parser-proc port)
     (eprintf "At start of Aa-proc\n")
+    (define-values (line col pos) (port-next-location port))
+    (eprintf "port-next-location: ~a\n" pos)
     (for/stream
      ([d/A1 (parse-*/prefix port (get-A-parser))])
      (eprintf "In Aa-proc loop 1\n")
@@ -694,14 +699,19 @@ TODO
   (define Aa-parser-obj (parser "Aa" "" Aa-parser-proc))
 
 
-  (define A-parser (alt-parser "A" (list a1-parser-obj Aa-parser-obj) (list '() '())))
+  (define A-parser (alt-parser "A"
+                               (list
+                                Aa-parser-obj
+                                a1-parser-obj
+                                )
+                               (list '() '())))
   (define (get-A-parser) A-parser)
 
   (define results1 (parse-*/prefix p1 A-parser))
 
   (printf "\n\n")
   (printf "r1-1: ~s\n" (stream-ref results1 0))
-  (printf "r1-2: ~a\n" (stream-ref results1 1))
+  ;(printf "r1-2: ~a\n" (stream-ref results1 1))
 
   #;(for ([r results1])
     (printf "result: ~a\n" r))
