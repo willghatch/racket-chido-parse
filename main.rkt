@@ -181,14 +181,16 @@ The job->result-cache is a map from parser-job structs -> parser-stream OR parse
 
 
 (define (job->parser-name job)
-  (define p (parser-job-parser job))
-  (if (alt-parser? p)
-      (alt-parser-name p)
-      (parser-name p)))
+  (define p (and job (parser-job-parser job)))
+  (cond [(not p) #f]
+        [(alt-parser? p) (alt-parser-name p)]
+        [else (parser-name p)]))
 (define (job->display job)
-  (format "~a@~a" (job->parser-name job) (parser-job-start-position job)))
+  (and job
+       (format "~a@~a" (job->parser-name job) (parser-job-start-position job))))
 (define (job->display_ job)
-  (format "~a_~a" (job->display job) (parser-job-result-index job)))
+  (and job
+       (format "~a_~a" (job->display job) (parser-job-result-index job))))
 
 
 
@@ -253,13 +255,21 @@ A weak hash port-broker->ephemeron with scheduler.
      (get-job! s parser extra-args start-position (add1 result-index))]))
 
 
+(define (stream-force-minimal-work! s)
+  ;; Everywhere I use streams I need to know if they are empty or have at least
+  ;; one value.
+  (when (and (stream? s)
+             (not (stream-empty? s))
+             (stream? (stream-first s)))
+    (stream-force-minimal-work! (stream-first s))))
+
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;; Scheduling
 
 (define chido-parse-prompt (make-continuation-prompt-tag 'chido-parse-prompt))
 (define current-chido-parse-job (make-parameter #f))
-(define recursive-enter-flag (gensym))
+(define recursive-enter-flag (gensym 'recursive-enter-flag))
 
 (define (enter-the-parser port-broker parser extra-args start-position)
   (define s (port-broker-scheduler port-broker))
@@ -282,8 +292,8 @@ A weak hash port-broker->ephemeron with scheduler.
           ;; we schedule its dependency, and then we abort back to the
           ;; scheduler loop.
           (let ([parent-job (current-chido-parse-job)])
-            (eprintf "It's a recursive call with parent: ~a\n"
-                     (job->display_ parent-job))
+            (eprintf "It's a recursive call with parent: ~a and done-k ~s\n"
+                     (job->display_ parent-job) (scheduler-done-k scheduler))
             (call-with-composable-continuation
              (λ (k)
                (define sched-k (job->scheduled-continuation parent-job k job))
@@ -306,11 +316,14 @@ A weak hash port-broker->ephemeron with scheduler.
                  (push-parser-job-dependent! job k-job)
                  ;; As a fresh entry into the parser, we start a fresh hint stack.
                  (set-scheduler-hint-stack! scheduler (list k-job))
+                 (set-scheduler-done-k! scheduler k-job)
                  (run-scheduler scheduler))))
             (eprintf "fulfilling done-k with result: ~s\n" result)
             (if (eq? recursive-enter-flag result)
                 (run-scheduler scheduler)
-                result)))))
+                (begin
+                  (set-scheduler-done-k! scheduler #f)
+                  result))))))
 
 
 (define (find-work s job-list)
@@ -348,7 +361,6 @@ A weak hash port-broker->ephemeron with scheduler.
   (match hint
     [(scheduled-continuation #f done-k dep #t)
      ;; done-k is ready.
-     (set-scheduler-done-k! s #f)
      (define result (scheduler-get-result s dep))
      (eprintf "done-k is ready! With result: ~s\n" result)
      (done-k result)]
@@ -361,7 +373,8 @@ A weak hash port-broker->ephemeron with scheduler.
      (eprintf "running a scheduled continuation for job: ~a\n"
               (and job (job->display_ job)))
      (let ([actionable-job (find-work s (list dependency))])
-       (eprintf "found actionable job: ~a\n" (job->display_ actionable-job))
+       (eprintf "found actionable job: ~a\n"
+                (and actionable-job (job->display_ actionable-job)))
        (cond
          [(and actionable-job (scheduler-get-result s actionable-job))
           (eprintf "\n")
@@ -455,6 +468,7 @@ A weak hash port-broker->ephemeron with scheduler.
            (let ([result-contents (stream-first result)]
                  [this-next-job (get-next-job! scheduler job)]
                  [dep-next-job (get-next-job! scheduler ready-job)])
+             (eprintf "\ngoing to cache alt-worker result: ~s\n\n" result-contents)
              (define result-stream
                (parse-stream result-contents this-next-job scheduler))
              (cache-result-and-ready-dependents! scheduler job result-stream)
@@ -488,7 +502,7 @@ A weak hash port-broker->ephemeron with scheduler.
            (do-run! scheduler
                     (λ () (let ([result (stream-rest stream1)])
                             ;; Force the stream to compute its first value.
-                            (stream-empty? result)
+                            (stream-force-minimal-work! result)
                             result))
                     job
                     stack-rest)]
@@ -503,9 +517,7 @@ A weak hash port-broker->ephemeron with scheduler.
               (do-run! scheduler
                        (λ ()
                          (let ([result (apply procedure port extra-args)])
-                           (when (stream? result)
-                             ;; Force streams to compute at least one value.
-                             (stream-empty? result))
+                           (stream-force-minimal-work! result)
                            result))
                        job
                        '())]
@@ -533,6 +545,8 @@ A weak hash port-broker->ephemeron with scheduler.
              (run-scheduler scheduler))])])]))
 
 (define (do-run! scheduler thunk job stream-stack)
+  (when (not job)
+    (error 'chido-parse "Internal error - trying to recur with no job"))
   (define result
     (call-with-continuation-prompt
      (λ ()
@@ -600,10 +614,7 @@ A weak hash port-broker->ephemeron with scheduler.
      ;; Otherwise it should be treated as an ordinary stream.
      (cache-result-and-ready-dependents!/procedure-job
       scheduler job inner-result (cons result stream-stack))]
-    [(? (λ (x) (and (stream? x)
-                    (eprintf "pre-stream-empty?\n")
-                    (stream-empty? x)
-                    (eprintf "post-stream-empty?\n"))))
+    [(? (λ (x) (and (stream? x) (stream-empty? x))))
      ;; Turn it into a parse failure and recur.
      (eprintf "caching a stream-empty result\n")
      (match job
@@ -622,7 +633,8 @@ A weak hash port-broker->ephemeron with scheduler.
      ;; Recur with stream-first, adding the stream to the stream-stack.
      (cache-result-and-ready-dependents!/procedure-job
       scheduler job (stream-first result) (cons result stream-stack))]
-    [(parse-derivation result parser start-position end-position derivation-list)
+    [(parse-derivation semantic-result parser start-position
+                       end-position derivation-list)
      ;; This is the main branch.
      ;; Use the stream-stack to determine the continuation to get the next result.
      ;; Package it up in a parse-stream object.
@@ -712,8 +724,8 @@ TODO
 
   (define A-parser (alt-parser "A"
                                (list
-                                Aa-parser-obj
                                 a1-parser-obj
+                                Aa-parser-obj
                                 )
                                (list '() '())))
   (define (get-A-parser) A-parser)
@@ -722,7 +734,7 @@ TODO
 
   (printf "\n\n")
   (printf "r1-1: ~s\n" (stream-ref results1 0))
-  ;(printf "r1-2: ~a\n" (stream-ref results1 1))
+  (printf "r1-2: ~a\n" (stream-ref results1 1))
 
   #;(for ([r results1])
     (printf "result: ~a\n" r))
