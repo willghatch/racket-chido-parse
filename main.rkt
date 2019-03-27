@@ -287,12 +287,11 @@ A weak hash port-broker->ephemeron with scheduler.
                ((scheduled-continuation-k (scheduler-done-k scheduler))
                 recursive-enter-flag))
              chido-parse-prompt))
-          (let loop ()
-            ;; This is the original entry into the parser machinery.
-            ;; In this branch we want to capture the full continuation.
-            ;; But we do it in this loop to keep from growing a little bit
-            ;; of extra continuation on each recursive call.
-            (eprintf "In parser loop...\n")
+          ;; This is the original entry into the parser machinery.
+          ;; In this branch we want to capture the full continuation.
+          ;; We also use this continuation as a loop point for the
+          ;; scheduler until a result is ready.
+          (let ()
             (define result
               (call-with-current-continuation
                (λ (full-k)
@@ -303,9 +302,8 @@ A weak hash port-broker->ephemeron with scheduler.
                  ;; As a fresh entry into the parser, we start a fresh hint stack.
                  (set-scheduler-hint-stack! scheduler (list k-job))
                  (run-scheduler scheduler))))
-            (eprintf "parser loop result: ~a\n" result)
             (if (eq? recursive-enter-flag result)
-                (loop)
+                (run-scheduler scheduler)
                 result)))))
 
 
@@ -314,6 +312,7 @@ A weak hash port-broker->ephemeron with scheduler.
   ;; s is a scheduler
   ;; job-list is a list of parser-job structs
   ;; TODO - this is probably the best place to detect cycles.  I should maybe return some sort of flag object containing the job that contains the smallest dependency cycle so I know which job to return a cycle error for.
+  (eprintf "in find-work with job list: ~s\n" job-list)
   (let loop ([jobs job-list]
              [blocked '()])
     (if (null? jobs)
@@ -352,7 +351,10 @@ A weak hash port-broker->ephemeron with scheduler.
      (run-actionable-job s job)]
     [(scheduled-continuation job k dependency ready?)
      ;; Not ready
+     (eprintf "running a scheduled continuation for job: ~a\n"
+              (and job (job->display_ job)))
      (let ([actionable-job (find-work s (list dependency))])
+       (eprintf "found actionable job: ~a\n" (job->display_ actionable-job))
        (cond [actionable-job (run-actionable-job s actionable-job)]
              [using-hint? (set-scheduler-hint-stack! s '())
                           (run-scheduler s)]
@@ -398,83 +400,97 @@ A weak hash port-broker->ephemeron with scheduler.
 
 (define (run-actionable-job scheduler job)
   (eprintf "running actionable job for: ~a\n" (job->display_ job))
-  (match job
-    [(parser-job parsador extra-args start-position
-                 result-index k/worker dependents s-stack)
-     (match k/worker
-       [(scheduled-continuation job k dependency (and ready? #t))
-        (do-run! scheduler
-                 (λ () (k (scheduler-get-result scheduler dependency)))
-                 job
-                 s-stack)]
-       [(alt-worker job remaining-jobs (list ready-job rjs ...) failures successful?)
-        ;; TODO - remove ready-job from ready-jobs and remaining-jobs, if it's a success cache the result, set success flag, and add the next iteration of the job to the remaining jobs (this should check if it's also ready and add it to the ready list as appropriate), if failure add to failures.
-        (set-alt-worker-remaining-jobs! k/worker (remove ready-job remaining-jobs))
-        (set-alt-worker-ready-jobs! k/worker rjs)
-        (eprintf "in ready alt worker for: ~a\n" (job->display_ job))
-        (eprintf "ready job: ~a\n" (job->display_ ready-job))
-        (define result (scheduler-get-result scheduler ready-job))
-        (cond
-          [(parse-failure? result)
-           (set-alt-worker-failures! k/worker (cons result failures))]
-          [(parse-stream? result)
-           (let ([result-contents (stream-first result)]
-                 [this-next-job (get-next-job! scheduler job)]
-                 [dep-next-job (get-next-job! scheduler ready-job)])
-             (define result-stream
-               (parse-stream result-contents this-next-job scheduler))
-             (cache-result-and-ready-dependents! scheduler job result-stream)
-             (set-alt-worker-successful?! k/worker #t)
-             (set-alt-worker-job! k/worker this-next-job)
-             (set-parser-job-continuation/worker! this-next-job k/worker)
-             (set-alt-worker-remaining-jobs!
-              k/worker
-              (cons dep-next-job (alt-worker-remaining-jobs k/worker)))
-             (when (scheduler-get-result scheduler dep-next-job)
-               (set-alt-worker-ready-jobs!
-                k/worker
-                (cons dep-next-job (alt-worker-ready-jobs k/worker)))))]
-          [else
-           (error 'chido-parse
-                  "Internal error - alt-worker got a non-stream result: ~s"
-                  result)])
-        (run-scheduler scheduler)]
-       [(alt-worker job (list) (list) failures successful?)
-        ;; Finished alt-worker.
-        ;; TODO - Right now a failure object is also an empty stream,
-        ;;        so it can serve both cases.  Should this change?
-        (define result (alt-worker->failure k/worker))
-        (cache-result-and-ready-dependents! scheduler job result)
-        (run-scheduler scheduler)]
-       [else
-        (match s-stack
-          [(list stream1 stack-rest ...)
-           (set-parser-job-stream-stack! job stack-rest)
-           (do-run! scheduler (λ () (stream-rest stream1)) job stack-rest)]
-          ;;; TODO -- if there is no stream-stack but the index is >0, I need to fail
-          [else
-           (match parsador
-             [(parser name prefix procedure)
-              (define port (port-broker->port (scheduler-port-broker scheduler)
-                                              start-position))
-              ;; TODO - check prefix.  All parsers that fail the prefix check can be logged as failures immediately, then the remaining parsers can be prioritized by length of prefix.
-              ;; TODO - this interface should maybe be different...
-              (do-run! scheduler
-                       (λ () (apply procedure port extra-args))
-                       job
-                       '())]
-             [(alt-parser name parsers extra-arg-lists)
-              (define (mk-dep parsador extra-args)
-                (get-job! scheduler parsador extra-args start-position 0))
-              (define worker
-                (alt-worker job (map mk-dep parsers extra-arg-lists) '() '() #f))
-              (for ([dep (alt-worker-remaining-jobs worker)])
-                (set-parser-job-dependents!
-                 dep
-                 (cons worker (parser-job-dependents dep))))
-              (set-parser-job-continuation/worker! job worker)
-              (push-hint! scheduler worker)
-              (run-scheduler scheduler)])])])]))
+  (if (scheduler-get-result scheduler job)
+      (run-scheduler scheduler)
+      (match job
+        [(parser-job parsador extra-args start-position
+                     result-index k/worker dependents s-stack)
+         (match k/worker
+           [(scheduled-continuation job k dependency (and ready? #t))
+            (do-run! scheduler
+                     (λ () (k (scheduler-get-result scheduler dependency)))
+                     job
+                     s-stack)]
+           [(alt-worker job remaining-jobs (list ready-job rjs ...) failures successful?)
+            ;; TODO - remove ready-job from ready-jobs and remaining-jobs, if it's a success cache the result, set success flag, and add the next iteration of the job to the remaining jobs (this should check if it's also ready and add it to the ready list as appropriate), if failure add to failures.
+            (set-alt-worker-remaining-jobs! k/worker (remove ready-job remaining-jobs))
+            (set-alt-worker-ready-jobs! k/worker rjs)
+            (eprintf "in ready alt worker for: ~a\n" (job->display_ job))
+            (eprintf "ready job: ~a\n" (job->display_ ready-job))
+            (define result (scheduler-get-result scheduler ready-job))
+            (cond
+              [(parse-failure? result)
+               (set-alt-worker-failures! k/worker (cons result failures))]
+              [(parse-stream? result)
+               (let ([result-contents (stream-first result)]
+                     [this-next-job (get-next-job! scheduler job)]
+                     [dep-next-job (get-next-job! scheduler ready-job)])
+                 (define result-stream
+                   (parse-stream result-contents this-next-job scheduler))
+                 (cache-result-and-ready-dependents! scheduler job result-stream)
+                 (set-alt-worker-successful?! k/worker #t)
+                 (set-alt-worker-job! k/worker this-next-job)
+                 (set-parser-job-continuation/worker! this-next-job k/worker)
+                 (set-alt-worker-remaining-jobs!
+                  k/worker
+                  (cons dep-next-job (alt-worker-remaining-jobs k/worker)))
+                 (when (scheduler-get-result scheduler dep-next-job)
+                   (set-alt-worker-ready-jobs!
+                    k/worker
+                    (cons dep-next-job (alt-worker-ready-jobs k/worker)))))]
+              [else
+               (error 'chido-parse
+                      "Internal error - alt-worker got a non-stream result: ~s"
+                      result)])
+            (run-scheduler scheduler)]
+           [(alt-worker job (list) (list) failures successful?)
+            ;; Finished alt-worker.
+            ;; TODO - Right now a failure object is also an empty stream,
+            ;;        so it can serve both cases.  Should this change?
+            (define result (alt-worker->failure k/worker))
+            (cache-result-and-ready-dependents! scheduler job result)
+            (run-scheduler scheduler)]
+           [else
+            (match s-stack
+              [(list stream1 stack-rest ...)
+               (set-parser-job-stream-stack! job stack-rest)
+               (do-run! scheduler (λ () (stream-rest stream1)) job stack-rest)]
+              ;;; TODO -- if there is no stream-stack but the index is >0, I need to fail
+              [else
+               (if (equal? 0 (parser-job-result-index job))
+                   (match parsador
+                     [(parser name prefix procedure)
+                      (define port (port-broker->port (scheduler-port-broker scheduler)
+                                                      start-position))
+                      ;; TODO - check prefix.  All parsers that fail the prefix check can be logged as failures immediately, then the remaining parsers can be prioritized by length of prefix.
+                      ;; TODO - this interface should maybe be different...
+                      (do-run! scheduler
+                               (λ () (apply procedure port extra-args))
+                               job
+                               '())]
+                     [(alt-parser name parsers extra-arg-lists)
+                      (define (mk-dep parsador extra-args)
+                        (get-job! scheduler parsador extra-args start-position 0))
+                      (define worker
+                        (alt-worker job (map mk-dep parsers extra-arg-lists) '() '() #f))
+                      (for ([dep (alt-worker-remaining-jobs worker)])
+                        (set-parser-job-dependents!
+                         dep
+                         (cons worker (parser-job-dependents dep))))
+                      (set-parser-job-continuation/worker! job worker)
+                      (push-hint! scheduler worker)
+                      (run-scheduler scheduler)])
+                   ;; In this case there has been a result stream but it is dried up.
+                   (let ([end-failure (parse-failure (job->parser-name job)
+                                                     (parser-job-start-position job)
+                                                     (parser-job-start-position job)
+                                                     "No more results"
+                                                     '())])
+                     (cache-result-and-ready-dependents! scheduler
+                                                         job
+                                                         end-failure)
+                     (set-parser-job-continuation/worker! job #f)
+                     (run-scheduler scheduler)))])])])))
 
 (define (do-run! scheduler thunk job stream-stack)
   (define result
@@ -497,7 +513,7 @@ A weak hash port-broker->ephemeron with scheduler.
   (set-parser-job-dependents! job '()))
 
 (define (cache-result-and-ready-dependents! scheduler job result [stream-stack '()])
-  (eprintf "caching result ~a, for job ~a\n\n" result (job->display_ job))
+  (eprintf "caching result ~s, for job ~a\n\n" result (job->display_ job))
   (if (alt-parser? (parser-job-parser job))
       (cache-result-and-ready-dependents!/alt-job scheduler job result)
       (cache-result-and-ready-dependents!/procedure-job
@@ -512,17 +528,16 @@ A weak hash port-broker->ephemeron with scheduler.
          scheduler job result [stream-stack '()])
   (match result
     [(parse-failure name start-position fail-position message sub-failures)
-     (match stream-stack
-       [(list stream1 streams ...)
-        ;; Pop the stream stack and start working on the next one.
-        ;; In this case we DON'T ready dependents!
-        ;; So the job will essentially re-run with a smaller stream stack.
-        ;; (The stream-stack that comes in is one smaller than the original
-        ;; stream-stack from the job.)
-        (set-parser-job-stream-stack! job stream-stack)]
-       [else
-        (scheduler-set-result! scheduler job result)
-        (ready-dependents! job)])]
+     (if (null? stream-stack)
+         (begin
+           (scheduler-set-result! scheduler job result)
+           (ready-dependents! job))
+         ;; Pop the stream stack and start working on the next one.
+         ;; In this case we DON'T ready dependents!
+         ;; So the job will essentially re-run with a smaller stream stack.
+         ;; (The stream-stack that comes in is one smaller than the original
+         ;; stream-stack from the job.)
+         (set-parser-job-stream-stack! job stream-stack))]
     [(parse-stream inner-result next-job sched)
      ;; TODO
      ;; If this parse stream comes from the same job family
@@ -627,10 +642,9 @@ TODO
   (define (get-A-parser) A-parser)
 
   (define results1 (parse-*/prefix p1 A-parser))
-  (define r1-1 (stream-first results1))
 
   (printf "\n\n")
-  (printf "r1-1: ~s\n" r1-1)
+  (printf "r1-1: ~s\n" (stream-ref results1 0))
   (printf "r1-2: ~a\n" (stream-ref results1 1))
 
   #;(for ([r results1])
