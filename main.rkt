@@ -336,14 +336,18 @@ A weak hash port-broker->ephemeron with scheduler.
   |#
   (define (rec goal jobs)
     (match goal
-      [(alt-worker aoeu)
-       TODO]
+      [(alt-worker job remaining-jobs ready-jobs failures successful?)
+       ;; If I'm in a situation to have to break a cycle, all remaining-jobs
+       ;; are cyclic.  So let's just break the first one for now.
+       (define next-job (car remaining-jobs))
+       (rec (parser-job-continuation/worker next-job) (cons job jobs))]
       [(scheduled-continuation job k dependency ready?)
        (if (member dependency jobs)
            (begin (set-scheduled-continuation-dependency! goal the-cycle-failure-job)
                   (set-scheduled-continuation-ready? goal #t))
            (rec (parser-job-continuation/worker dependency)
-                (cons job jobs)))])))
+                (cons job jobs)))]))
+  (rec (scheduler-done-k scheduler) '()))
 
 (define (run-actionable-job scheduler job)
   (match job
