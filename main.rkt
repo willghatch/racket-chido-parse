@@ -3,7 +3,10 @@
 (require
  "port-broker.rkt"
  "util.rkt"
+ racket/stream
+ racket/match
  racket/struct
+ racket/exn
  )
 
 ;; TODO - explanation from notes about the big picture of how this parsing library works
@@ -51,9 +54,9 @@
 
 (define (make-cycle-failure job)
   (match job
-    [(parser-job parser extra-arguments start-position result-index
+    [(parser-job parse extra-arguments start-position result-index
                  k/worker dependents stream-stack)
-     (match parser
+     (match parse
        [(alt-parser name parsers extra-arg-lists)
         (parse-failure name start-position start-position "Cycle failure" '())]
        [(parser name prefix procedure)
@@ -62,9 +65,9 @@
 (define (exn->failure e job)
   (let ([message (format "Exception while parsing: ~a\n" (exn->string e))])
     (match job
-      [(parser-job parser extra-arguments start-position
+      [(parser-job parse extra-arguments start-position
                    result-index continuation/worker dependents stream-stack)
-       (match parser
+       (match parse
          ;; TODO - it should only be possible to get a procedural parser here, not an alt-parser.
          [(parser name prefix procedure)
           (parse-failure name start-position start-position message '())])])))
@@ -101,6 +104,11 @@ The job->result-cache is a map from parser-job structs -> parser-stream OR parse
   #:transparent)
 (define (make-scheduler port-broker)
   (scheduler port-broker #f '() (hash) (hasheq)))
+
+(define (pop-hint! scheduler)
+  (set-scheduler-hint-stack! scheduler (cdr (scheduler-hint-stack scheduler))))
+(define (push-hint! scheduler hint)
+  (set-scheduler-hint-stack! scheduler (cons hint (scheduler-hint-stack scheduler))))
 
 (struct parser-job
   ;; TODO - document from notes
@@ -151,7 +159,7 @@ A weak hash port-broker->ephemeron with scheduler.
   (if (null? args)
       (hash-set h k1 k2)
       (hash-set h k1 (apply hash-set+
-                            (hash-ref h k1 (λ (hash)))
+                            (hash-ref h k1 (λ () (hash)))
                             k2
                             args))))
 (define (hash-ref+ fail-thunk h k1 . args)
@@ -286,18 +294,15 @@ A weak hash port-broker->ephemeron with scheduler.
   (define using-hint? #t)
   (when (null? (scheduler-hint-stack s))
     (set! using-hint? #f)
-    (set-scheduler-hint-stack s (list (scheduler-done-k s))))
-  (define hinted (car hints))
-  (define (pop-hint!)
-    (set-scheduler-hint-stack! s (cdr (scheduler-hint-stack s))))
-  (match hinted
+    (set-scheduler-hint-stack! s (list (scheduler-done-k s))))
+  (match (car (scheduler-hint-stack s))
     [(scheduled-continuation #f done-k dep #t)
      ;; done-k is ready.
      (set-scheduler-done-k! s #f)
      (done-k (scheduler-get-result s dep))]
     [(scheduled-continuation job k dependency #t)
      ;; also ready
-     (pop-hint!)
+     (pop-hint! s)
      (run-actionable-job s job)]
     [(scheduled-continuation job k dependency ready?)
      ;; Not ready
@@ -308,10 +313,10 @@ A weak hash port-broker->ephemeron with scheduler.
              [else (fail-smallest-cycle! s)
                    (run-scheduler s)]))]
     [(alt-worker job remaining-jobs (list ready-job rjs ...) failures successful?)
-     (pop-hint!)
+     (pop-hint! s)
      (run-actionable-job s job)]
     [(alt-worker job (list) (list) failures successful?)
-     (pop-hint!)
+     (pop-hint! s)
      (run-actionable-job s job)]
     [(alt-worker job remaining-jobs ready-jobs failures successful?)
      (let ([actionable-job (find-work s remaining-jobs)])
