@@ -49,6 +49,16 @@
    (define (stream-rest s)
      (error 'stream-rest "empty stream"))])
 
+(define (make-cycle-failure job)
+  (match job
+    [(parser-job parser extra-arguments start-position result-index
+                 k/worker dependents stream-stack)
+     (match parser
+       [(alt-parser name parsers extra-arg-lists)
+        (parse-failure name start-position start-position "Cycle failure" '())]
+       [(parser name prefix procedure)
+        (parse-failure name start-position start-position "cycle-failure" '())])]))
+
 (define (exn->failure e job)
   (let ([message (format "Exception while parsing: ~a\n" (exn->string e))])
     (match job
@@ -58,6 +68,21 @@
          ;; TODO - it should only be possible to get a procedural parser here, not an alt-parser.
          [(parser name prefix procedure)
           (parse-failure name start-position start-position message '())])])))
+
+(define (alt-worker->failure aw)
+  (match aw
+    [(alt-worker job remaining-jobs ready-jobs failures successful?)
+     (match job
+       [(parser-job parser extra-arguments start-position result-index
+                    k/worker dependents stream-stack)
+        (match parser
+          [(alt-parser name parsers extra-arg-lists)
+           ;; TODO - what is the best fail position?
+           ;;        Probably I should analyze the sub-failures...
+           (define fail-position start-position)
+           (parse-failure name start-position fail-position
+                          "TODO - better failure message" failures)])])]))
+
 
 #|
 Schedulers keep track of parse work that needs to be done and have caches of results.
@@ -92,6 +117,8 @@ The job->result-cache is a map from parser-job structs -> parser-stream OR parse
   #:transparent)
 (define (make-parser-job p extra-args start result-index)
   (parser-job p extra-args start result-index #f '() '()))
+
+(struct cycle-breaker-job (failure-job) #:transparent)
 
 (struct alt-worker
   (job remaining-jobs ready-jobs failures successful?)
@@ -138,7 +165,10 @@ A weak hash port-broker->ephemeron with scheduler.
    (hash-set (scheduler-job->result-cache s) job result)))
 
 (define (scheduler-get-result s job)
-  (hash-ref (scheduler-job->result-cache s) job #f))
+  (match job
+    [(cycle-breaker-job failure-job)
+     (make-cycle-failure failure-job)]
+    [else (hash-ref (scheduler-job->result-cache s) job #f)]))
 
 (define (get-job! s parser extra-args start-position result-number)
   (define existing (hash-ref+ #f (scheduler-job-info->job-cache s)
@@ -204,7 +234,8 @@ A weak hash port-broker->ephemeron with scheduler.
              (set-parser-job-dependents! job (cons k-job (parser-job-dependents job)))
              (push-hint! scheduler k-job)
              ;; Launch the scheduler by being "done" with a flag value.
-             ((scheduler-done-k scheduler) recursive-enter-flag))
+             ((scheduled-continuation-k (scheduler-done-k scheduler))
+              recursive-enter-flag))
            chido-parse-prompt)
           (let loop ()
             ;; This is the original entry into the parser machinery.
@@ -263,7 +294,7 @@ A weak hash port-broker->ephemeron with scheduler.
     [(scheduled-continuation #f done-k dep #t)
      ;; done-k is ready.
      (set-scheduler-done-k! s #f)
-     (done-k (lookup-job-result dep))]
+     (done-k (scheduler-get-result s dep))]
     [(scheduled-continuation job k dependency #t)
      ;; also ready
      (pop-hint!)
@@ -292,15 +323,22 @@ A weak hash port-broker->ephemeron with scheduler.
              [else (fail-smallest-cycle! s)
                    (run-scheduler s)]))]))
 
+
 (define (fail-smallest-cycle! scheduler)
-  ;; TODO - find the smallest cycle, make a failure object for the job, cache-and-ready, then maybe try to set up a hint stack (probably the list of continuations/workers up to the failed cycle)?
-  ;; old code from alt-worker demand running
-  #;(let ([cycle-fail (make-cycle-failure job)])
-      (set-alt-worker-failures! hinted
-                                (cons cycle-fail failures))
-      (cache-result-and-ready-dependents!
-       s job (alt-worker->failure hinted)))
-  (error 'fail-smallest-cycle "TODO - not yet implemented"))
+  #|
+  TODO - better name.
+  This isn't failing the smallest cycle necessarily, but it is failing the job in a cycle that first depends back on something earlier in the chain to the root goal.
+  |#
+  (define (rec goal jobs)
+    (match goal
+      [(alt-worker aoeu)
+       TODO]
+      [(scheduled-continuation job k dependency ready?)
+       (if (member dependency jobs)
+           (begin (set-scheduled-continuation-dependency! goal the-cycle-failure-job)
+                  (set-scheduled-continuation-ready? goal #t))
+           (rec (parser-job-continuation/worker dependency)
+                (cons job jobs)))])))
 
 (define (run-actionable-job scheduler job)
   (match job
@@ -308,7 +346,10 @@ A weak hash port-broker->ephemeron with scheduler.
                  result-index k/worker dependents s-stack)
      (match k/worker
        [(scheduled-continuation job k dependency (and ready? #t))
-        (do-run! scheduler (λ () (k (lookup-job-result dep))) job s-stack)]
+        (do-run! scheduler
+                 (λ () (k (scheduler-get-result scheduler dep)))
+                 job
+                 s-stack)]
        [(alt-worker job remaining-jobs (list ready-job rjs ...) failures successful?)
         ;; TODO - remove ready-job from ready-jobs and remaining-jobs, if it's a success cache the result, set success flag, and add the next iteration of the job to the remaining jobs (this should check if it's also ready and add it to the ready list as appropriate), if failure add to failures.
         (set-alt-worker-remaining-jobs! k/worker (remove ready-job remaining-jobs))
@@ -437,7 +478,8 @@ A weak hash port-broker->ephemeron with scheduler.
        (parse-stream result next-job scheduler))
      (scheduler-set-result! scheduler job wrapped-result)
      (ready-dependents! job)]
-    [else
+    [else (error 'chido-parse "Parsers must (for now) return parse-derivation objects")]
+    #;[else
      ;; Turn the result into a parse-derivation and recur.
      (define parser (parser-job-parser job))
      (define start-position (parser-job-start-position job))
@@ -446,12 +488,6 @@ A weak hash port-broker->ephemeron with scheduler.
        (parse-derivation result parser start-position end-position '()))
      (cache-result-and-ready-dependents!/procedure-job
       scheduler job new-result stream-stack)]))
-
-(define (alt-worker->failure aw)
-  TODO)
-
-(define (make-cycle-failure job)
-  TODO)
 
 
 
