@@ -7,7 +7,10 @@
  racket/match
  racket/struct
  racket/exn
- )
+ (for-syntax
+  racket/base
+  syntax/parse
+  ))
 
 (module+ test
   (require
@@ -226,6 +229,7 @@ A weak hash port-broker->ephemeron with scheduler.
 (define (scheduler-get-result s job)
   (match job
     [(cycle-breaker-job failure-job)
+     (eprintf "scheduler getting result for cycle-breaker\n")
      (make-cycle-failure failure-job)]
     [else (hash-ref (scheduler-job->result-cache s) job #f)]))
 
@@ -263,6 +267,8 @@ A weak hash port-broker->ephemeron with scheduler.
   (enter-the-parser/job s j))
 
 (define (enter-the-parser/job scheduler job)
+  (when (< 3 (parser-job-start-position job))
+    (error 'my-crash-point))
   (define ready-result (scheduler-get-result scheduler job))
   (eprintf "entering the parser with ~a!  Result ready? ~a\n"
            (job->display_ job) ready-result)
@@ -276,6 +282,8 @@ A weak hash port-broker->ephemeron with scheduler.
           ;; we schedule its dependency, and then we abort back to the
           ;; scheduler loop.
           (let ([parent-job (current-chido-parse-job)])
+            (eprintf "It's a recursive call with parent: ~a\n"
+                     (job->display_ parent-job))
             (call-with-composable-continuation
              (λ (k)
                (define sched-k (job->scheduled-continuation parent-job k job))
@@ -534,7 +542,20 @@ A weak hash port-broker->ephemeron with scheduler.
   (set-parser-job-dependents! job '()))
 
 (define (cache-result-and-ready-dependents! scheduler job result [stream-stack '()])
-  (eprintf "caching result ~s, for job ~a\n\n" result (job->display_ job))
+  (eprintf "######################################################################\n")
+  (eprintf "caching result ~s, for job ~a, with stream stack ~s\n"
+           result (job->display_ job) stream-stack)
+  (eprintf "Here 1\n")
+  (stream? result)
+  (eprintf "Here 2\n")
+  ;(and (stream? result) (stream-empty? result))
+  (eprintf "parse-stream? ~a\n" (parse-stream? result))
+  (eprintf "parse-failure? ~a\n" (parse-failure? result))
+  (eprintf "stream? ~a\n" (stream? result))
+  #;(stream-empty? (for/stream ([x '()])
+                             'hi))
+  (eprintf "Here 3\n")
+  (eprintf "stream-empty? ~s\n\n" (and (stream? result) (stream-empty? result)))
   (if (alt-parser? (parser-job-parser job))
       (cache-result-and-ready-dependents!/alt-job scheduler job result)
       (cache-result-and-ready-dependents!/procedure-job
@@ -568,8 +589,12 @@ A weak hash port-broker->ephemeron with scheduler.
      ;; Otherwise it should be treated as an ordinary stream.
      (cache-result-and-ready-dependents!/procedure-job
       scheduler job inner-result (cons result stream-stack))]
-    [(? (λ (x) (and (stream? x) (stream-empty? x))))
+    [(? (λ (x) (and (stream? x)
+                    (eprintf "pre-stream-empty?\n")
+                    (stream-empty? x)
+                    (eprintf "post-stream-empty?\n"))))
      ;; Turn it into a parse failure and recur.
+     (eprintf "caching a stream-empty result\n")
      (match job
        [(parser-job parse extra-arguments start-position
                     result-index continuation/worker
@@ -631,11 +656,21 @@ TODO
 ;(define (parse-1/prefix TODO) TODO)
 ;(define (parse-1/whole TODO) TODO)
 
+(define-syntax (for/parse-stream stx)
+  (syntax-parse stx
+    [(_ for-header body ...+)
+     #'(let ([result-stream (for/stream for-header body ...)])
+         (if (stream-empty? result-stream)
+             (void)
+             (stream-first result-stream))
+         result-stream)]))
+
 (module+ test
   (define s1 "aaa")
   (define p1 (open-input-string s1))
 
   (define (a1-parser-proc port)
+    (eprintf "At start of a1-parser-proc\n")
     (define-values (line col pos) (port-next-location port))
     (define c (read-char port))
     (if (equal? c #\a)
@@ -651,7 +686,7 @@ TODO
      (eprintf "In Aa-proc loop 1\n")
      (for/stream
       ([d/a (parse-*/prefix port a1-parser-obj
-                            #:previos-derivation d/A1)])
+                            #:previous-derivation d/A1)])
       (eprintf "In Aa-proc loop 2\n")
       (make-parse-derivation (string-append (parse-derivation-result d/A1)
                                             (parse-derivation-result d/a))
