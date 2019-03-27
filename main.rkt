@@ -253,12 +253,8 @@ A weak hash port-broker->ephemeron with scheduler.
 (define recursive-enter-flag (gensym))
 
 (define (enter-the-parser port-broker parser extra-args start-position)
-  (enter-the-parser/n port-broker parser extra-args start-position 0))
-
-(define (enter-the-parser/n port-broker parser extra-args
-                            start-position result-number)
   (define s (port-broker-scheduler port-broker))
-  (define j (get-job! s parser extra-args start-position result-number))
+  (define j (get-job! s parser extra-args start-position 0))
   (enter-the-parser/job s j))
 
 (define (enter-the-parser/job scheduler job)
@@ -302,6 +298,7 @@ A weak hash port-broker->ephemeron with scheduler.
                  ;; As a fresh entry into the parser, we start a fresh hint stack.
                  (set-scheduler-hint-stack! scheduler (list k-job))
                  (run-scheduler scheduler))))
+            (eprintf "fulfilling done-k with result: ~s\n" result)
             (if (eq? recursive-enter-flag result)
                 (run-scheduler scheduler)
                 result)))))
@@ -312,7 +309,7 @@ A weak hash port-broker->ephemeron with scheduler.
   ;; s is a scheduler
   ;; job-list is a list of parser-job structs
   ;; TODO - this is probably the best place to detect cycles.  I should maybe return some sort of flag object containing the job that contains the smallest dependency cycle so I know which job to return a cycle error for.
-  (eprintf "in find-work with job list: ~s\n" job-list)
+  (eprintf "in find-work with job list: ~s\n" (map job->display_ job-list))
   (let loop ([jobs job-list]
              [blocked '()])
     (if (null? jobs)
@@ -338,12 +335,13 @@ A weak hash port-broker->ephemeron with scheduler.
   (when (null? (scheduler-hint-stack s))
     (set! using-hint? #f)
     (set-scheduler-hint-stack! s (list (scheduler-done-k s))))
-  (match (car (scheduler-hint-stack s))
+  (define hint (car (scheduler-hint-stack s)))
+  (match hint
     [(scheduled-continuation #f done-k dep #t)
      ;; done-k is ready.
-     (eprintf "done-k is ready!\n")
      (set-scheduler-done-k! s #f)
      (define result (scheduler-get-result s dep))
+     (eprintf "done-k is ready! With result: ~s\n" result)
      (done-k result)]
     [(scheduled-continuation job k dependency #t)
      ;; also ready
@@ -355,11 +353,21 @@ A weak hash port-broker->ephemeron with scheduler.
               (and job (job->display_ job)))
      (let ([actionable-job (find-work s (list dependency))])
        (eprintf "found actionable job: ~a\n" (job->display_ actionable-job))
-       (cond [actionable-job (run-actionable-job s actionable-job)]
-             [using-hint? (set-scheduler-hint-stack! s '())
-                          (run-scheduler s)]
-             [else (fail-smallest-cycle! s)
-                   (run-scheduler s)]))]
+       (cond
+         [(and actionable-job (scheduler-get-result s actionable-job))
+          (eprintf "WARNING! A continuation was not marked ready when its dependency finished\n\n")
+          (eprintf "Continuation for job: ~a\n" (and job (job->display_ job)))
+          (eprintf "Dependency that didn't mark it ready: ~a\n"
+                   (job->display_ actionable-job))
+          (eprintf "Result for the dependency: ~s\n"
+                   (scheduler-get-result s actionable-job))
+          (set-scheduled-continuation-ready?! hint #t)
+          (run-scheduler s)]
+         [actionable-job (run-actionable-job s actionable-job)]
+         [using-hint? (set-scheduler-hint-stack! s '())
+                      (run-scheduler s)]
+         [else (fail-smallest-cycle! s)
+               (run-scheduler s)]))]
     [(alt-worker job remaining-jobs (list ready-job rjs ...) failures successful?)
      (pop-hint! s)
      (run-actionable-job s job)]
