@@ -1,5 +1,29 @@
 #lang racket/base
 
+(provide
+ make-parse-derivation
+ parse-derivation?
+ parse-derivation-result
+ parse-derivation-parser
+ parse-derivation-start-position
+ parse-derivation-end-position
+ parse-derivation-derivation-list
+
+ (struct-out alt-parser)
+ (struct-out proc-parser)
+ parser-name
+
+ (struct-out parse-failure)
+ make-parse-failure
+
+ string->parser
+ regexp->parser
+
+ parse*
+ ;; TODO - other parse functions
+
+ )
+
 (require
  "port-broker.rkt"
  "util.rkt"
@@ -20,6 +44,9 @@
    ))
 
 ;; TODO - explanation from notes about the big picture of how this parsing library works
+
+;; TODO - literal strings and regexps should be accepted as parsers
+;; TODO - procedures with the contract (-> parser) should be accepted as parsers
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;; Structs
@@ -117,6 +144,37 @@
            (define fail-position start-position)
            (parse-failure name start-position fail-position
                           "TODO - better failure message" failures)])])]))
+
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;; Literal parsers
+(define (parse-literal-string port s failure-message)
+  (define-values (line col pos) (port-next-location port))
+  (define length (string-length s))
+  (define read-in (read-string length port))
+  (if (equal? s read-in)
+      (make-parse-derivation s #:end (+ pos length))
+      (make-parse-failure (format "Didn't match literal ~a" s) #:position pos)))
+
+(define (string->parser s #:name [name #f])
+  ;; TODO - add optional args for what to do with the result
+  (define failure-message (format "Didn't match string literal: ~s" s))
+  (proc-parser (or name s) s (λ (p) (parse-literal-string p s failure-message))))
+
+(define (parse-regexp port r failure-message)
+  (define-values (line col pos) (port-next-location port))
+  (define m (regexp-match r port))
+  (define length (and m (string-length (car m))))
+  (if m
+      (make-parse-derivation m #:end (+ pos length))
+      (make-parse-failure failure-message #:position pos)))
+
+(define (regexp->parser rx #:name [name #f])
+  ;; TODO - add optional args for what to do with the result
+  (define failure-message (format "Didn't match regexp: ~a" (or name rx)))
+  (proc-parser (or name (format "~a" rx))
+               ""
+               (λ (p) (parse-regexp p rx failure-message))))
 
 
 #|
