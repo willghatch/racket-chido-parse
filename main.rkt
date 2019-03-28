@@ -187,10 +187,10 @@ The job->result-cache is a map from parser-job structs -> parser-stream OR parse
         [else (parser-name p)]))
 (define (job->display job)
   (and job
-       (format "~a@~a" (job->parser-name job) (parser-job-start-position job))))
-(define (job->display_ job)
-  (and job
-       (format "~a_~a" (job->display job) (parser-job-result-index job))))
+       (format "~a@~a_~a"
+               (job->parser-name job)
+               (parser-job-start-position job)
+               (parser-job-result-index job))))
 
 
 
@@ -231,7 +231,8 @@ A weak hash port-broker->ephemeron with scheduler.
 (define (scheduler-get-result s job)
   (match job
     [(cycle-breaker-job failure-job)
-     (eprintf "scheduler getting result for cycle-breaker\n")
+     (eprintf "scheduler getting result for cycle-breaker for job: ~a\n"
+              (job->display failure-job))
      (make-cycle-failure failure-job)]
     [else (hash-ref (scheduler-job->result-cache s) job #f)]))
 
@@ -278,8 +279,6 @@ A weak hash port-broker->ephemeron with scheduler.
 
 (define (enter-the-parser/job scheduler job)
   (define ready-result (scheduler-get-result scheduler job))
-  (eprintf "entering the parser with ~a!  Result ready? ~a\n"
-           (job->display_ job) ready-result)
   (or ready-result
       #|
       TODO - there is no scheduler done-k iff there is no chido-parse continuation prompt and no chido-parse mark.  In this case I want to capture the whole continuation as done-k and set it on the scheduler.  Otherwise I want to capture a composable continuation, set it as the continuation of whatever job was in the mark, and just re-run the scheduler (probably with new hints).
@@ -290,8 +289,6 @@ A weak hash port-broker->ephemeron with scheduler.
           ;; we schedule its dependency, and then we abort back to the
           ;; scheduler loop.
           (let ([parent-job (current-chido-parse-job)])
-            (eprintf "It's a recursive call with parent: ~a and done-k ~s\n"
-                     (job->display_ parent-job) (scheduler-done-k scheduler))
             (call-with-composable-continuation
              (λ (k)
                (define sched-k (job->scheduled-continuation parent-job k job))
@@ -316,7 +313,6 @@ A weak hash port-broker->ephemeron with scheduler.
                  (set-scheduler-hint-stack! scheduler (list k-job))
                  (set-scheduler-done-k! scheduler k-job)
                  (run-scheduler scheduler))))
-            (eprintf "fulfilling done-k with result: ~s\n" result)
             (if (eq? recursive-enter-flag result)
                 (run-scheduler scheduler)
                 (begin
@@ -329,7 +325,6 @@ A weak hash port-broker->ephemeron with scheduler.
   ;; s is a scheduler
   ;; job-list is a list of parser-job structs
   ;; TODO - this is probably the best place to detect cycles.  I should maybe return some sort of flag object containing the job that contains the smallest dependency cycle so I know which job to return a cycle error for.
-  (eprintf "in find-work with job list: ~s\n" (map job->display_ job-list))
   (let loop ([jobs job-list]
              [blocked '()])
     (if (null? jobs)
@@ -360,7 +355,6 @@ A weak hash port-broker->ephemeron with scheduler.
     [(scheduled-continuation #f done-k dep #t)
      ;; done-k is ready.
      (define result (scheduler-get-result s dep))
-     (eprintf "done-k is ready! With result: ~s\n" result)
      (done-k result)]
     [(scheduled-continuation job k dependency #t)
      ;; also ready
@@ -368,18 +362,14 @@ A weak hash port-broker->ephemeron with scheduler.
      (run-actionable-job s job)]
     [(scheduled-continuation job k dependency ready?)
      ;; Not ready
-     (eprintf "running a scheduled continuation for job: ~a\n"
-              (and job (job->display_ job)))
      (let ([actionable-job (find-work s (list dependency))])
-       (eprintf "found actionable job: ~a\n"
-                (and actionable-job (job->display_ actionable-job)))
        (cond
          [(and actionable-job (scheduler-get-result s actionable-job))
           (eprintf "\n")
           (eprintf "WARNING! A continuation was not marked ready when its dependency finished\n")
-          (eprintf "Continuation for job: ~a\n" (and job (job->display_ job)))
+          (eprintf "Continuation for job: ~a\n" (and job (job->display job)))
           (eprintf "Dependency that didn't mark it ready: ~a\n"
-                   (job->display_ actionable-job))
+                   (job->display actionable-job))
           (eprintf "Result for the dependency: ~s\n"
                    (scheduler-get-result s actionable-job))
           (eprintf "\n\n")
@@ -401,9 +391,9 @@ A weak hash port-broker->ephemeron with scheduler.
          [(and actionable-job (scheduler-get-result s actionable-job))
           (eprintf "\n")
           (eprintf "WARNING! An alt-worker was not marked ready when its dependency finished\n")
-          (eprintf "Worker for job: ~a\n" (job->display_ job))
+          (eprintf "Worker for job: ~a\n" (job->display job))
           (eprintf "Dependency that didn't mark it ready: ~a\n"
-                   (job->display_ actionable-job))
+                   (job->display actionable-job))
           (eprintf "result for the dependency: ~s\n" (scheduler-get-result s actionable-job))
           (eprintf "\n\n")
           (error 'chido-parse "Internal error -- dependency tracking issue")]
@@ -430,19 +420,22 @@ A weak hash port-broker->ephemeron with scheduler.
        (rec (parser-job-continuation/worker next-job) (cons job jobs))]
       [(scheduled-continuation job k dependency ready?)
        (if (member dependency jobs)
-           (begin (set-scheduled-continuation-dependency!
-                   goal (cycle-breaker-job dependency))
-                  (set-scheduled-continuation-ready?! goal #t))
+           (begin
+             (eprintf "Breaking cycle where job ~a depends on job ~a\n"
+                      (job->display job) (job->display dependency))
+             (set-scheduled-continuation-dependency!
+              goal
+              (cycle-breaker-job dependency))
+             (set-scheduled-continuation-ready?! goal #t))
            (rec (parser-job-continuation/worker dependency)
                 (cons job jobs)))]))
   (rec (scheduler-done-k scheduler) '()))
 
 (define (run-actionable-job scheduler job)
-  (eprintf "running actionable job for: ~a\n" (job->display_ job))
   (when (scheduler-get-result scheduler job)
     (error 'chido-parse
            "internal error - run-actionable-job got a job that was already done: ~a"
-           (job->display_ job)))
+           (job->display job)))
   (match job
     [(parser-job parsador extra-args start-position
                  result-index k/worker dependents s-stack)
@@ -456,8 +449,6 @@ A weak hash port-broker->ephemeron with scheduler.
         ;; TODO - remove ready-job from ready-jobs and remaining-jobs, if it's a success cache the result, set success flag, and add the next iteration of the job to the remaining jobs (this should check if it's also ready and add it to the ready list as appropriate), if failure add to failures.
         (set-alt-worker-remaining-jobs! k/worker (remove ready-job remaining-jobs))
         (set-alt-worker-ready-jobs! k/worker rjs)
-        (eprintf "in ready alt worker for: ~a\n" (job->display_ job))
-        (eprintf "ready job: ~a\n" (job->display_ ready-job))
         (define result (scheduler-get-result scheduler ready-job))
         (cond
           [(parse-failure? result)
@@ -466,7 +457,6 @@ A weak hash port-broker->ephemeron with scheduler.
            (let ([result-contents (stream-first result)]
                  [this-next-job (get-next-job! scheduler job)]
                  [dep-next-job (get-next-job! scheduler ready-job)])
-             (eprintf "\ngoing to cache alt-worker result: ~s\n\n" result-contents)
              (define result-stream
                (parse-stream result-contents this-next-job scheduler))
              (cache-result-and-ready-dependents! scheduler job result-stream)
@@ -565,8 +555,6 @@ A weak hash port-broker->ephemeron with scheduler.
   (set-parser-job-dependents! job '()))
 
 (define (cache-result-and-ready-dependents! scheduler job result [stream-stack '()])
-  (eprintf "caching result ~s, for job ~a, with stream stack ~s\n"
-           result (job->display_ job) stream-stack)
   (if (alt-parser? (parser-job-parser job))
       (cache-result-and-ready-dependents!/alt-job scheduler job result)
       (cache-result-and-ready-dependents!/procedure-job
@@ -602,7 +590,6 @@ A weak hash port-broker->ephemeron with scheduler.
       scheduler job inner-result (cons result stream-stack))]
     [(? (λ (x) (and (stream? x) (stream-empty? x))))
      ;; Turn it into a parse failure and recur.
-     (eprintf "caching a stream-empty result\n")
      (match job
        [(parser-job parse extra-arguments start-position
                     result-index continuation/worker
@@ -675,11 +662,9 @@ TODO
          result-stream)]))
 
 (module+ test
-  (define s1 "aaa")
+  (define s1 "aaaaa")
   (define p1 (open-input-string s1))
   (port-count-lines! p1)
-  (define-values (line col pos) (port-next-location p1))
-  (eprintf "port-next-loc: ~a\n" pos)
 
   (define (a1-parser-proc port)
     (eprintf "At start of a1-parser-proc\n")
@@ -694,7 +679,6 @@ TODO
   (define (Aa-parser-proc port)
     (eprintf "At start of Aa-proc\n")
     (define-values (line col pos) (port-next-location port))
-    (eprintf "port-next-location: ~a\n" pos)
     (for/stream
      ([d/A1 (parse-*/prefix port (get-A-parser))])
      (eprintf "In Aa-proc loop 1\n")
@@ -710,8 +694,8 @@ TODO
 
   (define A-parser (alt-parser "A"
                                (list
-                                a1-parser-obj
                                 Aa-parser-obj
+                                a1-parser-obj
                                 )
                                (list '() '())))
   (define (get-A-parser) A-parser)
@@ -725,11 +709,11 @@ TODO
   ;(printf "r1-2: ~a\n" (stream-ref results1 1))
 
   (for ([r results1])
-    (printf "result: ~a\n" r))
+    (printf "result: ~s\n" (parse-derivation-result r)))
 
   (printf "\n\n\n\n\n")
   (for ([r results1])
-    (printf "result: ~a\n" r))
+    (printf "result: ~s\n" (parse-derivation-result r)))
 
   )
 
