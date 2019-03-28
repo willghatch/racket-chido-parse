@@ -16,6 +16,7 @@
 (module+ test
   (require
    rackunit
+   "forparse.rkt"
    ))
 
 ;; TODO - explanation from notes about the big picture of how this parsing library works
@@ -43,14 +44,16 @@
                          (error 'chido-parse "TODO - for now you have to supply an end location explicitly when making a derivation")))
      (parse-derivation result parser start-position end-use derivation-list)]))
 
-(struct parser
+(struct parser (name) #:transparent)
+
+(struct proc-parser parser
   ;; TODO - document from notes
-  (name prefix procedure)
+  (prefix procedure)
   #:transparent)
 
-(struct alt-parser
+(struct alt-parser parser
   ;; TODO - use a prefix trie for the parsers
-  (name parsers extra-arg-lists)
+  (parsers extra-arg-lists)
   #:transparent)
 
 (struct parse-stream
@@ -78,35 +81,28 @@
 (define (make-parse-failure message #:position [pos #f] #:failures [failures '()])
   (define job (current-chido-parse-job))
   (match job
-    [(parser-job parse extra-arguments start-position result-index
+    [(parser-job parser extra-arguments start-position result-index
                  continuation/worker dependents result-stream)
-     (match parse
-       [(parser name prefix procedure)
-        (parse-failure name start-position (or pos start-position)
-                       message failures)]
-       [(alt-parser name parsers extra-arg-lists)
-        (parse-failure name start-position (or pos start-position)
-                       message failures)])]))
+     (parse-failure (parser-name parser) start-position (or pos start-position)
+                    message failures)]))
 
 (define (make-cycle-failure job)
   (match job
-    [(parser-job parse extra-arguments start-position result-index
+    [(parser-job parser extra-arguments start-position result-index
                  k/worker dependents result-stream)
-     (match parse
-       [(alt-parser name parsers extra-arg-lists)
-        (parse-failure name start-position start-position "Cycle failure" '())]
-       [(parser name prefix procedure)
-        (parse-failure name start-position start-position "cycle-failure" '())])]))
+     (parse-failure (parser-name parser)
+                    start-position
+                    start-position
+                    "Cycle failure"
+                    '())]))
 
 (define (exn->failure e job)
   (let ([message (format "Exception while parsing: ~a\n" (exn->string e))])
     (match job
-      [(parser-job parse extra-arguments start-position
+      [(parser-job parser extra-arguments start-position
                    result-index continuation/worker dependents result-stream)
-       (match parse
-         ;; TODO - it should only be possible to get a procedural parser here, not an alt-parser.
-         [(parser name prefix procedure)
-          (parse-failure name start-position start-position message '())])])))
+       (parse-failure (parser-name parser)
+                      start-position start-position message '())])))
 
 (define (alt-worker->failure aw)
   (match aw
@@ -185,9 +181,9 @@ The job->result-cache is a map from parser-job structs -> parser-stream OR parse
 
 (define (job->parser-name job)
   (define p (and job (parser-job-parser job)))
-  (cond [(not p) #f]
-        [(alt-parser? p) (alt-parser-name p)]
-        [else (parser-name p)]))
+  (if (parser? p)
+      (parser-name p)
+      p))
 (define (job->display job)
   (cond [(not job) #f]
         [(cycle-breaker-job? job) "cycle-breaker"]
@@ -484,7 +480,7 @@ A weak hash port-broker->ephemeron with scheduler.
                         job)]
               [(equal? 0 result-index)
                (match parsador
-                 [(parser name prefix procedure)
+                 [(proc-parser name prefix procedure)
                   (define port (port-broker->port/char (scheduler-port-broker
                                                         scheduler)
                                                        start-position))
@@ -566,7 +562,7 @@ A weak hash port-broker->ephemeron with scheduler.
                     result-index continuation/worker
                     dependents result-stream)
         (match parse
-          [(parser name prefix procedure)
+          [(proc-parser name prefix procedure)
            (cache-result-and-ready-dependents!/procedure-job
             scheduler
             job
@@ -618,20 +614,6 @@ TODO
 ;(define (whole-parse TODO) TODO)
 ;(define (whole-parse* TODO) TODO)
 
-(define (for/parse-proc body-proc arg-stream-thunk)
-  (let loop ([stream (arg-stream-thunk)])
-    (if (stream-empty? stream)
-        stream
-        (let ([v1 (stream-first stream)])
-          (stream-cons (body-proc v1)
-                       (loop (stream-rest stream)))))))
-(define-syntax (for/parse stx)
-  (syntax-parse stx
-    [(_ ([arg-name input-stream])
-        body ...+)
-     #'(for/parse-proc (λ (arg-name) body ...)
-                       (λ () input-stream))]))
-
 
 (module+ test
   (define s1 "aaaaa")
@@ -646,7 +628,7 @@ TODO
                                #:end (add1 pos)
                                #:derivations '())
         (make-parse-failure "Didn't match.")))
-  (define a1-parser-obj (parser "a" "" a1-parser-proc))
+  (define a1-parser-obj (proc-parser "a" "" a1-parser-proc))
 
   (define (Aa-parser-proc port)
     (for/parse
@@ -658,7 +640,7 @@ TODO
                                             (parse-derivation-result d/a))
                              #:derivations (list d/A d/a)))))
 
-  (define Aa-parser-obj (parser "Aa" "" Aa-parser-proc))
+  (define Aa-parser-obj (proc-parser "Aa" "" Aa-parser-proc))
 
 
   (define A-parser (alt-parser "A"
