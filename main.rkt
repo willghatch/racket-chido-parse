@@ -629,34 +629,40 @@ A weak hash port-broker->ephemeron with scheduler.
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;;; Parsing outer API
 
-(define (parse-*/prefix port parser
-                        #:args [extra-args '()]
-                        #:previous-derivation [prev-d #f])
+(define (parse* port parser
+                #:args [extra-args '()]
+                #:start [start #f])
   (define pb (or (port->port-broker port)
                  (port-broker port)))
-  (define start-pos (if prev-d
-                        (parse-derivation-end-position prev-d)
-                        (let-values ([(line col pos) (port-next-location port)])
-                          pos)))
+  (define start-pos (match start
+                      [(? parse-derivation?) (parse-derivation-end-position start)]
+                      [#f (let-values ([(line col pos) (port-next-location port)])
+                            pos)]))
   ;(eprintf "Entering parse-*/prefix with parser ~s and using start pos ~a\n" (alt-parser-name parser) start-pos)
   (enter-the-parser pb parser extra-args start-pos))
 
 #|
 TODO
 |#
-;(define (parse-*/prefix TODO) TODO)
-;(define (parse-*/whole TODO) TODO)
-;(define (parse-1/prefix TODO) TODO)
-;(define (parse-1/whole TODO) TODO)
+;(define (parse TODO) TODO)
+;(define (parse* TODO) TODO)
+;(define (whole-parse TODO) TODO)
+;(define (whole-parse* TODO) TODO)
 
-(define-syntax (for/parse-stream stx)
+(define (for/parse-proc body-proc arg-stream-thunk)
+  (let loop ([stream (arg-stream-thunk)])
+    (if (stream-empty? stream)
+        stream
+        (let ([v1 (stream-first stream)])
+          (stream-cons (body-proc v1)
+                       (loop (stream-rest stream)))))))
+(define-syntax (for/parse stx)
   (syntax-parse stx
-    [(_ for-header body ...+)
-     #'(let ([result-stream (for/stream for-header body ...)])
-         (if (stream-empty? result-stream)
-             (void)
-             (stream-first result-stream))
-         result-stream)]))
+    [(_ ([arg-name input-stream])
+        body ...+)
+     #'(for/parse-proc (λ (arg-name) body ...)
+                       (λ () input-stream))]))
+
 
 (module+ test
   (define s1 "aaaaa")
@@ -673,83 +679,21 @@ TODO
                                #:derivations '())
         (make-parse-failure "Didn't match.")))
   (define a1-parser-obj (parser "a" "" a1-parser-proc))
-  (define (Aa-parser-proc1 port)
+
+  (define (Aa-parser-proc port)
     (eprintf "At start of Aa-proc\n")
-    (for/stream
-     ([d/A (parse-*/prefix port (get-A-parser))])
+    (for/parse
+     ([d/A (parse* port (get-A-parser))])
      (eprintf "---- In Aa-proc loop 1\n")
-     (for/stream
-      ([d/a (parse-*/prefix port a1-parser-obj
-                            #:previous-derivation d/A)])
+     (for/parse
+      ([d/a (parse* port a1-parser-obj
+                    #:start d/A)])
       (eprintf "------ In Aa-proc loop 2\n")
       (make-parse-derivation (string-append (parse-derivation-result d/A)
                                             (parse-derivation-result d/a))
                              #:derivations (list d/A d/a)))))
-  (define (Aa-parser-proc2 port)
-    (eprintf "At start of Aa-proc VVVVV 2\n")
-    (stream-map
-     (λ (d/A)
-       (eprintf "---- In Aa-proc loop 1\n")
-       (eprintf "     with ~s\n" d/A)
-       (stream-map
-        (λ (d/a)
-          (eprintf "----- In Aa-proc loop 2\n")
-          (eprintf "     with ~s\n" d/a)
-          (define result
-            (make-parse-derivation (string-append (parse-derivation-result d/A)
-                                                  (parse-derivation-result d/a))
-                                   #:derivations (list d/A d/a)))
-          (eprintf "----- Aa-proc can return a derivation for ~s\n"
-                   (parse-derivation-result result))
-          result)
-        (parse-*/prefix port a1-parser-obj
-                        #:previous-derivation d/A)))
-     (parse-*/prefix port (get-A-parser))))
-  (define (Aa-parser-proc3 port)
-    (eprintf "at start of Aa-prop V 3\n")
-    (define r1 (parse-*/prefix port (get-A-parser)))
-    (eprintf "Aa-v3 hello 2\n")
-    (define r1-1 (stream-first r1))
-    (eprintf "Aa-v3 hello 3\n")
-    (define r2/r1-1 (parse-*/prefix port a1-parser-obj
-                                    #:previous-derivation r1-1))
-    (eprintf "Aa-v3 hello 4\n")
-    (define r2-1/r1-1 (stream-first r2/r1-1))
-    (eprintf "Aa-v3 hello 5\n")
-    (stream-cons (make-parse-derivation "aa-subst" #:derivations (list r1-1 r2-1/r1-1))
-                 (for/stream ([x1 (stream-rest r1)])
-                             (eprintf "Aa-v3 hello 6\n")
-                             (for/stream ([x2 (parse-*/prefix
-                                               port a1-parser-obj
-                                               #:previous-derivation x1)])
-                                         (eprintf "Aa-v3 hello 7\n")
-                                         (make-parse-derivation
-                                          (string-append
-                                           (parse-derivation-result x1)
-                                           (parse-derivation-result x2))
-                                          #:derivations (list x1 x2))))))
-  (define (Aa-parser-proc4 port)
-    (eprintf "At start of Aa-proc\n")
-    (let loop1 ([s1 (parse-*/prefix port (get-A-parser))])
-      (eprintf "---- In Aa-proc loop 1")
-      (if (stream-empty? s1)
-          s1
-          (stream-cons
-           (let ([v1 (stream-first s1)])
-             (let loop2 ([s2 (parse-*/prefix port a1-parser-obj
-                                             #:previous-derivation v1)])
-               (if (stream-empty? s2)
-                   s2
-                   (stream-cons
-                    (let ([v2 (stream-first s2)])
-                      (make-parse-derivation
-                       (string-append (parse-derivation-result v1)
-                                      (parse-derivation-result v2))
-                       #:derivations (list v1 v2)))
-                    (loop2 (stream-rest s2))))))
-           (loop1 (stream-rest s1))))))
 
-  (define Aa-parser-obj (parser "Aa" "" Aa-parser-proc4))
+  (define Aa-parser-obj (parser "Aa" "" Aa-parser-proc))
 
 
   (define A-parser (alt-parser "A"
