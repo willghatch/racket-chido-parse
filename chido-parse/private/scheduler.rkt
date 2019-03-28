@@ -71,17 +71,32 @@
                          (error 'chido-parse "TODO - for now you have to supply an end location explicitly when making a derivation")))
      (parse-derivation result parser start-position end-use derivation-list)]))
 
-(struct parser (name) #:transparent)
+(struct parser-struct (name) #:transparent)
 
-(struct proc-parser parser
+(struct proc-parser parser-struct
   ;; TODO - document from notes
   (prefix procedure)
   #:transparent)
 
-(struct alt-parser parser
+(struct alt-parser parser-struct
   ;; TODO - use a prefix trie for the parsers
   (parsers extra-arg-lists)
   #:transparent)
+
+(define (parser-name p)
+  (cond [(parser-struct? p) (parser-struct-name p)]
+        [(string? p) p]
+        [(regexp? p) (format "~s" p)]
+        [(procedure? p) (parser-name (p))]
+        [else (error 'parser-name "not a parser: ~s" p)]))
+
+(define (parser->usable p)
+  ;; TODO - I maybe should be caching these depending on how other caching is working...
+  (cond [(parser-struct? p) p]
+        [(string? p) (string->parser p)]
+        [(regexp? p) (regexp->parser p)]
+        [(procedure? p) (parser->usable (p))]
+        [else (error 'chido-parse "not a parser: ~s" p)]))
 
 (struct parse-stream
   (result next-job scheduler)
@@ -239,9 +254,7 @@ The job->result-cache is a map from parser-job structs -> parser-stream OR parse
 
 (define (job->parser-name job)
   (define p (and job (parser-job-parser job)))
-  (if (parser? p)
-      (parser-name p)
-      p))
+  (if (not p) p (parser-name p)))
 (define (job->display job)
   (cond [(not job) #f]
         [(cycle-breaker-job? job) "cycle-breaker"]
@@ -298,12 +311,18 @@ A weak hash port-broker->ephemeron with scheduler.
   (define (make-parser-job p extra-args start result-index)
     (parser-job p extra-args start result-index #f '() #f))
   (or existing
-      (let ([fresh-job (make-parser-job parser extra-args
-                                        start-position result-number)])
+      (let* ([usable (parser->usable parser)]
+             [fresh-job (make-parser-job usable extra-args
+                                         start-position result-number)])
         (set-scheduler-job-info->job-cache!
          s
          (hash-set+ (scheduler-job-info->job-cache s)
                     parser extra-args start-position result-number fresh-job))
+        (when (not (eq? parser usable))
+          (set-scheduler-job-info->job-cache!
+           s
+           (hash-set+ (scheduler-job-info->job-cache s)
+                      usable extra-args start-position result-number fresh-job)))
         fresh-job)))
 
 (define (get-next-job! s job)
