@@ -189,11 +189,12 @@ The job->result-cache is a map from parser-job structs -> parser-stream OR parse
         [(alt-parser? p) (alt-parser-name p)]
         [else (parser-name p)]))
 (define (job->display job)
-  (and job
-       (format "~a@~a_~a"
-               (job->parser-name job)
-               (parser-job-start-position job)
-               (parser-job-result-index job))))
+  (cond [(not job) #f]
+        [(cycle-breaker-job? job) "cycle-breaker"]
+        [else (format "~a@~a_~a"
+                      (job->parser-name job)
+                      (parser-job-start-position job)
+                      (parser-job-result-index job))]))
 
 
 
@@ -275,6 +276,7 @@ A weak hash port-broker->ephemeron with scheduler.
 
 (define (enter-the-parser/job scheduler job)
   (define ready-result (scheduler-get-result scheduler job))
+  (eprintf "\n\n Maybe recuring into scheduler for job: ~s\n" (job->display job))
   (or ready-result
       #|
       TODO - there is no scheduler done-k iff there is no chido-parse continuation prompt and no chido-parse mark.  In this case I want to capture the whole continuation as done-k and set it on the scheduler.  Otherwise I want to capture a composable continuation, set it as the continuation of whatever job was in the mark, and just re-run the scheduler (probably with new hints).
@@ -285,7 +287,7 @@ A weak hash port-broker->ephemeron with scheduler.
           ;; we schedule its dependency, and then we abort back to the
           ;; scheduler loop.
           (let ([parent-job (current-chido-parse-job)])
-            (eprintf "Recuring into scheduler: parent job ~a, recursive job ~a\n"
+            (eprintf "\n\nRecuring into scheduler: parent job ~a, recursive job ~a\n\n"
                      (job->display parent-job) (job->display job))
             (call-with-composable-continuation
              (λ (k)
@@ -444,6 +446,7 @@ A weak hash port-broker->ephemeron with scheduler.
        [(scheduled-continuation job k dependency (and ready? #t))
         (eprintf "going to run a scheduled continuation that's ready for job ~a\n"
                  (job->display job))
+        (eprintf "... using result from job ~a\n" (job->display dependency))
         (do-run! scheduler
                  (λ () (k (scheduler-get-result scheduler dependency)))
                  job)]
@@ -461,6 +464,8 @@ A weak hash port-broker->ephemeron with scheduler.
                  [dep-next-job (get-next-job! scheduler ready-job)])
              (define result-stream
                (parse-stream result-contents this-next-job scheduler))
+             (eprintf "about to cache for alt-job ~a with ~a\n"
+                      (job->display job) result-contents)
              (cache-result-and-ready-dependents! scheduler job result-stream)
              (set-alt-worker-successful?! k/worker #t)
              (set-alt-worker-job! k/worker this-next-job)
@@ -473,7 +478,9 @@ A weak hash port-broker->ephemeron with scheduler.
              (when (scheduler-get-result scheduler dep-next-job)
                (set-alt-worker-ready-jobs!
                 k/worker
-                (cons dep-next-job (alt-worker-ready-jobs k/worker)))))]
+                (cons dep-next-job (alt-worker-ready-jobs k/worker))))
+             (eprintf "alt-job jobs remaining: ~s\n"
+                      (map job->display (alt-worker-remaining-jobs k/worker))))]
           [else
            (error 'chido-parse
                   "Internal error - alt-worker got a non-stream result: ~s"
@@ -484,12 +491,18 @@ A weak hash port-broker->ephemeron with scheduler.
         ;; TODO - Right now a failure object is also an empty stream,
         ;;        so it can serve both cases.  Should this change?
         (define result (alt-worker->failure k/worker))
+        (eprintf "about to cache for FINISHED alt-job ~a with ~a\n"
+                 (job->display job) result)
         (cache-result-and-ready-dependents! scheduler job result)
         (run-scheduler scheduler)]
        [#f
         (cond [(stream? result-stream)
                (do-run! scheduler
-                        (λ () (stream-rest result-stream))
+                        (λ ()
+                          (eprintf "#############################################")
+                          (eprintf "about to pull on stream-rest for job: ~a\n"
+                                   (job->display job))
+                          (stream-rest result-stream))
                         job)]
               [(equal? 0 result-index)
                (match parsador
@@ -563,7 +576,9 @@ A weak hash port-broker->ephemeron with scheduler.
 
 (define (cache-result-and-ready-dependents!/alt-job scheduler job result)
   ;; This version only gets pre-sanitized results, and is straightforward.
-  (eprintf "caching result for alt-job: ~a\n" (job->display job))
+  (eprintf "caching result for alt-job: ~a, with ~s\n"
+           (job->display job)
+           (if (parse-stream? result) (stream-first result) result))
   (scheduler-set-result! scheduler job result)
   (ready-dependents! job))
 
@@ -599,12 +614,7 @@ A weak hash port-broker->ephemeron with scheduler.
      (define wrapped-result
        (parse-stream result next-job scheduler))
      (scheduler-set-result! scheduler job wrapped-result)
-     (ready-dependents! job)
-     ;; Because we got only a single result and not a stream,
-     ;; the next one is always empty.
-     (cache-result-and-ready-dependents! scheduler
-                                         next-job
-                                         empty-stream)]
+     (ready-dependents! job)]
     [else (cache-result-and-ready-dependents! scheduler
                                               job
                                               (raw-result->parse-derivation result))]))
@@ -628,6 +638,7 @@ A weak hash port-broker->ephemeron with scheduler.
                         (parse-derivation-end-position prev-d)
                         (let-values ([(line col pos) (port-next-location port)])
                           pos)))
+  ;(eprintf "Entering parse-*/prefix with parser ~s and using start pos ~a\n" (alt-parser-name parser) start-pos)
   (enter-the-parser pb parser extra-args start-pos))
 
 #|
@@ -665,11 +676,11 @@ TODO
   (define (Aa-parser-proc1 port)
     (eprintf "At start of Aa-proc\n")
     (for/stream
-     ([d/A (in-stream (parse-*/prefix port (get-A-parser)))])
+     ([d/A (parse-*/prefix port (get-A-parser))])
      (eprintf "---- In Aa-proc loop 1\n")
      (for/stream
-      ([d/a (in-stream (parse-*/prefix port a1-parser-obj
-                                       #:previous-derivation d/A))])
+      ([d/a (parse-*/prefix port a1-parser-obj
+                            #:previous-derivation d/A)])
       (eprintf "------ In Aa-proc loop 2\n")
       (make-parse-derivation (string-append (parse-derivation-result d/A)
                                             (parse-derivation-result d/a))
@@ -694,19 +705,64 @@ TODO
         (parse-*/prefix port a1-parser-obj
                         #:previous-derivation d/A)))
      (parse-*/prefix port (get-A-parser))))
+  (define (Aa-parser-proc3 port)
+    (eprintf "at start of Aa-prop V 3\n")
+    (define r1 (parse-*/prefix port (get-A-parser)))
+    (eprintf "Aa-v3 hello 2\n")
+    (define r1-1 (stream-first r1))
+    (eprintf "Aa-v3 hello 3\n")
+    (define r2/r1-1 (parse-*/prefix port a1-parser-obj
+                                    #:previous-derivation r1-1))
+    (eprintf "Aa-v3 hello 4\n")
+    (define r2-1/r1-1 (stream-first r2/r1-1))
+    (eprintf "Aa-v3 hello 5\n")
+    (stream-cons (make-parse-derivation "aa-subst" #:derivations (list r1-1 r2-1/r1-1))
+                 (for/stream ([x1 (stream-rest r1)])
+                             (eprintf "Aa-v3 hello 6\n")
+                             (for/stream ([x2 (parse-*/prefix
+                                               port a1-parser-obj
+                                               #:previous-derivation x1)])
+                                         (eprintf "Aa-v3 hello 7\n")
+                                         (make-parse-derivation
+                                          (string-append
+                                           (parse-derivation-result x1)
+                                           (parse-derivation-result x2))
+                                          #:derivations (list x1 x2))))))
+  (define (Aa-parser-proc4 port)
+    (eprintf "At start of Aa-proc\n")
+    (let loop1 ([s1 (parse-*/prefix port (get-A-parser))])
+      (eprintf "---- In Aa-proc loop 1")
+      (if (stream-empty? s1)
+          s1
+          (stream-cons
+           (let ([v1 (stream-first s1)])
+             (let loop2 ([s2 (parse-*/prefix port a1-parser-obj
+                                             #:previous-derivation v1)])
+               (if (stream-empty? s2)
+                   s2
+                   (stream-cons
+                    (let ([v2 (stream-first s2)])
+                      (make-parse-derivation
+                       (string-append (parse-derivation-result v1)
+                                      (parse-derivation-result v2))
+                       #:derivations (list v1 v2)))
+                    (loop2 (stream-rest s2))))))
+           (loop1 (stream-rest s1))))))
 
-  (define Aa-parser-obj (parser "Aa" "" Aa-parser-proc2))
+  (define Aa-parser-obj (parser "Aa" "" Aa-parser-proc4))
 
 
   (define A-parser (alt-parser "A"
                                (list
-                                a1-parser-obj
                                 Aa-parser-obj
+                                a1-parser-obj
                                 )
                                (list '() '())))
   (define (get-A-parser) A-parser)
 
   (define results1 (parse-*/prefix p1 A-parser))
+  (eprintf "Got results1\n")
+  (eprintf "r1: ~a\n" (parse-derivation-result (stream-first results1)))
 
   ;(printf "\n\n")
   ;(printf "r1-1: ~s\n" (stream-ref results1 0))
@@ -715,8 +771,17 @@ TODO
   ;(printf "\n\n")
   ;(printf "r1-2: ~a\n" (stream-ref results1 1))
 
-  (printf "\n\n")
-  (for ([r results1])
+  (eprintf "going to print all result now.......................................\n")
+  (let loop ([stream results1])
+    (when (not (stream-empty? stream))
+      (printf "result: ~s\n" (parse-derivation-result (stream-first stream)))
+      (loop (stream-rest stream))))
+  (eprintf "going to print all result now.......................................again\n")
+  (let loop ([stream results1])
+    (when (not (stream-empty? stream))
+      (printf "result: ~s\n" (parse-derivation-result (stream-first stream)))
+      (loop (stream-rest stream))))
+  #;(for ([r (in-stream results1)])
     (printf "result: ~s\n" (parse-derivation-result r)))
 
   ;(printf "\n\n")
