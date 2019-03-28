@@ -277,8 +277,6 @@ A weak hash port-broker->ephemeron with scheduler.
   (enter-the-parser/job s j))
 
 (define (enter-the-parser/job scheduler job)
-  (when (< 3 (parser-job-start-position job))
-    (error 'my-crash-point))
   (define ready-result (scheduler-get-result scheduler job))
   (eprintf "entering the parser with ~a!  Result ready? ~a\n"
            (job->display_ job) ready-result)
@@ -298,7 +296,7 @@ A weak hash port-broker->ephemeron with scheduler.
              (λ (k)
                (define sched-k (job->scheduled-continuation parent-job k job))
                (set-parser-job-continuation/worker! parent-job sched-k)
-               (push-parser-job-dependent! parent-job sched-k)
+               (push-parser-job-dependent! job sched-k)
                (push-hint! scheduler sched-k)
                ;; Launch the scheduler by being "done" with a flag value.
                ((scheduled-continuation-k (scheduler-done-k scheduler))
@@ -567,20 +565,8 @@ A weak hash port-broker->ephemeron with scheduler.
   (set-parser-job-dependents! job '()))
 
 (define (cache-result-and-ready-dependents! scheduler job result [stream-stack '()])
-  (eprintf "######################################################################\n")
   (eprintf "caching result ~s, for job ~a, with stream stack ~s\n"
            result (job->display_ job) stream-stack)
-  (eprintf "Here 1\n")
-  (stream? result)
-  (eprintf "Here 2\n")
-  ;(and (stream? result) (stream-empty? result))
-  (eprintf "parse-stream? ~a\n" (parse-stream? result))
-  (eprintf "parse-failure? ~a\n" (parse-failure? result))
-  (eprintf "stream? ~a\n" (stream? result))
-  #;(stream-empty? (for/stream ([x '()])
-                             'hi))
-  (eprintf "Here 3\n")
-  (eprintf "stream-empty? ~s\n\n" (and (stream? result) (stream-empty? result)))
   (if (alt-parser? (parser-job-parser job))
       (cache-result-and-ready-dependents!/alt-job scheduler job result)
       (cache-result-and-ready-dependents!/procedure-job
@@ -732,11 +718,17 @@ TODO
 
   (define results1 (parse-*/prefix p1 A-parser))
 
-  (printf "\n\n")
-  (printf "r1-1: ~s\n" (stream-ref results1 0))
-  (printf "r1-2: ~a\n" (stream-ref results1 1))
+  ;(printf "\n\n")
+  ;(printf "r1-1: ~s\n" (stream-ref results1 0))
+  ;(printf "r1-2: ~a\n" (stream-ref results1 1))
+  ;(printf "\n\n")
+  ;(printf "r1-2: ~a\n" (stream-ref results1 1))
 
-  #;(for ([r results1])
+  (for ([r results1])
+    (printf "result: ~a\n" r))
+
+  (printf "\n\n\n\n\n")
+  (for ([r results1])
     (printf "result: ~a\n" r))
 
   )
