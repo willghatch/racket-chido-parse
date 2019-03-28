@@ -685,43 +685,66 @@ TODO
                                #:derivations '())
         (make-parse-failure "Didn't match.")))
   (define a1-parser-obj (parser "a" "" a1-parser-proc))
-  (define (Aa-parser-proc port)
+  (define (Aa-parser-proc1 port)
     (eprintf "At start of Aa-proc\n")
     (for/stream
-     ([d/A1 (in-stream (parse-*/prefix port (get-A-parser)))])
+     ([d/A (in-stream (parse-*/prefix port (get-A-parser)))])
      (eprintf "---- In Aa-proc loop 1\n")
      (for/stream
       ([d/a (in-stream (parse-*/prefix port a1-parser-obj
-                                       #:previous-derivation d/A1))])
+                                       #:previous-derivation d/A))])
       (eprintf "------ In Aa-proc loop 2\n")
-      (make-parse-derivation (string-append (parse-derivation-result d/A1)
+      (make-parse-derivation (string-append (parse-derivation-result d/A)
                                             (parse-derivation-result d/a))
-                             #:derivations (list d/A1 d/a)))))
-  (define Aa-parser-obj (parser "Aa" "" Aa-parser-proc))
+                             #:derivations (list d/A d/a)))))
+  (define (Aa-parser-proc2 port)
+    (eprintf "At start of Aa-proc VVVVV 2\n")
+    (stream-map
+     (λ (d/A)
+       (eprintf "---- In Aa-proc loop 1\n")
+       (eprintf "     with ~s\n" d/A)
+       (stream-map
+        (λ (d/a)
+          (eprintf "----- In Aa-proc loop 2\n")
+          (eprintf "     with ~s\n" d/a)
+          (define result
+            (make-parse-derivation (string-append (parse-derivation-result d/A)
+                                                  (parse-derivation-result d/a))
+                                   #:derivations (list d/A d/a)))
+          (eprintf "----- Aa-proc can return a derivation for ~s\n"
+                   (parse-derivation-result result))
+          result)
+        (parse-*/prefix port a1-parser-obj
+                        #:previous-derivation d/A)))
+     (parse-*/prefix port (get-A-parser))))
+
+  (define Aa-parser-obj (parser "Aa" "" Aa-parser-proc2))
 
 
   (define A-parser (alt-parser "A"
                                (list
-                                a1-parser-obj
                                 Aa-parser-obj
+                                a1-parser-obj
                                 )
                                (list '() '())))
   (define (get-A-parser) A-parser)
 
   (define results1 (parse-*/prefix p1 A-parser))
 
-  ;(printf "\n\n")
-  ;(printf "r1-1: ~s\n" (stream-ref results1 0))
-  ;(printf "r1-2: ~a\n" (stream-ref results1 1))
+  (printf "\n\n")
+  (printf "r1-1: ~s\n" (stream-ref results1 0))
+  (printf "r1-2: ~s\n" (stream-ref results1 1))
+  (printf "r1-3: ~s\n" (stream-ref results1 2))
   ;(printf "\n\n")
   ;(printf "r1-2: ~a\n" (stream-ref results1 1))
 
-  (for ([r results1])
-    (printf "result: ~s\n" (parse-derivation-result r)))
+  ;(printf "\n\n")
+  ;(for ([r results1])
+  ;  (printf "result: ~s\n" (parse-derivation-result r)))
 
-  (printf "\n\n\n\n\n")
-  (for ([r results1])
-    (printf "result: ~s\n" (parse-derivation-result r)))
+  ;(printf "\n\n")
+  ;(for ([r results1])
+  ;  (printf "result: ~s\n" (parse-derivation-result r)))
 
   )
 
