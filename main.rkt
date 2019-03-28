@@ -235,8 +235,6 @@ A weak hash port-broker->ephemeron with scheduler.
 (define (scheduler-get-result s job)
   (match job
     [(cycle-breaker-job failure-job)
-     (eprintf "scheduler getting result for cycle-breaker for job: ~a\n"
-              (job->display failure-job))
      (make-cycle-failure failure-job)]
     [else (hash-ref (scheduler-job->result-cache s) job #f)]))
 
@@ -276,7 +274,6 @@ A weak hash port-broker->ephemeron with scheduler.
 
 (define (enter-the-parser/job scheduler job)
   (define ready-result (scheduler-get-result scheduler job))
-  (eprintf "\n\n Maybe recuring into scheduler for job: ~s\n" (job->display job))
   (or ready-result
       #|
       TODO - there is no scheduler done-k iff there is no chido-parse continuation prompt and no chido-parse mark.  In this case I want to capture the whole continuation as done-k and set it on the scheduler.  Otherwise I want to capture a composable continuation, set it as the continuation of whatever job was in the mark, and just re-run the scheduler (probably with new hints).
@@ -287,8 +284,6 @@ A weak hash port-broker->ephemeron with scheduler.
           ;; we schedule its dependency, and then we abort back to the
           ;; scheduler loop.
           (let ([parent-job (current-chido-parse-job)])
-            (eprintf "\n\nRecuring into scheduler: parent job ~a, recursive job ~a\n\n"
-                     (job->display parent-job) (job->display job))
             (call-with-composable-continuation
              (λ (k)
                (define sched-k (job->scheduled-continuation parent-job k job))
@@ -352,8 +347,6 @@ A weak hash port-broker->ephemeron with scheduler.
     (set-scheduler-hint-stack! s (list (scheduler-done-k s))))
   ;(define hint (car (scheduler-hint-stack s)))
   (define hint (scheduler-done-k s))
-  (eprintf "Running scheduler with goal ~a...\n"
-           (job->display (scheduled-continuation-dependency hint)))
   (match hint
     [(scheduled-continuation #f done-k dep #t)
      ;; done-k is ready.
@@ -424,8 +417,6 @@ A weak hash port-broker->ephemeron with scheduler.
       [(scheduled-continuation job k dependency ready?)
        (if (member dependency jobs)
            (begin
-             (eprintf "Breaking cycle where job ~a depends on job ~a\n"
-                      (job->display job) (job->display dependency))
              (set-scheduled-continuation-dependency!
               goal
               (cycle-breaker-job dependency))
@@ -444,9 +435,6 @@ A weak hash port-broker->ephemeron with scheduler.
                  result-index k/worker dependents result-stream)
      (match k/worker
        [(scheduled-continuation job k dependency (and ready? #t))
-        (eprintf "going to run a scheduled continuation that's ready for job ~a\n"
-                 (job->display job))
-        (eprintf "... using result from job ~a\n" (job->display dependency))
         (do-run! scheduler
                  (λ () (k (scheduler-get-result scheduler dependency)))
                  job)]
@@ -464,8 +452,6 @@ A weak hash port-broker->ephemeron with scheduler.
                  [dep-next-job (get-next-job! scheduler ready-job)])
              (define result-stream
                (parse-stream result-contents this-next-job scheduler))
-             (eprintf "about to cache for alt-job ~a with ~a\n"
-                      (job->display job) result-contents)
              (cache-result-and-ready-dependents! scheduler job result-stream)
              (set-alt-worker-successful?! k/worker #t)
              (set-alt-worker-job! k/worker this-next-job)
@@ -478,9 +464,7 @@ A weak hash port-broker->ephemeron with scheduler.
              (when (scheduler-get-result scheduler dep-next-job)
                (set-alt-worker-ready-jobs!
                 k/worker
-                (cons dep-next-job (alt-worker-ready-jobs k/worker))))
-             (eprintf "alt-job jobs remaining: ~s\n"
-                      (map job->display (alt-worker-remaining-jobs k/worker))))]
+                (cons dep-next-job (alt-worker-ready-jobs k/worker)))))]
           [else
            (error 'chido-parse
                   "Internal error - alt-worker got a non-stream result: ~s"
@@ -491,18 +475,12 @@ A weak hash port-broker->ephemeron with scheduler.
         ;; TODO - Right now a failure object is also an empty stream,
         ;;        so it can serve both cases.  Should this change?
         (define result (alt-worker->failure k/worker))
-        (eprintf "about to cache for FINISHED alt-job ~a with ~a\n"
-                 (job->display job) result)
         (cache-result-and-ready-dependents! scheduler job result)
         (run-scheduler scheduler)]
        [#f
         (cond [(stream? result-stream)
                (do-run! scheduler
-                        (λ ()
-                          (eprintf "#############################################")
-                          (eprintf "about to pull on stream-rest for job: ~a\n"
-                                   (job->display job))
-                          (stream-rest result-stream))
+                        (λ () (stream-rest result-stream))
                         job)]
               [(equal? 0 result-index)
                (match parsador
@@ -545,7 +523,6 @@ A weak hash port-broker->ephemeron with scheduler.
 (define (do-run! scheduler thunk job)
   (when (not job)
     (error 'chido-parse "Internal error - trying to recur with no job"))
-  (eprintf "running a thunk for job ~a\n" (job->display job))
   (define result
     (call-with-continuation-prompt
      (λ ()
@@ -557,14 +534,11 @@ A weak hash port-broker->ephemeron with scheduler.
   (run-scheduler scheduler))
 
 (define (ready-dependents! job)
-  (eprintf "Readying dependents of ~a...\n" (job->display job))
   (for ([dep (parser-job-dependents job)])
     (match dep
       [(alt-worker alt-job remaining-jobs ready-jobs failures successful?)
-       (eprintf "... readying ~a\n" (job->display alt-job))
        (set-alt-worker-ready-jobs! dep (cons job ready-jobs))]
       [(scheduled-continuation parent-job k dependency ready?)
-       (eprintf "... readying ~a\n" (job->display parent-job))
        (set-scheduled-continuation-ready?! dep #t)]))
   (set-parser-job-dependents! job '()))
 
@@ -576,9 +550,6 @@ A weak hash port-broker->ephemeron with scheduler.
 
 (define (cache-result-and-ready-dependents!/alt-job scheduler job result)
   ;; This version only gets pre-sanitized results, and is straightforward.
-  (eprintf "caching result for alt-job: ~a, with ~s\n"
-           (job->display job)
-           (if (parse-stream? result) (stream-first result) result))
   (scheduler-set-result! scheduler job result)
   (ready-dependents! job))
 
@@ -603,7 +574,6 @@ A weak hash port-broker->ephemeron with scheduler.
                            "parse returned empty stream" '()))])])]
     [(? stream?)
      ;; Recur with stream-first, setting the stream as the result-stream
-     (eprintf "in stream case of caching\n")
      (define next-job (get-next-job! scheduler job))
      (set-parser-job-result-stream! next-job result)
      (cache-result-and-ready-dependents!/procedure-job
@@ -638,7 +608,6 @@ A weak hash port-broker->ephemeron with scheduler.
                       [(? parse-derivation?) (parse-derivation-end-position start)]
                       [#f (let-values ([(line col pos) (port-next-location port)])
                             pos)]))
-  ;(eprintf "Entering parse-*/prefix with parser ~s and using start pos ~a\n" (alt-parser-name parser) start-pos)
   (enter-the-parser pb parser extra-args start-pos))
 
 #|
@@ -670,7 +639,6 @@ TODO
   (port-count-lines! p1)
 
   (define (a1-parser-proc port)
-    (eprintf "At start of a1-parser-proc\n")
     (define-values (line col pos) (port-next-location port))
     (define c (read-char port))
     (if (equal? c #\a)
@@ -681,14 +649,11 @@ TODO
   (define a1-parser-obj (parser "a" "" a1-parser-proc))
 
   (define (Aa-parser-proc port)
-    (eprintf "At start of Aa-proc\n")
     (for/parse
      ([d/A (parse* port (get-A-parser))])
-     (eprintf "---- In Aa-proc loop 1\n")
      (for/parse
       ([d/a (parse* port a1-parser-obj
                     #:start d/A)])
-      (eprintf "------ In Aa-proc loop 2\n")
       (make-parse-derivation (string-append (parse-derivation-result d/A)
                                             (parse-derivation-result d/a))
                              #:derivations (list d/A d/a)))))
@@ -704,9 +669,7 @@ TODO
                                (list '() '())))
   (define (get-A-parser) A-parser)
 
-  (define results1 (parse-*/prefix p1 A-parser))
-  (eprintf "Got results1\n")
-  (eprintf "r1: ~a\n" (parse-derivation-result (stream-first results1)))
+  (define results1 (parse* p1 A-parser))
 
   ;(printf "\n\n")
   ;(printf "r1-1: ~s\n" (stream-ref results1 0))
@@ -720,17 +683,6 @@ TODO
     (when (not (stream-empty? stream))
       (printf "result: ~s\n" (parse-derivation-result (stream-first stream)))
       (loop (stream-rest stream))))
-  (eprintf "going to print all result now.......................................again\n")
-  (let loop ([stream results1])
-    (when (not (stream-empty? stream))
-      (printf "result: ~s\n" (parse-derivation-result (stream-first stream)))
-      (loop (stream-rest stream))))
-  #;(for ([r (in-stream results1)])
-    (printf "result: ~s\n" (parse-derivation-result r)))
-
-  ;(printf "\n\n")
-  ;(for ([r results1])
-  ;  (printf "result: ~s\n" (parse-derivation-result r)))
 
   )
 
