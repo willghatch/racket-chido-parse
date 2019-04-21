@@ -56,6 +56,8 @@
   (result parser start-position end-position derivation-list)
   #:transparent)
 
+(define current-chido-parse-port (make-parameter #f))
+
 (define (make-parse-derivation result
                                #:end [end #f]
                                #:derivations [derivation-list '()])
@@ -68,7 +70,13 @@
                               (apply max
                                      (map parse-derivation-end-position
                                           derivation-list)))
-                         (error 'chido-parse "TODO - for now you have to supply an end location explicitly when making a derivation")))
+                         (and (current-chido-parse-port)
+                              (let-values ([(line col pos)
+                                            (port-next-location
+                                             (current-chido-parse-port))])
+                                pos))
+                         (error 'make-parse-derivation
+                                "Couldn't infer end location and none provided.")))
      (parse-derivation result parser start-position end-use derivation-list)]))
 
 (struct parser-struct (name) #:transparent)
@@ -564,11 +572,13 @@ A weak hash port-broker->ephemeron with scheduler.
                   ;; TODO - check prefix.  All parsers that fail the prefix check can be logged as failures immediately, then the remaining parsers can be prioritized by length of prefix.
                   ;; TODO - this interface should maybe be different...
                   (do-run! scheduler
-                           (λ () (let ([result (apply procedure port extra-args)])
-                                   (if (and (stream? result)
-                                            (not (flattened-stream? result)))
-                                       (stream-flatten result)
-                                       result)))
+                           (λ ()
+                             (parameterize ([current-chido-parse-port port])
+                               (let ([result (apply procedure port extra-args)])
+                                 (if (and (stream? result)
+                                          (not (flattened-stream? result)))
+                                     (stream-flatten result)
+                                     result))))
                            job)]
                  [(alt-parser name parsers extra-arg-lists)
                   (define (mk-dep parsador extra-args)
@@ -665,7 +675,7 @@ A weak hash port-broker->ephemeron with scheduler.
 (define (raw-result->parse-derivation result)
   (if (parse-derivation? result)
       result
-      (error 'TODO "auto-transformation to proper parse result not yet implemented")))
+      (error 'TODO "auto-transformation to proper parse result not yet implemented.  Got ~a\n" result)))
 
 
 
