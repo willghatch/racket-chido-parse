@@ -325,6 +325,10 @@
            (parse* (open-input-string s-exp-str-1) basic-s-exp)))
      (list (read (open-input-string s-exp-str-1))))
 
+  #|
+  S-expression tests:
+  (()()()()()) -- this should work -- no spaces are needed between expressions in lists or in the top-level, except to denote boundaries between symbols and numbers.
+  |#
 
 
 
