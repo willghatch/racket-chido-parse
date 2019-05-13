@@ -14,6 +14,13 @@
   ))
 
 
+#|
+Parameters and streams don't work nicely together.
+Not only do I need a special set of chido-parse-parameters to be captured by the
+parsing system to influence caching and re-parameterize for recursive parses,
+but I need to capture them and re-parameterize them with result streams too, or
+later elements in the streams will get different parameterizations.
+|#
 (define-syntax (parse-stream-cons stx)
   (syntax-parse stx
     [(_ head:expr tail:expr)
