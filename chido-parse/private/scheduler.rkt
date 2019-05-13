@@ -29,6 +29,7 @@
  "port-broker.rkt"
  "util.rkt"
  "stream-flatten.rkt"
+ "parameters.rkt"
  racket/stream
  racket/match
  racket/struct
@@ -41,7 +42,7 @@
 (module+ test
   (require
    rackunit
-   "forparse.rkt"
+   "parse-stream.rkt"
    ))
 
 ;; TODO - explanation from notes about the big picture of how this parsing library works
@@ -64,7 +65,7 @@
                                #:derivations [derivation-list '()])
   (define job (current-chido-parse-job))
   (match job
-    [(parser-job parser extra-arguments start-position result-index
+    [(parser-job parser extra-arguments cp-params start-position result-index
                  continuation/worker dependents result-stream)
      (define end-use (or end
                          (and (not (null? derivation-list))
@@ -141,14 +142,14 @@
 (define (make-parse-failure message #:position [pos #f] #:failures [failures '()])
   (define job (current-chido-parse-job))
   (match job
-    [(parser-job parser extra-arguments start-position result-index
+    [(parser-job parser extra-arguments cp-params start-position result-index
                  continuation/worker dependents result-stream)
      (parse-failure (parser-name parser) start-position (or pos start-position)
                     message failures)]))
 
 (define (make-cycle-failure job)
   (match job
-    [(parser-job parser extra-arguments start-position result-index
+    [(parser-job parser extra-arguments cp-params start-position result-index
                  k/worker dependents result-stream)
      (parse-failure (parser-name parser)
                     start-position
@@ -159,7 +160,7 @@
 (define (exn->failure e job)
   (let ([message (format "Exception while parsing: ~a\n" (exn->string e))])
     (match job
-      [(parser-job parser extra-arguments start-position
+      [(parser-job parser extra-arguments cp-params start-position
                    result-index continuation/worker dependents result-stream)
        (parse-failure (parser-name parser)
                       start-position start-position message '())])))
@@ -168,7 +169,7 @@
   (match aw
     [(alt-worker job remaining-jobs ready-jobs failures successful?)
      (match job
-       [(parser-job parser extra-arguments start-position result-index
+       [(parser-job parser extra-arguments cp-params start-position result-index
                     k/worker dependents result-stream)
         (match parser
           [(alt-parser name parsers extra-arg-lists)
@@ -239,6 +240,8 @@ The job->result-cache is a map from parser-job structs -> parser-stream OR parse
    ;; parser is either a parser struct or an alt-parser struct
    parser
    extra-arguments
+   ;; chido-parse-parameters
+   cp-params
    start-position
    result-index
    [continuation/worker #:mutable]
@@ -323,30 +326,31 @@ A weak hash port-broker->ephemeron with scheduler.
      (make-cycle-failure failure-job)]
     [else (hash-ref (scheduler-job->result-cache s) job #f)]))
 
-(define (get-job! s parser extra-args start-position result-number)
+(define (get-job! s parser extra-args cp-params start-position result-number)
   (define existing (hash-ref+ #f (scheduler-job-info->job-cache s)
-                              parser extra-args start-position result-number))
-  (define (make-parser-job p extra-args start result-index)
-    (parser-job p extra-args start result-index #f '() #f))
+                              parser extra-args cp-params start-position result-number))
+  (define (make-parser-job p extra-args cp-params start result-index)
+    (parser-job p extra-args cp-params start result-index #f '() #f))
   (or existing
       (let* ([usable (parser->usable parser)]
-             [fresh-job (make-parser-job usable extra-args
+             [fresh-job (make-parser-job usable extra-args cp-params
                                          start-position result-number)])
         (set-scheduler-job-info->job-cache!
          s
          (hash-set+ (scheduler-job-info->job-cache s)
-                    parser extra-args start-position result-number fresh-job))
+                    parser extra-args cp-params start-position result-number fresh-job))
         (when (not (eq? parser usable))
           (set-scheduler-job-info->job-cache!
            s
            (hash-set+ (scheduler-job-info->job-cache s)
-                      usable extra-args start-position result-number fresh-job)))
+                      usable extra-args cp-params start-position result-number fresh-job)))
         fresh-job)))
 
 (define (get-next-job! s job)
   (match job
-    [(parser-job parser extra-args start-position result-index k/w deps result-stream)
-     (get-job! s parser extra-args start-position (add1 result-index))]))
+    [(parser-job parser extra-args cp-params start-position
+                 result-index k/w deps result-stream)
+     (get-job! s parser extra-args cp-params start-position (add1 result-index))]))
 
 
 
@@ -360,7 +364,8 @@ A weak hash port-broker->ephemeron with scheduler.
 
 (define (enter-the-parser port-broker parser extra-args start-position)
   (define s (port-broker-scheduler port-broker))
-  (define j (get-job! s parser extra-args start-position 0))
+  (define cp-params (current-chido-parse-parameters))
+  (define j (get-job! s parser extra-args cp-params start-position 0))
   (enter-the-parser/job s j))
 
 (define (enter-the-parser/job scheduler job)
@@ -522,7 +527,7 @@ A weak hash port-broker->ephemeron with scheduler.
            "internal error - run-actionable-job got a job that was already done: ~a"
            (job->display job)))
   (match job
-    [(parser-job parsador extra-args start-position
+    [(parser-job parsador extra-args cp-params start-position
                  result-index k/worker dependents result-stream)
      (match k/worker
        [(scheduled-continuation job k dependency (and ready? #t))
@@ -583,7 +588,11 @@ A weak hash port-broker->ephemeron with scheduler.
                   ;; TODO - this interface should maybe be different...
                   (do-run! scheduler
                            (λ ()
-                             (parameterize ([current-chido-parse-port port])
+                             ;; TODO - current-chido-parse-port should be a chido-parse-parameter,
+                             ;;        But it should not affect caching...
+                             (parameterize ([current-chido-parse-port port]
+                                            [current-chido-parse-parameters
+                                             cp-params])
                                (let ([result (apply procedure port extra-args)])
                                  (if (and (stream? result)
                                           (not (flattened-stream? result)))
@@ -592,7 +601,7 @@ A weak hash port-broker->ephemeron with scheduler.
                            job)]
                  [(alt-parser name parsers extra-arg-lists)
                   (define (mk-dep parsador extra-args)
-                    (get-job! scheduler parsador extra-args start-position 0))
+                    (get-job! scheduler parsador extra-args cp-params start-position 0))
                   (define worker
                     (alt-worker job (map mk-dep parsers extra-arg-lists) '() '() #f))
                   (for ([dep (alt-worker-remaining-jobs worker)])
@@ -619,6 +628,8 @@ A weak hash port-broker->ephemeron with scheduler.
   (define result
     (call-with-continuation-prompt
      (λ ()
+       ;; TODO - this error handling should probably be done where thunk is created.
+       ;;        Here it will grow continuations each time they get re-scheduled...
        (with-handlers ([(λ (e) #t) (λ (e) (exn->failure e job))])
          (parameterize ([current-chido-parse-job job])
            (thunk))))
@@ -655,7 +666,7 @@ A weak hash port-broker->ephemeron with scheduler.
     [(? (λ (x) (and (stream? x) (stream-empty? x))))
      ;; Turn it into a parse failure and recur.
      (match job
-       [(parser-job parse extra-arguments start-position
+       [(parser-job parse extra-arguments cp-params start-position
                     result-index continuation/worker
                     dependents result-stream)
         (match parse

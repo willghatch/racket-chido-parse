@@ -2,7 +2,7 @@
 
 (require
  "scheduler.rkt"
- "forparse.rkt"
+ "parse-stream.rkt"
  racket/string
  racket/stream
  )
@@ -104,10 +104,10 @@
       (define len (length derivations))
       (if (< len min)
           (get-more-streams derivations)
-          (stream-cons (combiner (reverse derivations))
-                       (if (>= len max)
-                           empty-stream
-                           (get-more-streams derivations)))))
+          (parse-stream-cons (combiner (reverse derivations))
+                             (if (>= len max)
+                                 empty-stream
+                                 (get-more-streams derivations)))))
     (rec '()))
   (proc-parser use-name "" proc))
 
@@ -168,10 +168,10 @@
                                  #:result (λ (r1 r2) r2)))
   (define between+main+ (kleene-plus between+main #:result (λ(x)x)))
   (define (proc port)
-    (stream-cons
+    (parse-stream-cons
      (combiner '())
      (for/parse ([d (parse* port main-parser)])
-                (stream-cons
+                (parse-stream-cons
                  (combiner (list d))
                  (for/parse ([d2 (parse* port between+main+
                                          #:start d)])
