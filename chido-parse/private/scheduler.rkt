@@ -9,6 +9,9 @@
  parse-derivation-end-position
  parse-derivation-derivation-list
 
+ ;; this is not for the public interface...
+ current-chido-parse-derivation-implicit-end
+
  (struct-out alt-parser)
  (struct-out proc-parser)
  ;prop:custom-parser
@@ -58,7 +61,7 @@
   (result parser start-position end-position derivation-list)
   #:transparent)
 
-(define current-chido-parse-port (make-parameter #f))
+(define current-chido-parse-derivation-implicit-end (make-parameter #f))
 
 (define (make-parse-derivation result
                                #:end [end #f]
@@ -72,11 +75,7 @@
                               (apply max
                                      (map parse-derivation-end-position
                                           derivation-list)))
-                         (and (current-chido-parse-port)
-                              (let-values ([(line col pos)
-                                            (port-next-location
-                                             (current-chido-parse-port))])
-                                pos))
+                         (current-chido-parse-derivation-implicit-end)
                          (error 'make-parse-derivation
                                 "Couldn't infer end location and none provided.")))
      (parse-derivation result parser start-position end-use derivation-list)]))
@@ -588,10 +587,7 @@ A weak hash port-broker->ephemeron with scheduler.
                   ;; TODO - this interface should maybe be different...
                   (do-run! scheduler
                            (λ ()
-                             ;; TODO - current-chido-parse-port should be a chido-parse-parameter,
-                             ;;        But it should not affect caching...
-                             (parameterize ([current-chido-parse-port port]
-                                            [current-chido-parse-parameters
+                             (parameterize ([current-chido-parse-parameters
                                              cp-params])
                                (let ([result (apply procedure port extra-args)])
                                  (if (and (stream? result)

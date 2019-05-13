@@ -5,7 +5,10 @@
  "parse-stream.rkt"
  racket/string
  racket/stream
- )
+ (for-syntax
+  racket/base
+  syntax/parse
+  ))
 
 (module+ test
   (require
@@ -14,6 +17,17 @@
     racket/base
     syntax/parse
     )))
+
+(define-syntax (/end stx)
+  ;; quick hack to get end positions working with empty derivation lists
+  (syntax-parse stx
+    [(_ n body)
+     #'(parameterize ([current-chido-parse-derivation-implicit-end n])
+         body)]))
+
+(define (port->pos port)
+  (define-values (line col pos) (port-next-location port))
+  pos)
 
 (define (sequence-2 l r
                     #:name [name #f]
@@ -66,7 +80,7 @@
                        "must provide a result or derivation transformer")]))
   (define (proc port)
     (define (rec parsers derivations)
-      (cond [(null? parsers) (apply combiner (reverse derivations))]
+      (cond [(null? parsers) (/end (port->pos port) (apply combiner (reverse derivations)))]
             [else (for/parse ([result (parse* port (car parsers)
                                               #:start (if (null? derivations)
                                                           #f
@@ -104,7 +118,8 @@
       (define len (length derivations))
       (if (< len min)
           (get-more-streams derivations)
-          (parse-stream-cons (combiner (reverse derivations))
+          (parse-stream-cons (/end (port->pos port)
+                                   (combiner (reverse derivations)))
                              (if (>= len max)
                                  empty-stream
                                  (get-more-streams derivations)))))
@@ -143,7 +158,7 @@
 
 (define (epsilon-parser #:name [name "epsilon"]
                         #:result-value [result #f])
-  (proc-parser name "" (λ (p) (make-parse-derivation result))))
+  (proc-parser name "" (λ (p) (make-parse-derivation result #:end (port->pos p)))))
 
 
 (define (between* main-parser between-parser
@@ -169,7 +184,7 @@
   (define between+main+ (kleene-plus between+main #:result (λ(x)x)))
   (define (proc port)
     (parse-stream-cons
-     (combiner '())
+     (/end (port->pos port) (combiner '()))
      (for/parse ([d (parse* port main-parser)])
                 (parse-stream-cons
                  (combiner (list d))
@@ -256,7 +271,7 @@
       (or (and (member c '(#\newline #\space #\return #\tab))
                (begin
                  (read-char port)
-                 (make-parse-derivation c)))
+                 (make-parse-derivation c #:end (port->pos port))))
           (make-parse-failure "not whitespace"))))
   (define whitespace-char-parser
     (proc-parser "whitespace-char" "" whitespace-char-func))
@@ -267,7 +282,7 @@
       (or (and (not (member c '(#\newline #\space #\return #\tab #\( #\))))
                (begin
                  (read-char port)
-                 (make-parse-derivation c)))
+                 (make-parse-derivation c #:end (port->pos port))))
           (make-parse-failure "not symbol char"))))
 
   (define symbol-char-parser (proc-parser "symbol-char" "" symbol-char-func))
@@ -308,7 +323,6 @@
           (stream->list
            (parse* (open-input-string "test") basic-s-exp)))
      (list 'test))
-
 
   (define s-exp-str-1 "(test test (test test) test (hello foo (bar aoeu)
                                    thaoneuth)
