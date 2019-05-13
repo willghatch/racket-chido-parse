@@ -11,6 +11,7 @@
 
  (struct-out alt-parser)
  (struct-out proc-parser)
+ ;prop:custom-parser
  parser-name
 
  (struct-out parse-failure)
@@ -91,8 +92,16 @@
   (parsers extra-arg-lists)
   #:transparent)
 
+
+(define-values (prop:custom-parser custom-parser? custom-parser-ref)
+  ;; TODO - document -- the property should be a function that accepts a `self` argument and returns a parser.
+  ;; TODO - Is this really a good idea?  Perhaps I really just want to have objects that users can convert into parsing procedures, eg. readtable-like-object with ->single-read, ->multi-read functions.
+  (make-struct-type-property 'custom-parser))
+
+
 (define (parser-name p)
   (cond [(parser-struct? p) (parser-struct-name p)]
+        [(custom-parser? p) (parser-name (parser->usable p))]
         [(string? p) p]
         [(regexp? p) (format "~s" p)]
         [(procedure? p) (parser-name (p))]
@@ -101,6 +110,7 @@
 (define (parser->usable p)
   ;; TODO - I maybe should be caching these depending on how other caching is working...
   (cond [(parser-struct? p) p]
+        [(custom-parser? p) (parser->usable ((custom-parser-ref p) p))]
         [(string? p) (string->parser p)]
         [(regexp? p) (regexp->parser p)]
         [(procedure? p) (parser->usable (p))]
