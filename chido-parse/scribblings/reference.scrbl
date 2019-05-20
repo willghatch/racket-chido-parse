@@ -68,6 +68,10 @@ Terminating and nonterminating parsers can follow each other with no layout in b
 
 Note that when using a chido-readtable as a parser directly, it parses only ONE form, equivalent to using @racket[chido-readtable->read1-parser].  When you want to parse a sequence using chido-readtables, instead of using a kleene star combinator, you should use @racket[chido-readtable->read*-parser].
 
+Ambiguous results are possible from parsing with a chido-readtable when terminating/nonterminating parsers themselves return ambiguous results or when multiple terminating/nonterminating parsers are successful at a given position.
+If another parser is successful, the symbol and number parsers are not tried.
+If the symbol and number parsers are used, only one result is returned (a symbol or a number), never an ambiguous result.
+
 @defthing[chido-readtable->read1-parser]{
 Turns a @racket[chido-readtable] into an opaque parser that parses a single form (with leading whitespace allowed).
 The parser is equivalent to using the readtable directly as a parser.
@@ -95,6 +99,7 @@ TODO -- this should be a readtable analogous to Racket's default readtable.
 @defthing[extend-chido-readtable]{
 TODO --
 (extend-chido-readtable crt 'terminating my-foo-parser)
+With optional argument #:replace-prefix.
 }
 
 TODO - other APIs?
