@@ -28,6 +28,12 @@ alt-parser
 parser-name
 TODO - other parser inspection stuff?
 
+chido-parse-parameter
+chido-parse-parameter?
+chido-parse-parameterize
+
+parse-stream-cons
+for/parse
 
 TODO
 
