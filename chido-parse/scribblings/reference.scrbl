@@ -96,14 +96,44 @@ TODO
 TODO -- this should be a readtable analogous to Racket's default readtable.
 }
 
+@defthing[clear-chido-readtable]{
+(clear-chido-readtable crt prefix-or-parser)
+
+Removes all parsers (terminating, nonterminating, or layout) with the prefix (or the same prefix as) prefix-or-parser.
+}
+
 @defthing[extend-chido-readtable]{
 TODO --
 (extend-chido-readtable crt 'terminating my-foo-parser)
-With optional argument #:replace-prefix.
+
+If optional argument #:replace-prefix is true, any parsers with the same prefix as the new parser are removed from the readtable.  (IE it runs clear-chido-readtable before extending.)
 }
+
+@defthing[set-chido-readtable-complex-number-support]{
+Set whether the built-in number parser accepts complex numbers (as default Racket allows).
+}
+
+@defthing[set-chido-readtable-symbol-result-transformer]{
+Parse results from the built-in symbol and number parsers are syntax objects by default.
+By setting a transformer, you can change the result (eg, perhaps you want datums instead of syntax objects).
+
+The default transformer is the identify function.
+}
+
+@defproc[(set-chido-readtable-symbol-literal-delimiters
+[crt chido-readtable?]
+[l (or/c string? false/c)]
+[r (or/c string? false/c)])
+chido-readtable?]{
+Between these delimiters, symbols characters are literal and layout/terminating parsers are ignored.
+By default both delimiters are pipe characters.
+If #f is given for the delimiters then no delimiters cause this behavior.
+}
+
+TODO - should I have a procedure for setting or disabling the character that acts like backslash for symbols?
 
 TODO - other APIs?
 
 @section{BNF DSL}
 
-TODO
+TODO -- I'm not entirely sure what I want here.  Maybe I just want a BNF-like macro among the combinators that lets me specify alt parsers with various built-in filters (precidence, associativity, follow).  Something similar to what other GLL/GLR parser provide, like spoofax's parser and Iguana.  Or maybe I want custom syntax as well -- for a #lang chido-bnf or a chido-bnf macro that parses a string at expansion time.  Either way, I would want the results to be convineintly extensible as well.  (Maybe that means rather than just defining a parser, this will need to define parameters for the parsers of the several nonterminal alternatives that can be extended.)
