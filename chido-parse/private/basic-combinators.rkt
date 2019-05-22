@@ -219,11 +219,10 @@
   (define ap (string->parser "a"))
   (define bp "b")
   (define cp "c")
-  (define (Bp) (alt-parser "B"
-                           (list bp
-                                 (sequence #:name "Bb" #:result string-append
-                                           Bp bp))
-                           (list '() '())))
+  (define (Bp) (make-alt-parser "B"
+                                (list bp
+                                      (sequence #:name "Bb" #:result string-append
+                                                Bp bp))))
   (define aBcp (sequence #:name "aBc" #:result string-append
                          ap Bp cp))
 
@@ -310,10 +309,9 @@
                                   ")"))
 
   (define (basic-s-exp)
-    (alt-parser "s-exp"
-                (list symbol-parser
-                      list-parser)
-                (list '() '())))
+    (make-alt-parser "s-exp"
+                     (list symbol-parser
+                           list-parser)))
 
   (c check-equal?
      (map parse-derivation-result

@@ -132,8 +132,8 @@
      rt
      (parser-list->trie (readtable-layout-parsers rt)))
     (set-readtable-layout*-parser!
-     rt (kleene-star (alt-parser (readtable-layout-parsers rt)
-                                 (map (λ (x) '()) (readtable-layout-parsers rt)))
+     rt (kleene-star (make-alt-parser "readtable-layout*"
+                                      (readtable-layout-parsers rt))
                      #:result (λ (elems) #f)))
     (set-readtable-read1-parser!
      rt
@@ -146,8 +146,8 @@
                          (readtable-nonterminating-parsers rt)
                          (readtable-soft-terminating-parsers rt)
                          (readtable-terminating-parsers rt)))
-        (define alt (alt-parser parsers
-                                (map (λ () '()) parsers)))
+        (define alt (make-alt-parser "readtable-read1/alt"
+                                     parsers))
         (define parsers-result (parse* port alt))
         (if (parse-failure? parsers-result)
             (parse* port parse-symbol/number rt)
@@ -167,8 +167,9 @@
                        #:result (λ (vals layout) vals))]
            [no-content-parser
             (sequence (readtable-layout*-parser rt) #:result (λ (layout) '()))])
-       (alt-parser (list with-content-parser no-content-parser) '(()()))))
-
+       ;; TODO - better name!
+       (make-alt-parser "readtable-read*"
+                        (list with-content-parser no-content-parser))))
     (set-readtable-flush-state?! #f)))
 
 

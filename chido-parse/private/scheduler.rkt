@@ -13,6 +13,7 @@
  current-chido-parse-derivation-implicit-end
 
  (struct-out alt-parser)
+ make-alt-parser
  (struct-out proc-parser)
  ;prop:custom-parser
  parser-name
@@ -91,6 +92,9 @@
   ;; TODO - use a prefix trie for the parsers
   (parsers extra-arg-lists)
   #:transparent)
+
+(define (make-alt-parser name parsers [extra-arg-lists #f])
+  (alt-parser name parsers (or extra-arg-lists (map (λ (p) '()) parsers))))
 
 
 (define-values (prop:custom-parser custom-parser? custom-parser-ref)
@@ -747,36 +751,18 @@ TODO
   (define Aa-parser-obj (proc-parser "Aa" "" Aa-parser-proc))
 
 
-  (define A-parser (alt-parser "A"
-                               (list
-                                Aa-parser-obj
-                                a1-parser-obj
-                                )
-                               (list '() '())))
+  (define A-parser (make-alt-parser "A"
+                                    (list
+                                     Aa-parser-obj
+                                     a1-parser-obj)))
   (define (get-A-parser) A-parser)
 
   (define results1 (parse* p1 A-parser))
-
-  ;(printf "\n\n")
-  ;(printf "r1-1: ~s\n" (stream-ref results1 0))
-  ;(printf "r1-2: ~s\n" (stream-ref results1 1))
-  ;(printf "r1-3: ~s\n" (stream-ref results1 2))
-  ;(printf "\n\n")
-  ;(printf "r1-2: ~a\n" (stream-ref results1 1))
-
-  (eprintf "going to print all result now.......................................\n")
-  (let loop ([stream results1])
-    (when (not (stream-empty? stream))
-      (printf "result: ~s\n" (parse-derivation-result (stream-first stream)))
-      (loop (stream-rest stream))))
+  (check-equal? (map parse-derivation-result (stream->list results1))
+                (list "a" "aa" "aaa" "aaaa" "aaaaa"))
 
   )
 
-
-;; Temporarily
-(module+ main
-  (require (submod ".." test))
-  )
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
