@@ -99,15 +99,18 @@
                                     (parser-name parser)
                                     min max)))
   (define combiner
-    (cond [(or (and derive make-result)
-               (and (not derive) (not make-result)))
+    (cond [(and derive make-result)
            (error 'repetition
                   "must provide either result or derive function, (and not both)")]
           [derive derive]
           [make-result (λ (derivations)
                          (make-parse-derivation
                           (make-result (map parse-derivation-result derivations))
-                          #:derivations derivations))]))
+                          #:derivations derivations))]
+          [else (λ (derivations)
+                  (make-parse-derivation
+                   (map parse-derivation-result derivations)
+                   #:derivations derivations))]))
   (define (proc port)
     (define (get-more-streams derivations)
       (for/parse ([derivation (parse* port parser #:start (if (null? derivations)

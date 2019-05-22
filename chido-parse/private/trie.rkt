@@ -9,6 +9,7 @@
  trie-step
  trie-walk
  trie-leaf?
+ trie-bare?
  trie-empty?
  )
 
@@ -28,6 +29,10 @@
 
 (define (trie-empty? x)
   (and (trie-leaf? x)
+       (null? (trie-values x))))
+
+(define (trie-bare? x)
+  (and (trie? x)
        (null? (trie-values x))))
 
 (define empty-trie (trie '() (hash)))

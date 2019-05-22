@@ -52,19 +52,23 @@ Chido-readtables have an interface similar to Rackets @tech{readtable}s.
 
 Chido-readtables are a fancy kind of alternative parser.
 Among their alternatives, chido-readtables have built-in symbol and number parsers whose behavior is modified by the other parsers.
-Chido-readtables are extended with parsers as either @racket['terminating], @racket['nonterminating], or @racket['layout] parsers.
+Chido-readtables are extended with parsers as either @racket['terminating], @racket['soft-terminating], @racket['nonterminating], or @racket['layout] parsers.
 
-Layout parsers are whitespace parsers that delimit symbols and numbers.
-Results from layout parsers are generally ignored.
-Two symbols or numbers in sequence require a layout parser between them.
+When the built-in symbol (or number) parser is used by a chido-readtable, the symbol continues until reaching the prefix of a @racket['terminating] parser or a successful parse from a @racket['soft-terminating] or @racket['layout] parser.
+
+Layout parsers are whitespace parsers that delimit symbols and numbers, and are generally allowed between other parsers inside lists.
+Results from layout parsers are ignored when creating parse results from readtable parsers, only the fact that they succeed at parsing is relevant.
 
 Terminating parsers are parsing alternatives that also delimit symbols and numbers (IE they terminate the built-in symbol/number parsing).
 In other words no space is necessary between a symbol or number and a following terminating parser.
+@racket['soft-terminating] parsers terminate a symbol only of they parse successfully.
+Hard terminating (@racket['terminating]) parsers terminate a symbol when their prefix matches, whether or not they parse successfully.
+Therefore the prefixes of hard terminating parsers are disallowed within symbols.
 
 Nonterminating parsers are alternatives that do not delimit a symbol or number.
-A space is required between a symbol or number and a following nonterminating parser.
+Layout (whitespace) is required between a symbol or number and a following nonterminating parser.
 
-Terminating and nonterminating parsers can follow each other with no layout in between.
+Terminating and nonterminating parsers can follow each other with no layout in between, though layout is allowed between them.
 
 Note that when using a chido-readtable as a parser directly, it parses only ONE form, equivalent to using @racket[chido-readtable->read1-parser].  When you want to parse a sequence using chido-readtables, instead of using a kleene star combinator, you should use @racket[chido-readtable->read*-parser].
 
@@ -73,7 +77,7 @@ If another parser is successful, the symbol and number parsers are not tried.
 If the symbol and number parsers are used, only one result is returned (a symbol or a number), never an ambiguous result.
 
 @defthing[chido-readtable->read1-parser]{
-Turns a @racket[chido-readtable] into an opaque parser that parses a single form (with leading whitespace allowed).
+Turns a @racket[chido-readtable] into an opaque parser that parses a single form (with NO leading whitespace allowed).
 The parser is equivalent to using the readtable directly as a parser.
 
 TODO - there should be optional arguments that determine whether it allows leading whitespace and whether it allows a trailing EOF read.
