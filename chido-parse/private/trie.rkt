@@ -1,63 +1,117 @@
 #lang racket/base
 
 (provide
+ trie?
  empty-trie
- trie-insert
- trie-insert*
  trie-ref
- )
+ trie-add
 
-;; This module is basically a more convenient interface of pfds/trie.  My keys are always strings (rather than lists of arbitrary things).
-;; Also pfds/trie has an interface that is inconsistent with standard data structure get/set functions (dict-ref, etc), and even internally inconsistent (insert vs bind argument order).
-
-
-(require
- pfds/trie
- racket/match
+ trie-step
+ trie-walk
+ trie-leaf?
+ trie-empty?
  )
 
 
-(define empty-trie (tries '() '()))
+#|
+* My tries need to be keyed by strings (IE each level is keyed by characters) and values need to be listof any/c.
+* I need to be able to tell whether a trie key (string) is a prefix of further keys.
+|#
 
-(define (trie-insert t key-string v)
-  (bind (string->list key-string) v t))
 
-(define (list->parallel-lists args)
-  (match args
-    [(list k v) (values (list k) (list v))]
-    [(list k v rest ...)
-     (define-values (ks vs) (list->parallel-lists rest))
-     (values (cons k ks) (cons v vs))]
-    ;; Because this is only used in trie-insert*...
-    [(list k) (error 'trie-insert* "uneven argument list")]))
+(struct trie (values hash)
+  #:transparent)
 
-(define (trie-insert* t . args)
-  (define-values (ks vs) (list->parallel-lists args))
-  (insert vs (map string->list ks) t))
+(define (trie-leaf? t)
+  (and (trie? t)
+       (hash-empty? (trie-hash t))))
 
-(define (trie-ref t key-string
-                  [default-thunk (λ () (error 'trie-ref "key not found"))])
-  (with-handlers ([(λ(e)#t)(λ(e) (if (procedure? default-thunk)
-                                     (default-thunk)
-                                     default-thunk))])
-    (lookup (string->list key-string) t)))
+(define (trie-empty? x)
+  (and (trie-leaf? x)
+       (null? (trie-values x))))
+
+(define empty-trie (trie '() (hash)))
+
+;;; returns the values (list) from walking down the trie with `str` prefix
+(define (trie-ref t str [default (λ () (error 'trie-ref "key not found: ~a" str))])
+  (define ret (trie-walk t str not-found))
+  (if (eq? not-found ret)
+      (do-default default)
+      (trie-values ret)))
+
+;;; Returns the trie that is the result of taking one step in the trie.
+(define (trie-step t c [default (λ () (error 'trie-step "key not found: ~a" c))])
+  (hash-ref (trie-hash t) c default))
+
+;;; Returns the trie that is the result of walking down `str`
+(define (trie-walk t str [default (λ () (error 'trie-walk "key not found: ~a" str))])
+  (let loop ([t t]
+             [keys (string->list str)])
+    (define ret (trie-step t (car keys) not-found))
+    (if (eq? not-found ret)
+        (do-default default)
+        (if (null? (cdr keys))
+            ret
+            (loop ret (cdr keys))))))
+
+
+;;; adds a value to the value list at prefix `str`
+(define (trie-add t str v)
+  (define (rec t keys v)
+    (cond [(null? keys) (trie (cons v (trie-values t)) (trie-hash t))]
+          [(trie-step t (car keys) #f)
+           =>
+           (λ (nt) (trie (trie-values t)
+                         (hash-set (trie-hash t)
+                                   (car keys)
+                                   (rec nt (cdr keys) v))))]
+          [else (rec (trie (trie-values t)
+                           (hash-set (trie-hash t)
+                                     (car keys)
+                                     empty-trie))
+                     keys
+                     v)]))
+  (rec t (string->list str) v))
+
+;;; clears values list at prefix `str`
+#;(define (trie-clear t str)
+  TODO)
+
+;;; Helper for defaults a la hash-ref
+(define (do-default x)
+  (if (procedure? x)
+      (x)
+      x))
+(define not-found (gensym))
 
 
 (module+ test
   (require rackunit)
-  (define t1 (trie-insert (trie-insert empty-trie "a" 5)
-                          "abc"
-                          99))
-  (define t2 (trie-insert* empty-trie "a" 5 "abc" 99))
-  (check-equal? (trie-ref t1 "a")
-                5)
-  (check-equal? (trie-ref t1 "a")
-                (trie-ref t2 "a"))
+
+  (define t1
+    (trie-add
+     (trie-add
+      (trie-add
+       (trie-add empty-trie "abc" 'abc)
+       "ab"
+       'ab)
+      "abeef"
+      'abeef)
+     "abc"
+     'abc2))
+
   (check-equal? (trie-ref t1 "abc")
-                (trie-ref t2 "abc"))
-  (check-equal? (trie-ref t1 "foo" #f)
-                #f)
-  (check-equal? (trie-ref t1 "foo" (λ()42))
-                42)
-  (check-exn exn? (λ () (trie-ref t1 "foo")))
+                '(abc2 abc))
+  (check-equal? (trie-ref t1 "abeef")
+                '(abeef))
+  (check-equal? (trie-ref t1 "a")
+                '())
+
+  (check-equal? (trie-ref (trie-walk t1 "ab") "eef")
+                '(abeef))
+
+  (check-equal? (trie-ref t1 "abcde" 'def)
+                'def)
+  (check-true (trie-leaf? (trie-walk t1 "abeef")))
+  (check-exn exn? (λ () (trie-ref t1 "abeefa")))
   )
