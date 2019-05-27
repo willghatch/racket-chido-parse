@@ -22,6 +22,7 @@
  "scheduler.rkt"
  "basic-combinators.rkt"
  "trie.rkt"
+ "parameters.rkt"
  racket/match
  racket/list
  )
@@ -153,7 +154,7 @@
                                      parsers))
         (define parsers-result (parse* port alt))
         (if (parse-failure? parsers-result)
-            (parse* port parse-symbol/number rt)
+            (parse* port symbol/number-parser #:args (list rt))
             parsers-result))))
     (set-chido-readtable-layout*+read1-parser!
      rt
@@ -173,10 +174,10 @@
        ;; TODO - better name!
        (make-alt-parser "chido-readtable-read*"
                         (list with-content-parser no-content-parser))))
-    (set-chido-readtable-flush-state?! #f)))
+    (set-chido-readtable-flush-state?! rt #f)))
 
 
-(define (parse-symbol/number port rt)
+(define (parse-symbol/number-func port rt)
   ;; TODO - handle symbol escapes and literal delimiters
 
   (define-values (start-line start-col start-pos) (port-next-location port))
@@ -258,6 +259,9 @@
         ;; TODO - use result transformer
         (make-parse-derivation stx #:end (+ pos span)))))
 
+(define symbol/number-parser
+  (proc-parser "symbol/number-parser" "" parse-symbol/number-func))
+
 
 (define (chido-readtable->read1 rt)
   (chido-readtable-populate-cache! rt)
@@ -270,3 +274,54 @@
   (chido-readtable-layout*+read1-parser rt))
 
 
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;;; Basic readtable-related parsers
+
+;; TODO - what should the default be?
+(define current-chido-readtable (chido-parse-parameter #f))
+
+
+;; TODO - left and right must be strings
+(define (chido-readtable-add-list-parser rt left right
+                                         ;#:result-transformer
+                                         ;#:inside-readtable
+                                         )
+  (define (inner-parser)
+    (proc-parser (format "list-inner-parser-~a-~a" left right)
+                 ""
+                 (λ (port)
+                   (define inner-rt (current-chido-readtable))
+                   (parse* port (chido-readtable->read* inner-rt)))))
+  (define left-parser
+    (sequence left inner-parser right
+              #:result (λ (l inner right) inner)))
+
+  (define right-parser
+    (proc-parser (format "trailing-right-delimiter_~a" right)
+                 right
+                 (λ (port) (make-parse-failure
+                            (format "Trailing right delimiter: ~a"
+                                    right)))))
+
+  (extend-chido-readtable (extend-chido-readtable rt 'terminating left-parser)
+                          'terminating right-parser))
+
+#;(define (chido-readtable-add-raw-string-parser rt left right)
+  TODO)
+
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;;; Testing
+(module+ test
+  (require rackunit)
+  (define my-rt (chido-readtable-add-list-parser empty-chido-readtable "(" ")"))
+
+  (chido-parse-parameterize
+   ([current-chido-readtable my-rt])
+   #;(parse* (open-input-string "(hello 1 2 (hi 3 4) 5)")
+           (chido-readtable->read1 my-rt))
+   (parse* (open-input-string "()")
+           (chido-readtable->read1 my-rt))
+   )
+
+  )

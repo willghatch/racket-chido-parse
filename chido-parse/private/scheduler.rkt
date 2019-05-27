@@ -1,5 +1,5 @@
 #lang racket/base
-
+(require racket/contract/base)
 (provide
  make-parse-derivation
  parse-derivation?
@@ -18,6 +18,7 @@
  ;prop:custom-parser
  parser-name
  parser-prefix
+ parser?
 
  (struct-out parse-failure)
  make-parse-failure
@@ -26,6 +27,12 @@
  regexp->parser
 
  parse*
+ #;(contract-out
+  [parse* (->* (input-port? parser?)
+               (#:args (listof any/c)
+                #:start integer?)
+               (or/c parse-failure? stream?))]
+  )
  ;; TODO - other parse functions
 
  )
@@ -103,6 +110,14 @@
   ;; TODO - Is this really a good idea?  Perhaps I really just want to have objects that users can convert into parsing procedures, eg. readtable-like-object with ->single-read, ->multi-read functions.
   (make-struct-type-property 'custom-parser))
 
+(define (parser? p)
+  (cond [(parser-struct? p)]
+        [(custom-parser? p)]
+        [(string? p)]
+        [(regexp? p)]
+        ;; TODO - this is not a great predicate...
+        [(procedure? p)]
+        [else #f]))
 
 (define (parser-name p)
   (cond [(parser-struct? p) (parser-struct-name p)]
@@ -467,7 +482,8 @@ A weak hash port-broker->ephemeron with scheduler.
          [(and actionable-job (scheduler-get-result s actionable-job))
           (eprintf "\n")
           (eprintf "WARNING! A continuation was not marked ready when its dependency finished\n")
-          (eprintf "Continuation for job: ~a\n" (and job (job->display job)))
+          (eprintf "Continuation for job: ~a\n" (or (and job (job->display job))
+                                                    job))
           (eprintf "Dependency that didn't mark it ready: ~a\n"
                    (job->display actionable-job))
           (eprintf "Result for the dependency: ~s\n"
