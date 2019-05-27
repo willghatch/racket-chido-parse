@@ -613,18 +613,25 @@ A weak hash port-broker->ephemeron with scheduler.
                   (define port (port-broker->port/char (scheduler-port-broker
                                                         scheduler)
                                                        start-position))
-                  ;; TODO - check prefix.  All parsers that fail the prefix check can be logged as failures immediately, then the remaining parsers can be prioritized by length of prefix.
-                  ;; TODO - this interface should maybe be different...
-                  (do-run! scheduler
-                           (λ ()
-                             (parameterize ([current-chido-parse-parameters
-                                             cp-params])
-                               (let ([result (apply procedure port extra-args)])
-                                 (if (and (stream? result)
-                                          (not (flattened-stream? result)))
-                                     (stream-flatten result)
-                                     result))))
-                           job)]
+                  (define prefix-length (string-length prefix))
+                  ;; TODO - optimize this peek for alt parsers, at least...
+                  (if (equal? prefix
+                              (peek-string prefix-length 0 port))
+                      ;; TODO - this interface should maybe be different...
+                      (do-run! scheduler
+                               (λ ()
+                                 (parameterize ([current-chido-parse-parameters
+                                                 cp-params])
+                                   (let ([result (apply procedure port extra-args)])
+                                     (if (and (stream? result)
+                                              (not (flattened-stream? result)))
+                                         (stream-flatten result)
+                                         result))))
+                               job)
+                      (let ([result (parse-failure name start-position start-position
+                                                   "prefix didn't match" '())])
+                        (cache-result-and-ready-dependents! scheduler job result)
+                        (run-scheduler scheduler)))]
                  [(alt-parser name parsers extra-arg-lists)
                   (define (mk-dep parsador extra-args)
                     (get-job! scheduler parsador extra-args cp-params start-position 0))

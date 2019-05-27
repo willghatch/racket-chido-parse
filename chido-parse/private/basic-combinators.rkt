@@ -10,6 +10,7 @@
  ;; TODO - These are not great, should probably be replaced
  between*
  traditional-read-func->parse-result-func
+ result-modify
  )
 
 (require
@@ -206,6 +207,18 @@
                              (cons d (parse-derivation-derivation-list d2))))))))
   (proc-parser use-name "" proc))
 
+(define (result-modify parser result-func #:name [name #f])
+  (proc-parser (or name (parser-name parser))
+               (parser-prefix parser)
+               (λ (port)
+                 (define s (parse* port parser))
+                 (if (parse-failure? s)
+                     s
+                     (stream-map (λ (d) (make-parse-derivation
+                                         (result-func (parse-derivation-result d))
+                                         #:derivations (list d) ))
+                                 s)))))
+
 (define (traditional-read-func->parse-result-func f #:syntax? [syntax? #f])
   (λ (port)
     (define result (if syntax?
@@ -332,7 +345,7 @@
      (map parse-derivation-result
           (stream->list
            (parse* (open-input-string "test") basic-s-exp)))
-     (list 'test))
+     '(t te tes test))
 
   (define s-exp-str-1 "(test test (test test) test (hello foo (bar aoeu)
                                    thaoneuth)

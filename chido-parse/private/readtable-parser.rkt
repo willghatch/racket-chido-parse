@@ -7,14 +7,24 @@
   ;; TODO - re-think what the empty readtable should be...
   [empty-chido-readtable chido-readtable?]
   [extend-chido-readtable (-> chido-readtable?
-                        (or/c 'terminating 'soft-terminating
-                              'nonterminating 'layout)
-                        any/c
-                        chido-readtable?)]
+                              (or/c 'terminating 'soft-terminating
+                                    'nonterminating 'layout)
+                              any/c
+                              chido-readtable?)]
+  [chido-readtable-add-list-parser (-> chido-readtable?
+                                       string? string?
+                                       chido-readtable?)]
   [chido-readtable->read1 (-> chido-readtable? any/c)]
   [chido-readtable->read1/layout (-> chido-readtable? any/c)]
   [chido-readtable->read* (-> chido-readtable? any/c)]
   )
+ extend-chido-readtable*
+ current-chido-readtable
+
+ ;; TODO - maybe not these?
+ hash-t-parser
+ hash-f-parser
+ racket-style-string-parser
 
  )
 
@@ -70,10 +80,15 @@
    '() '() '() '()
    ;; options
    #f
-   ;; TODO - should literal delimiters and backslash be set on the empty readtable, or should they be #f?
    ;; TODO - also, when literal delimiters are NOT equal, should they be nestable?  I think yes.  Maybe there should be an option?
-   "|" "|" "\\"
-   #t #t
+   ;; literal delimiters
+   #f #f
+   ;; symbol escape
+   #f
+   ;; number support
+   #f
+   ;; complex number support
+   #f
    ;;; cached stuff
    #t
    ;; tries
@@ -321,6 +336,17 @@
 #;(define (chido-readtable-add-raw-string-parser rt left right)
   TODO)
 
+(define racket-style-string-parser
+  (proc-parser "racket-style-string-parser"
+               "\""
+               (λ (port)
+                 (define r (read port))
+                 (define-values (line col pos) (port-next-location port))
+                 (make-parse-derivation r #:end pos))))
+
+(define hash-t-parser (result-modify "#t" (λ(x)#t)))
+(define hash-f-parser (result-modify "#f" (λ(x)#f)))
+
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;;; Testing
@@ -331,6 +357,9 @@
     (extend-chido-readtable*
      (chido-readtable-add-list-parser empty-chido-readtable "(" ")")
      'terminating "##"
+     'terminating racket-style-string-parser
+     'nonterminating hash-t-parser
+     'nonterminating hash-f-parser
      'layout " "
      'layout "\n"
      'layout "\t"))
@@ -358,7 +387,13 @@
    (define s1 "(hello ( goodbye () ( ( ) ) ) aoeu aoeu ( aardvark   ))")
    (check-equal? (p* s1 r1)
                  (list (read (open-input-string s1))))
+   (check-equal? (p* "\"testing 123\"" r1)
+                 '("testing 123"))
+   (check-equal? (p* "(this is \"a test\" of string reading)" r1)
+                 '((this is "a test" of string reading)))
 
+   (check-equal? (p* "(this (is \"a test\") of string reading)" r1)
+                 '((this (is "a test") of string reading)))
 
    ;; TODO - this one has an interesting error that I want to get to later...
    ;(p* "   \n   " (chido-readtable-layout*-parser my-rt))
