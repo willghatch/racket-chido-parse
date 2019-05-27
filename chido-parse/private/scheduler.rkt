@@ -17,6 +17,7 @@
  (struct-out proc-parser)
  ;prop:custom-parser
  parser-name
+ parser-prefix
 
  (struct-out parse-failure)
  make-parse-failure
@@ -110,6 +111,10 @@
         [(regexp? p) (format "~s" p)]
         [(procedure? p) (parser-name (p))]
         [else (error 'parser-name "not a parser: ~s" p)]))
+
+(define (parser-prefix p)
+  (cond [(proc-parser? p) (proc-parser-prefix p)]
+        [else ""]))
 
 (define (parser->usable p)
   ;; TODO - I maybe should be caching these depending on how other caching is working...

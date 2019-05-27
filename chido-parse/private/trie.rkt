@@ -2,6 +2,7 @@
 
 (provide
  trie?
+ trie-values
  empty-trie
  trie-ref
  trie-add

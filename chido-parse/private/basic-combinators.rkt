@@ -1,5 +1,17 @@
 #lang racket/base
 
+(provide
+ sequence
+ repetition
+ kleene-star
+ kleene-plus
+ epsilon-parser
+
+ ;; TODO - These are not great, should probably be replaced
+ between*
+ traditional-read-func->parse-result-func
+ )
+
 (require
  "scheduler.rkt"
  "parse-stream.rkt"

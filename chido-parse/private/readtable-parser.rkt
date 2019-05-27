@@ -1,18 +1,19 @@
 #lang racket/base
 
+(require racket/contract/base)
 (provide
  ;; TODO - the names provided should maybe be chido-readtable-* ...
  (contract-out
   ;; TODO - re-think what the empty readtable should be...
-  [empty-readtable readtable?]
-  [extend-readtable (-> readtable?
+  [empty-chido-readtable chido-readtable?]
+  [extend-chido-readtable (-> chido-readtable?
                         (or/c 'terminating 'soft-terminating
                               'nonterminating 'layout)
                         any/c
-                        readtable?)]
-  [readtable->read1 (-> readtable? any/c)]
-  [readtable->read1/layout (-> readtable? any/c)]
-  [readtable->read* (-> readtable? any/c)]
+                        chido-readtable?)]
+  [chido-readtable->read1 (-> chido-readtable? any/c)]
+  [chido-readtable->read1/layout (-> chido-readtable? any/c)]
+  [chido-readtable->read* (-> chido-readtable? any/c)]
   )
 
  )
@@ -21,10 +22,12 @@
  "scheduler.rkt"
  "basic-combinators.rkt"
  "trie.rkt"
+ racket/match
+ racket/list
  )
 
 
-(struct readtable
+(struct chido-readtable
   (
    ;; Core parsers
    terminating-parsers
@@ -47,7 +50,7 @@
    [nonterminating-trie #:mutable]
    [layout-trie #:mutable]
 
-   ;; These exist to ensure parsers created with readtable are always eq?
+   ;; These exist to ensure parsers created with chido-readtable are always eq?
    [layout*-parser #:mutable]
    [read1-parser #:mutable]
    [layout*+read1-parser #:mutable]
@@ -60,8 +63,8 @@
   )
 
 
-(define empty-readtable
-  (readtable
+(define empty-chido-readtable
+  (chido-readtable
    ;; core parsers
    '() '() '() '()
    ;; options
@@ -84,32 +87,32 @@
    #f
    ))
 
-(define (extend-readtable rt extension-type parser)
+(define (extend-chido-readtable rt extension-type parser)
   ;; extension-type is 'terminating, 'soft-terminating, 'nonterminating, or 'layout
   (match extension-type
     ['terminating (struct-copy
-                   readtable
+                   chido-readtable
                    rt
                    [terminating-parsers
-                    (cons parser (readtable-terminating-parsers rt))]
+                    (cons parser (chido-readtable-terminating-parsers rt))]
                    [flush-state? #t])]
     ['soft-terminating (struct-copy
-                        readtable
+                        chido-readtable
                         rt
                         [soft-terminating-parsers
-                         (cons parser (readtable-soft-terminating-parsers rt))]
+                         (cons parser (chido-readtable-soft-terminating-parsers rt))]
                         [flush-state? #t])]
     ['nonterminating (struct-copy
-                      readtable
+                      chido-readtable
                       rt
                       [nonterminating-parsers
-                       (cons parser (readtable-nonterminating-parsers rt))]
+                       (cons parser (chido-readtable-nonterminating-parsers rt))]
                       [flush-state? #t])]
     ['layout (struct-copy
-              readtable
+              chido-readtable
               rt
               [layout-parsers
-               (cons parser (readtable-layout-parsers rt))]
+               (cons parser (chido-readtable-layout-parsers rt))]
               [flush-state? #t])]))
 
 (define (parser-list->trie parsers)
@@ -117,65 +120,66 @@
             ([p parsers])
     (trie-add t (parser-prefix p) p)))
 
-(define (readtable-populate-cache! rt)
-  (when (readtable-flush-state? rt)
-    (set-readtable-terminating-trie!
+(define (chido-readtable-populate-cache! rt)
+  (when (chido-readtable-flush-state? rt)
+    (set-chido-readtable-terminating-trie!
      rt
-     (parser-list->trie (readtable-terminating-parsers rt)))
-    (set-readtable-soft-terminating-trie!
+     (parser-list->trie (chido-readtable-terminating-parsers rt)))
+    (set-chido-readtable-soft-terminating-trie!
      rt
-     (parser-list->trie (readtable-soft-terminating-parsers rt)))
-    (set-readtable-nonterminating-trie!
+     (parser-list->trie (chido-readtable-soft-terminating-parsers rt)))
+    (set-chido-readtable-nonterminating-trie!
      rt
-     (parser-list->trie (readtable-nonterminating-parsers rt)))
-    (set-readtable-layout-trie!
+     (parser-list->trie (chido-readtable-nonterminating-parsers rt)))
+    (set-chido-readtable-layout-trie!
      rt
-     (parser-list->trie (readtable-layout-parsers rt)))
-    (set-readtable-layout*-parser!
-     rt (kleene-star (make-alt-parser "readtable-layout*"
-                                      (readtable-layout-parsers rt))
+     (parser-list->trie (chido-readtable-layout-parsers rt)))
+    (set-chido-readtable-layout*-parser!
+     rt (kleene-star (make-alt-parser "chido-readtable-layout*"
+                                      (chido-readtable-layout-parsers rt))
                      #:result (λ (elems) #f)))
-    (set-readtable-read1-parser!
+    (set-chido-readtable-read1-parser!
      rt
      ;; TODO - better name!
      (proc-parser
-      "readtable-read1"
+      "chido-readtable-read1"
       ""
       (λ (port)
         (define parsers (append
-                         (readtable-nonterminating-parsers rt)
-                         (readtable-soft-terminating-parsers rt)
-                         (readtable-terminating-parsers rt)))
-        (define alt (make-alt-parser "readtable-read1/alt"
+                         (chido-readtable-nonterminating-parsers rt)
+                         (chido-readtable-soft-terminating-parsers rt)
+                         (chido-readtable-terminating-parsers rt)))
+        (define alt (make-alt-parser "chido-readtable-read1/alt"
                                      parsers))
         (define parsers-result (parse* port alt))
         (if (parse-failure? parsers-result)
             (parse* port parse-symbol/number rt)
             parsers-result))))
-    (set-readtable-layout*+read1-parser!
+    (set-chido-readtable-layout*+read1-parser!
      rt
-     (sequence (readtable-layout*-parser rt)
-               (readtable-read1-parser rt)
+     (sequence (chido-readtable-layout*-parser rt)
+               (chido-readtable-read1-parser rt)
                #:result (λ (l r) r)))
-    (set-readtable-read*-parser!
+    (set-chido-readtable-read*-parser!
      rt
      (let ([with-content-parser
-             (sequence (kleene-plus (sequence (readtable-layout*-parser rt)
-                                              (readtable-read1-parser rt)
+             (sequence (kleene-plus (sequence (chido-readtable-layout*-parser rt)
+                                              (chido-readtable-read1-parser rt)
                                               #:result (λ (layout val) val)))
-                       (readtable-layout*-parser rt)
+                       (chido-readtable-layout*-parser rt)
                        #:result (λ (vals layout) vals))]
            [no-content-parser
-            (sequence (readtable-layout*-parser rt) #:result (λ (layout) '()))])
+            (sequence (chido-readtable-layout*-parser rt) #:result (λ (layout) '()))])
        ;; TODO - better name!
-       (make-alt-parser "readtable-read*"
+       (make-alt-parser "chido-readtable-read*"
                         (list with-content-parser no-content-parser))))
-    (set-readtable-flush-state?! #f)))
+    (set-chido-readtable-flush-state?! #f)))
 
 
 (define (parse-symbol/number port rt)
   ;; TODO - handle symbol escapes and literal delimiters
 
+  (define-values (start-line start-col start-pos) (port-next-location port))
   ;; Trie-pairs are (cons trie n),
   ;; where n is the prefix length of trie that has matched so far.
   (define (rec/main len hard-trie-pairs soft-trie-pairs peek-offsets)
@@ -208,8 +212,9 @@
         (for/fold ([delimit-length delimit-length])
                   ([parser (trie-values (car soft-pair))]
                    #:break delimit-length)
-          (define start-length (- len (cdr soft-pair)))
-          (if (not (parse-failure? (parse* port parser TODO-starting-location)))
+          (define start-offset (- len (cdr soft-pair)))
+          (if (not (parse-failure? (parse* port parser
+                                           #:start (+ start-pos start-offset))))
               (cdr soft-pair)
               #f))))
 
@@ -236,14 +241,15 @@
 
   ;; actual start of parsing symbols and numbers...
 
-  (readtable-populate-cache! rt)
+  (chido-readtable-populate-cache! rt)
   (define sym/num-length (rec/main 0 '() '() '(0)))
   (if (equal? 0 sym/num-length)
-      TODO-parse-failure
+      (make-parse-failure "Can't parse symbol because delimiter succeeded parsing."
+                          #:position start-pos)
       (let ()
         (define-values (line col pos) (port-next-location port))
         (define span sym/num-length)
-        (define str (read-string sym/num/length port))
+        (define str (read-string sym/num-length port))
         ;; TODO - check options for whether complex numbers, rational numbers, and numbers of any kind are supported in this readtable...
         (define number (string->number str))
         (define datum (or number str))
@@ -253,14 +259,14 @@
         (make-parse-derivation stx #:end (+ pos span)))))
 
 
-(define (readtable->read1 rt)
-  (readtable-populate-cache! rt)
-  (readtable-read1-parser rt))
-(define (readtable->read* rt)
-  (readtable-populate-cache! rt)
-  (readtable-read*-parser rt))
-(define (readtable->read1/layout rt)
-  (readtable-populate-cache! rt)
-  (readtable-layout*+read1-parser rt))
+(define (chido-readtable->read1 rt)
+  (chido-readtable-populate-cache! rt)
+  (chido-readtable-read1-parser rt))
+(define (chido-readtable->read* rt)
+  (chido-readtable-populate-cache! rt)
+  (chido-readtable-read*-parser rt))
+(define (chido-readtable->read1/layout rt)
+  (chido-readtable-populate-cache! rt)
+  (chido-readtable-layout*+read1-parser rt))
 
 
