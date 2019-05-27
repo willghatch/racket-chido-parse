@@ -116,6 +116,15 @@
                (cons parser (chido-readtable-layout-parsers rt))]
               [flush-state? #t])]))
 
+(define (extend-chido-readtable* rt . args)
+  (match args
+    [(list type parser rest-args ...)
+     (apply extend-chido-readtable*
+            (extend-chido-readtable rt type parser)
+            rest-args)]
+    [(list) rt]
+    [else (error 'extend-chido-readtable* "bad number of arguments")]))
+
 (define (parser-list->trie parsers)
   (for/fold ([t empty-trie])
             ([p parsers])
@@ -164,9 +173,7 @@
     (set-chido-readtable-read*-parser!
      rt
      (let ([with-content-parser
-             (sequence (kleene-plus (sequence (chido-readtable-layout*-parser rt)
-                                              (chido-readtable-read1-parser rt)
-                                              #:result (λ (layout val) val)))
+             (sequence (kleene-plus (chido-readtable-layout*+read1-parser rt))
                        (chido-readtable-layout*-parser rt)
                        #:result (λ (vals layout) vals))]
            [no-content-parser
@@ -214,14 +221,16 @@
                   ([parser (trie-values (car soft-pair))]
                    #:break delimit-length)
           (define start-offset (- len (cdr soft-pair)))
-          (if (not (parse-failure? (parse* port parser
-                                           #:start (+ start-pos start-offset))))
+          (define soft-result (parse* port parser
+                                      #:start (+ start-pos start-offset)))
+          (if (not (parse-failure? soft-result))
               (cdr soft-pair)
               #f))))
 
     (define delimit-length (if (and soft-delimit-length hard-delimit-length)
                                (max soft-delimit-length hard-delimit-length)
                                (or soft-delimit-length hard-delimit-length)))
+
 
     (if delimit-length
         (- len delimit-length)
@@ -233,11 +242,11 @@
         len
         (let ([c-len (char-utf-8-length c)])
           (rec/main (add1 len)
-                    (filter-map step-trie-pair hard-trie-pairs)
-                    (filter-map step-trie-pair soft-trie-pairs)
+                    (filter-map (step-trie-pair c) hard-trie-pairs)
+                    (filter-map (step-trie-pair c) soft-trie-pairs)
                     (cons (+ c-len (car peek-offsets)) peek-offsets)))))
-  (define (step-trie-pair tp)
-    (define next-trie (trie-step (car tp) #f))
+  (define ((step-trie-pair c) tp)
+    (define next-trie (trie-step (car tp) c #f))
     (and next-trie (cons next-trie (add1 (cdr tp)))))
 
   ;; actual start of parsing symbols and numbers...
@@ -253,11 +262,12 @@
         (define str (read-string sym/num-length port))
         ;; TODO - check options for whether complex numbers, rational numbers, and numbers of any kind are supported in this readtable...
         (define number (string->number str))
-        (define datum (or number str))
+        (define datum (or number (string->symbol str)))
         (define stx (datum->syntax #f datum (list (object-name port)
                                                   line col pos span)))
         ;; TODO - use result transformer
-        (make-parse-derivation stx #:end (+ pos span)))))
+        ;; TODO - by default this should be a syntax object, but for now I'll return a datum
+        (make-parse-derivation datum #:end (+ pos span)))))
 
 (define symbol/number-parser
   (proc-parser "symbol/number-parser" "" parse-symbol/number-func))
@@ -294,6 +304,8 @@
                    (parse* port (chido-readtable->read* inner-rt)))))
   (define left-parser
     (sequence left inner-parser right
+              ;; TODO - use the optional transformer argument
+              ;; TODO - the result should be a syntax object by default
               #:result (λ (l inner right) inner)))
 
   (define right-parser
@@ -314,14 +326,46 @@
 ;;;;; Testing
 (module+ test
   (require rackunit)
-  (define my-rt (chido-readtable-add-list-parser empty-chido-readtable "(" ")"))
+  (require racket/stream)
+  (define my-rt
+    (extend-chido-readtable*
+     (chido-readtable-add-list-parser empty-chido-readtable "(" ")")
+     'terminating "##"
+     'layout " "
+     'layout "\n"
+     'layout "\t"))
+
+  (define (p* string parser)
+    (define r (parse* (open-input-string string) parser))
+    (if (parse-failure? r)
+        r
+        (map parse-derivation-result
+             (stream->list
+              r))))
+
+  (define r1 (chido-readtable->read1 my-rt))
 
   (chido-parse-parameterize
    ([current-chido-readtable my-rt])
-   #;(parse* (open-input-string "(hello 1 2 (hi 3 4) 5)")
-           (chido-readtable->read1 my-rt))
-   (parse* (open-input-string "()")
-           (chido-readtable->read1 my-rt))
+
+   (check-equal? (p* "()" r1)
+                 '(()))
+   (check-equal? (p* "( )" r1)
+                 '(()))
+   (check-equal? (p* "( ( ) )" r1)
+                 '((())))
+   (check-pred parse-failure? (p* ")" r1))
+   (define s1 "(hello ( goodbye () ( ( ) ) ) aoeu aoeu ( aardvark   ))")
+   (check-equal? (p* s1 r1)
+                 (list (read (open-input-string s1))))
+
+
+   ;; TODO - this one has an interesting error that I want to get to later...
+   ;(p* "   \n   " (chido-readtable-layout*-parser my-rt))
+
+   ;; TODO - this is not returning the right failure object.
+   ;(p* "hello" "arg")
+
    )
 
   )

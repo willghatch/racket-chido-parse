@@ -129,6 +129,7 @@
 
 (define (parser-prefix p)
   (cond [(proc-parser? p) (proc-parser-prefix p)]
+        [(string? p) p]
         [else ""]))
 
 (define (parser->usable p)
@@ -211,7 +212,7 @@
   (define read-in (read-string length port))
   (if (equal? s read-in)
       (make-parse-derivation s #:end (+ pos length))
-      (make-parse-failure (format "Didn't match literal ~a" s) #:position pos)))
+      (make-parse-failure failure-message #:position pos)))
 
 (define (string->parser s #:name [name #f])
   ;; TODO - add optional args for what to do with the result
@@ -480,16 +481,20 @@ A weak hash port-broker->ephemeron with scheduler.
      (let ([actionable-job (find-work s (list dependency))])
        (cond
          [(and actionable-job (scheduler-get-result s actionable-job))
-          (eprintf "\n")
-          (eprintf "WARNING! A continuation was not marked ready when its dependency finished\n")
-          (eprintf "Continuation for job: ~a\n" (or (and job (job->display job))
-                                                    job))
-          (eprintf "Dependency that didn't mark it ready: ~a\n"
-                   (job->display actionable-job))
-          (eprintf "Result for the dependency: ~s\n"
-                   (scheduler-get-result s actionable-job))
-          (eprintf "\n\n")
-          (error 'chido-parse "Internal error, dependency tracking error")]
+          ;; TODO - fix this...
+          ;(eprintf "\n")
+          ;(eprintf "WARNING! A continuation was not marked ready when its dependency finished\n")
+          ;(eprintf "Continuation for job: ~a\n" (or (and job (job->display job))
+          ;                                          job))
+          ;(eprintf "Dependency that didn't mark it ready: ~a\n"
+          ;         (job->display actionable-job))
+          ;(eprintf "Result for the dependency: ~s\n"
+          ;         (scheduler-get-result s actionable-job))
+          ;(eprintf "\n\n")
+          ;(error 'chido-parse "Internal error, dependency tracking error")
+          (ready-dependents! actionable-job)
+          (run-scheduler s)
+          ]
          [actionable-job (run-actionable-job s actionable-job)]
          [using-hint? (set-scheduler-hint-stack! s '())
                       (run-scheduler s)]
@@ -730,6 +735,7 @@ A weak hash port-broker->ephemeron with scheduler.
   (define pb (or (port->port-broker port)
                  (port-broker port)))
   (define start-pos (match start
+                      [(? number?) start]
                       [(? parse-derivation?) (parse-derivation-end-position start)]
                       [#f (let-values ([(line col pos) (port-next-location port)])
                             pos)]))

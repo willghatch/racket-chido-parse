@@ -45,9 +45,7 @@
                     #:name [name #f]
                     #:derive [derive #f]
                     #:result [result #f])
-  (define prefix (if (proc-parser? l)
-                     (proc-parser-prefix l)
-                     ""))
+  (define prefix (parser-prefix l))
   (define use-name (or name (format "sequence-2_~a_~a"
                                     (parser-name l)
                                     (parser-name r))))
@@ -73,9 +71,8 @@
                   #:derive [derive #f]
                   #:result [make-result #f]
                   . parsers)
-  (define prefix (if (proc-parser? (car parsers))
-                     (proc-parser-prefix (car parsers))
-                     ""))
+  (define prefix (parser-prefix (car parsers)))
+
   (define use-name (or name (format "sequence_~a"
                                     (string-join (map parser-name parsers) "_"))))
   (define combiner
