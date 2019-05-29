@@ -247,11 +247,11 @@ The job->result-cache is a map from parser-job structs -> parser-stream OR parse
 |#
 (struct scheduler
   ;; TODO - document
-  (port-broker done-k hint-stack job-info->job-cache job->result-cache)
+  (port-broker top-job done-k hint-stack job-info->job-cache job->result-cache)
   #:mutable
   #:transparent)
 (define (make-scheduler port-broker)
-  (scheduler port-broker #f '() (hash) (hasheq)))
+  (scheduler port-broker #f #f '() (hash) (hasheq)))
 
 (define (pop-hint! scheduler)
   (set-scheduler-hint-stack! scheduler (cdr (scheduler-hint-stack scheduler))))
@@ -425,60 +425,79 @@ A weak hash port-broker->ephemeron with scheduler.
                  (define k-job (scheduled-continuation #f full-k job #f))
                  (push-parser-job-dependent! job k-job)
                  ;; As a fresh entry into the parser, we start a fresh hint stack.
-                 (set-scheduler-hint-stack! scheduler (list k-job))
+                 (set-scheduler-hint-stack! scheduler (list job))
                  (set-scheduler-done-k! scheduler k-job)
+                 (set-scheduler-top-job! scheduler job)
                  (run-scheduler scheduler))))
             (if (eq? recursive-enter-flag result)
                 (run-scheduler scheduler)
                 (begin
                   (set-scheduler-done-k! scheduler #f)
+                  (set-scheduler-top-job! scheduler #f)
                   result))))))
 
 
-(define (find-work s job-list)
-  ;; Returns an actionable job or #f.
+(define (find-work s job-stacks)
+  ;; Returns a hint stack for an actionable job -- IE a list where the
+  ;; first element is an actionable job, the second element is a job
+  ;; that depends on the first, etc
+  ;; OR
+  ;; Returns #f if there is no actionable job.
+  ;;
   ;; s is a scheduler
-  ;; job-list is a list of parser-job structs
+  ;; job-stacks is a list of these dependency stacks
   ;; TODO - this is probably the best place to detect cycles.  I should maybe return some sort of flag object containing the job that contains the smallest dependency cycle so I know which job to return a cycle error for.
-  (let loop ([jobs job-list]
+  (let loop ([stacks job-stacks]
              [blocked '()])
-    (if (null? jobs)
+    (if (null? stacks)
         #f
-        (let ([j (car jobs)])
-          (cond [(memq j blocked) (loop (cdr jobs) blocked)]
+        (let* ([jstack (car stacks)]
+               [j (car jstack)])
+          (cond [(memq j blocked) (loop (cdr stacks) blocked)]
                 ;; if it has a continuation/worker, add dependencies to jobs
                 [else (match (parser-job-continuation/worker j)
                         [(scheduled-continuation job k dependency ready?)
-                         (cond [ready? j]
-                               [else (loop (cons dependency (cdr jobs))
+                         (cond [ready? jstack]
+                               [else (loop (cons (cons dependency jstack)
+                                                 (cdr stacks))
                                            (cons j blocked))])]
                         [(alt-worker job remaining-jobs ready-jobs
                                      failures successful?)
-                         (cond [(not (null? ready-jobs)) j]
-                               [(null? remaining-jobs) j]
-                               [else (loop (append remaining-jobs jobs)
+                         (cond [(not (null? ready-jobs)) jstack]
+                               [(null? remaining-jobs) jstack]
+                               [else (loop (append (map (λ (rj) (cons rj jstack))
+                                                        remaining-jobs)
+                                                   (cdr stacks))
                                            (cons j blocked))])]
-                        [#f j])])))))
+                        [#f jstack])])))))
 
 (define (run-scheduler s)
+  (when (scheduled-continuation-ready? (scheduler-done-k s))
+    ;; Escape the mad world of delimited-continuation-based parsing!
+    ((scheduled-continuation-k (scheduler-done-k s))
+     (scheduler-get-result s (scheduled-continuation-dependency
+                              (scheduler-done-k s)))))
   (define using-hint? #t)
   (when (null? (scheduler-hint-stack s))
     (set! using-hint? #f)
-    (set-scheduler-hint-stack! s (list (scheduler-done-k s))))
-  ;(define hint (car (scheduler-hint-stack s)))
-  (define hint (scheduler-done-k s))
-  (match hint
-    [(scheduled-continuation #f done-k dep #t)
-     ;; done-k is ready.
-     (define result (scheduler-get-result s dep))
-     (done-k result)]
+    (set-scheduler-hint-stack! s (list (scheduler-top-job s))))
+  (define hint-stack (scheduler-hint-stack s))
+  (define hint-worker (if (null? hint-stack)
+                          (scheduler-done-k s)
+                          (parser-job-continuation/worker (car hint-stack))))
+  (match hint-worker
+    [#f (if (scheduler-get-result s (car hint-stack))
+            (begin (pop-hint! s)
+                   (run-scheduler s))
+            (run-actionable-job s (car hint-stack)))]
     [(scheduled-continuation job k dependency #t)
      ;; also ready
-     ;(pop-hint! s)
+     (pop-hint! s)
      (run-actionable-job s job)]
     [(scheduled-continuation job k dependency ready?)
      ;; Not ready
-     (let ([actionable-job (find-work s (list dependency))])
+     (let* ([actionable-job-stack (find-work s (list hint-stack))]
+            [actionable-job (and actionable-job-stack (car actionable-job-stack))])
        (cond
          [(and actionable-job (scheduler-get-result s actionable-job))
           ;; TODO - fix this...
@@ -492,22 +511,30 @@ A weak hash port-broker->ephemeron with scheduler.
           ;         (scheduler-get-result s actionable-job))
           ;(eprintf "\n\n")
           ;(error 'chido-parse "Internal error, dependency tracking error")
+          (pop-hint! s)
           (ready-dependents! actionable-job)
           (run-scheduler s)
           ]
          [actionable-job (run-actionable-job s actionable-job)]
-         [using-hint? (set-scheduler-hint-stack! s '())
-                      (run-scheduler s)]
-         [else (fail-smallest-cycle! s)
-               (run-scheduler s)]))]
+         [using-hint?
+          ;; try to find work in another part of the work tree...
+          (set-scheduler-hint-stack! s '())
+          (run-scheduler s)]
+         [else
+          ;; TODO - This should be optimized so that if `find-work` also finds this cycle...
+          (fail-smallest-cycle! s)
+          (run-scheduler s)]))]
     [(alt-worker job remaining-jobs (list ready-job rjs ...) failures successful?)
-     ;(pop-hint! s)
+     (pop-hint! s)
      (run-actionable-job s job)]
     [(alt-worker job (list) (list) failures successful?)
-     ;(pop-hint! s)
+     (pop-hint! s)
      (run-actionable-job s job)]
     [(alt-worker job remaining-jobs ready-jobs failures successful?)
-     (let ([actionable-job (find-work s remaining-jobs)])
+     ;; No ready jobs
+     (let* ([actionable-job-stack (find-work s (map (λ (rj) (cons rj hint-stack))
+                                                    remaining-jobs))]
+            [actionable-job (and actionable-job-stack (car actionable-job-stack))])
        (cond
          [(and actionable-job (scheduler-get-result s actionable-job))
           (eprintf "\n")
@@ -519,12 +546,15 @@ A weak hash port-broker->ephemeron with scheduler.
           (eprintf "\n\n")
           (error 'chido-parse "Internal error -- dependency tracking issue")]
          [actionable-job
+          (set-scheduler-hint-stack! s actionable-job-stack)
           (run-actionable-job s actionable-job)]
          ;; Try finding an actionable job without following hints
-         [using-hint? (set-scheduler-hint-stack! s '())
-                      (run-scheduler s)]
-         [else (fail-smallest-cycle! s)
-               (run-scheduler s)]))]))
+         [using-hint?
+          (set-scheduler-hint-stack! s '())
+          (run-scheduler s)]
+         [else
+          (fail-smallest-cycle! s)
+          (run-scheduler s)]))]))
 
 
 (define (fail-smallest-cycle! scheduler)
