@@ -3,8 +3,10 @@
 (provide
  make-parse-derivation
  parse-derivation?
- parse-derivation-result
+ (rename-out [parse-derivation-result! parse-derivation-result])
  parse-derivation-parser
+ parse-derivation-line
+ parse-derivation-column
  parse-derivation-start-position
  parse-derivation-end-position
  parse-derivation-derivation-list
@@ -67,14 +69,35 @@
 
 (struct parse-derivation
   ;; TODO - document from notes
-  (result parser start-position end-position derivation-list)
+  (
+   [result #:mutable] [result-forced? #:mutable]
+   parser
+   line column start-position end-position
+   derivation-list
+   )
   #:transparent)
+
+(define (parse-derivation-result! pd)
+  (if (parse-derivation-result-forced? pd)
+      (parse-derivation-result pd)
+      (let* ([f (parse-derivation-result pd)]
+             [r (with-handlers ([(λ(e)#t)(λ(e)e)])
+                  (f (parse-derivation-line pd)
+                     (parse-derivation-column pd)
+                     (parse-derivation-start-position pd)
+                     (parse-derivation-end-position pd)
+                     (parse-derivation-derivation-list pd)))])
+        (set-parse-derivation-result! pd r)
+        (set-parse-derivation-result-forced?! pd #t)
+        r)))
 
 (define current-chido-parse-derivation-implicit-end (make-parameter #f))
 
 (define (make-parse-derivation result
                                #:end [end #f]
                                #:derivations [derivation-list '()])
+  ;; `result` should be a non-procedure OR a procedure that accepts
+  ;; line column start-position end-position derivation-list
   (define job (current-chido-parse-job))
   (match job
     [(parser-job parser extra-arguments cp-params start-position result-index
@@ -87,7 +110,11 @@
                          (current-chido-parse-derivation-implicit-end)
                          (error 'make-parse-derivation
                                 "Couldn't infer end location and none provided.")))
-     (parse-derivation result parser start-position end-use derivation-list)]))
+     (define delayed? (procedure? result))
+     (parse-derivation result (not delayed?)
+                       parser
+                       #f #f start-position end-use
+                       derivation-list)]))
 
 (struct parser-struct (name) #:transparent)
 
@@ -485,15 +512,20 @@ A weak hash port-broker->ephemeron with scheduler.
   (define hint-worker (if (null? hint-stack)
                           (scheduler-done-k s)
                           (parser-job-continuation/worker (car hint-stack))))
+  (define (run-actionable-job? j)
+    ;; TODO - this is probably not great, but for now I just want to get things working again...
+    (if (scheduler-get-result s j)
+        (run-scheduler s)
+        (run-actionable-job s j)))
   (match hint-worker
     [#f (if (scheduler-get-result s (car hint-stack))
             (begin (pop-hint! s)
                    (run-scheduler s))
-            (run-actionable-job s (car hint-stack)))]
+            (run-actionable-job? (car hint-stack)))]
     [(scheduled-continuation job k dependency #t)
      ;; also ready
      (pop-hint! s)
-     (run-actionable-job s job)]
+     (run-actionable-job? job)]
     [(scheduled-continuation job k dependency ready?)
      ;; Not ready
      (let* ([actionable-job-stack (find-work s (list hint-stack))]
@@ -515,7 +547,7 @@ A weak hash port-broker->ephemeron with scheduler.
           (ready-dependents! actionable-job)
           (run-scheduler s)
           ]
-         [actionable-job (run-actionable-job s actionable-job)]
+         [actionable-job (run-actionable-job? actionable-job)]
          [using-hint?
           ;; try to find work in another part of the work tree...
           (set-scheduler-hint-stack! s '())
@@ -526,10 +558,10 @@ A weak hash port-broker->ephemeron with scheduler.
           (run-scheduler s)]))]
     [(alt-worker job remaining-jobs (list ready-job rjs ...) failures successful?)
      (pop-hint! s)
-     (run-actionable-job s job)]
+     (run-actionable-job? job)]
     [(alt-worker job (list) (list) failures successful?)
      (pop-hint! s)
-     (run-actionable-job s job)]
+     (run-actionable-job? job)]
     [(alt-worker job remaining-jobs ready-jobs failures successful?)
      ;; No ready jobs
      (let* ([actionable-job-stack (find-work s (map (λ (rj) (cons rj hint-stack))
@@ -547,7 +579,7 @@ A weak hash port-broker->ephemeron with scheduler.
           (error 'chido-parse "Internal error -- dependency tracking issue")]
          [actionable-job
           (set-scheduler-hint-stack! s actionable-job-stack)
-          (run-actionable-job s actionable-job)]
+          (run-actionable-job? actionable-job)]
          ;; Try finding an actionable job without following hints
          [using-hint?
           (set-scheduler-hint-stack! s '())
@@ -745,8 +777,10 @@ A weak hash port-broker->ephemeron with scheduler.
      (set-parser-job-result-stream! next-job result)
      (cache-result-and-ready-dependents!/procedure-job
       scheduler job (raw-result->parse-derivation (stream-first result)))]
-    [(parse-derivation semantic-result parser start-position
-                       end-position derivation-list)
+    [(parse-derivation semantic-result result-forced?
+                       parser
+                       line column start-position end-position
+                       derivation-list)
      (define next-job (get-next-job! scheduler job))
      (define wrapped-result
        (parse-stream result next-job scheduler))
@@ -808,8 +842,8 @@ TODO
      (for/parse
       ([d/a (parse* port a1-parser-obj
                     #:start d/A)])
-      (make-parse-derivation (string-append (parse-derivation-result d/A)
-                                            (parse-derivation-result d/a))
+      (make-parse-derivation (λ args (string-append (parse-derivation-result! d/A)
+                                                    (parse-derivation-result! d/a)))
                              #:derivations (list d/A d/a)))))
 
   (define Aa-parser-obj (proc-parser "Aa" "" Aa-parser-proc))
@@ -822,7 +856,7 @@ TODO
   (define (get-A-parser) A-parser)
 
   (define results1 (parse* p1 A-parser))
-  (check-equal? (map parse-derivation-result (stream->list results1))
+  (check-equal? (map parse-derivation-result! (stream->list results1))
                 (list "a" "aa" "aaa" "aaaa" "aaaaa"))
 
   )

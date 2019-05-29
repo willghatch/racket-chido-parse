@@ -8,9 +8,9 @@
  epsilon-parser
 
  ;; TODO - These are not great, should probably be replaced
- between*
+ ;between*
  traditional-read-func->parse-result-func
- result-modify
+ wrap-derivation
  )
 
 (require
@@ -42,7 +42,12 @@
   (define-values (line col pos) (port-next-location port))
   pos)
 
-(define (sequence-2 l r
+#|
+TODO -
+I need to re-think the derivation result interface for all these combinators.
+|#
+
+#;(define (sequence-2 l r
                     #:name [name #f]
                     #:derive [derive #f]
                     #:result [result #f])
@@ -83,8 +88,9 @@
           [derive derive]
           [make-result (λ derivations
                          (make-parse-derivation
-                          (apply make-result
-                                 (map parse-derivation-result derivations))
+                          (λ args
+                            (apply make-result
+                                   (map parse-derivation-result derivations)))
                           #:derivations derivations))]
           [else (error 'sequence
                        "must provide a result or derivation transformer")]))
@@ -115,11 +121,13 @@
           [derive derive]
           [make-result (λ (derivations)
                          (make-parse-derivation
-                          (make-result (map parse-derivation-result derivations))
+                          (λ args
+                            (make-result (map parse-derivation-result derivations)))
                           #:derivations derivations))]
           [else (λ (derivations)
                   (make-parse-derivation
-                   (map parse-derivation-result derivations)
+                   (λ args
+                     (map parse-derivation-result derivations))
                    #:derivations derivations))]))
   (define (proc port)
     (define (get-more-streams derivations)
@@ -169,8 +177,10 @@
               #:result make-result
               #:max 1))
 
+;; TODO - greedy repetition
+
 (define (epsilon-parser #:name [name "epsilon"]
-                        #:result-value [result #f])
+                        #:result [result #f])
   (proc-parser name "" (λ (p) (make-parse-derivation result #:end (port->pos p)))))
 
 
@@ -178,6 +188,7 @@
                   #:derive [derive #f]
                   #:result [make-result #f])
   ;; TODO - better version
+  ;; TODO - also, the result handling of this is wrong and doesn't match the new lazy API.
   ;; This is like kleene star for the main parser, except that between any
   ;; two of the main parser, the between parser must succeed, though its
   ;; result is thrown away.
@@ -207,7 +218,7 @@
                              (cons d (parse-derivation-derivation-list d2))))))))
   (proc-parser use-name "" proc))
 
-(define (result-modify parser result-func #:name [name #f])
+(define (wrap-derivation parser wrap-func #:name [name #f])
   (proc-parser (or name (parser-name parser))
                (parser-prefix parser)
                (λ (port)
@@ -215,7 +226,7 @@
                  (if (parse-failure? s)
                      s
                      (stream-map (λ (d) (make-parse-derivation
-                                         (result-func (parse-derivation-result d))
+                                         (wrap-func d)
                                          #:derivations (list d) ))
                                  s)))))
 

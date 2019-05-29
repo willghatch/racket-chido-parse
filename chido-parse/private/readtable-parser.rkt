@@ -162,7 +162,8 @@
     (set-chido-readtable-layout*-parser!
      rt (kleene-star (make-alt-parser "chido-readtable-layout"
                                       (chido-readtable-layout-parsers rt))
-                     #:result (λ (elems) #f)))
+                     #:derive (λ (elems) (make-parse-derivation
+                                          #f #:derivations elems))))
     (set-chido-readtable-read1-parser!
      rt
      ;; TODO - better name!
@@ -275,14 +276,19 @@
         (define-values (line col pos) (port-next-location port))
         (define span sym/num-length)
         (define str (read-string sym/num-length port))
-        ;; TODO - check options for whether complex numbers, rational numbers, and numbers of any kind are supported in this readtable...
-        (define number (string->number str))
-        (define datum (or number (string->symbol str)))
-        (define stx (datum->syntax #f datum (list (object-name port)
-                                                  line col pos span)))
-        ;; TODO - use result transformer
-        ;; TODO - by default this should be a syntax object, but for now I'll return a datum
-        (make-parse-derivation datum #:end (+ pos span)))))
+        (define result-func
+          (λ (line column start-position end-position derivations)
+
+            ;; TODO - check options for whether complex numbers, rational numbers, and numbers of any kind are supported in this readtable...
+            (define number (string->number str))
+            (define datum (or number (string->symbol str)))
+            #;(define stx (datum->syntax #f datum (list (object-name port)
+                                                      line col pos span)))
+            ;; TODO - use result transformer
+            ;; TODO - by default this should be a syntax object, but for now I'll return a datum
+            datum
+            ))
+        (make-parse-derivation result-func #:end (+ pos span)))))
 
 (define symbol/number-parser
   (proc-parser "symbol/number-parser" "" parse-symbol/number-func))
@@ -344,8 +350,8 @@
                  (define-values (line col pos) (port-next-location port))
                  (make-parse-derivation r #:end pos))))
 
-(define hash-t-parser (result-modify "#t" (λ(x)#t)))
-(define hash-f-parser (result-modify "#f" (λ(x)#f)))
+(define hash-t-parser (wrap-derivation "#t" (λ(x)#t)))
+(define hash-f-parser (wrap-derivation "#f" (λ(x)#f)))
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
