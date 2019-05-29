@@ -169,17 +169,17 @@
      (proc-parser
       "chido-readtable-read1"
       ""
-      (λ (port)
-        (define parsers (append
-                         (chido-readtable-nonterminating-parsers rt)
-                         (chido-readtable-soft-terminating-parsers rt)
-                         (chido-readtable-terminating-parsers rt)))
-        (define alt (make-alt-parser "chido-readtable-read1/alt"
-                                     parsers))
-        (define parsers-result (parse* port alt))
-        (if (parse-failure? parsers-result)
-            (parse* port symbol/number-parser #:args (list rt))
-            parsers-result))))
+      (let* ([parsers (append
+                       (chido-readtable-nonterminating-parsers rt)
+                       (chido-readtable-soft-terminating-parsers rt)
+                       (chido-readtable-terminating-parsers rt))]
+             [alt (make-alt-parser "chido-readtable-read1/alt"
+                                   parsers)])
+        (λ (port)
+          (define parsers-result (parse* port alt))
+          (if (parse-failure? parsers-result)
+              (parse* port symbol/number-parser #:args (list rt))
+              parsers-result)))))
     (set-chido-readtable-layout*+read1-parser!
      rt
      (sequence (chido-readtable-layout*-parser rt)

@@ -10,6 +10,8 @@
    racket/file
    racket/stream
    rackunit
+
+   profile
    )
 
   (define my-s-exp-readtable
@@ -29,7 +31,24 @@
 
   (define f (command-line #:args (filename) filename))
 
-  (define s (file->string f))
+  (define s1 (file->string f))
+  (define s "(
+ (this is a test (of an s-expr that) is moderately
+       (large and (I dont know) (whether (it will (be a (good) test)))
+              but Im going to use it (anyway as) a test I guess))
+ (this is a test (of an s-expr that) is moderately
+       (large and (I dont know) (whether (it will (be a (good) test)))
+              but Im going to use it (anyway as) a test I guess))
+ (this is a test (of an s-expr that) is moderately
+       (large and (I dont know) (whether (it will (be a (good) test)))
+              but Im going to use it (anyway as) a test I guess))
+ (this is a test (of an s-expr that) is moderately
+       (large and (I dont know) (whether (it will (be a (good) test)))
+              but Im going to use it (anyway as) a test I guess))
+ (this is a test (of an s-expr that) is moderately
+       (large and (I dont know) (whether (it will (be a (good) test)))
+              but Im going to use it (anyway as) a test I guess))
+ )")
 
   (eprintf "Time for chido-parse s-exp parser:\n")
   (define my-parse
@@ -37,11 +56,15 @@
      ([current-chido-readtable my-s-exp-readtable])
      (time (parse-derivation-result
             (stream-first
+             (parse* (open-input-string s) my-parser))))
+     (eprintf "\n\nTime for SECOND parse of s-exp parse that should be cached!\n\n")
+     (time (parse-derivation-result
+            (stream-first
              (parse* (open-input-string s) my-parser))))))
-  (eprintf "Time for racket's read function:\n")
-  (define r-parse
-    (time (read (open-input-string s))))
+  ;(eprintf "Time for racket's read function:\n")
+  ;(define r-parse
+  ;  (time (read (open-input-string s))))
 
-  (check-equal? my-parse r-parse)
+  ;(check-equal? my-parse r-parse)
 
   )
