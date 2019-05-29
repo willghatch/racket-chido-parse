@@ -445,7 +445,7 @@ A weak hash port-broker->ephemeron with scheduler.
     (if (null? jobs)
         #f
         (let ([j (car jobs)])
-          (cond [(member j blocked) (loop (cdr jobs) blocked)]
+          (cond [(memq j blocked) (loop (cdr jobs) blocked)]
                 ;; if it has a continuation/worker, add dependencies to jobs
                 [else (match (parser-job-continuation/worker j)
                         [(scheduled-continuation job k dependency ready?)
@@ -540,7 +540,7 @@ A weak hash port-broker->ephemeron with scheduler.
        (define next-job (car remaining-jobs))
        (rec (parser-job-continuation/worker next-job) (cons job jobs))]
       [(scheduled-continuation job k dependency ready?)
-       (if (member dependency jobs)
+       (if (memq dependency jobs)
            (begin
              (set-scheduled-continuation-dependency!
               goal
