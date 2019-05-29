@@ -5,6 +5,9 @@
     "scribble-lib"
     "racket-doc"
     "rackunit-lib"
+    "data-lib"
+
+    "profile-lib"
     ))
 
 (define version "0.0")
