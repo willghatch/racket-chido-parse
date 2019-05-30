@@ -352,7 +352,9 @@ I need to re-think the derivation result interface for all these combinators.
            (parse* (open-input-string "()") basic-s-exp)))
      (list '()))
 
-  (c check-equal?
+  ;; TODO - this test is causing an infinite loop and gobbling memory since a recent change.
+  (check-equal? 'todo 'fix-the-test-next-to-this-that-i-commented-out)
+  #;(c check-equal?
      (map parse-derivation-result
           (stream->list
            (parse* (open-input-string "test") basic-s-exp)))
