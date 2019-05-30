@@ -48,6 +48,7 @@
  racket/match
  racket/struct
  racket/exn
+ data/gvector
  (for-syntax
   racket/base
   syntax/parse
@@ -159,14 +160,20 @@
         [(string? p) p]
         [else ""]))
 
+(define parser-cache (make-weak-hasheq))
 (define (parser->usable p)
-  ;; TODO - I maybe should be caching these depending on how other caching is working...
-  (cond [(parser-struct? p) p]
-        [(custom-parser? p) (parser->usable ((custom-parser-ref p) p))]
-        [(string? p) (string->parser p)]
-        [(regexp? p) (regexp->parser p)]
-        [(procedure? p) (parser->usable (p))]
-        [else (error 'chido-parse "not a parser: ~s" p)]))
+  (define (rec p)
+    (cond [(parser-struct? p) p]
+          [(custom-parser? p) (rec ((custom-parser-ref p) p))]
+          [(string? p) (string->parser p)]
+          [(regexp? p) (regexp->parser p)]
+          [(procedure? p) (rec (p))]
+          [else (error 'chido-parse "not a parser: ~s" p)]))
+  (define cached (hash-ref parser-cache p #f))
+  (or cached
+      (let ([result (rec p)])
+        (hash-set! parser-cache p result)
+        result)))
 
 (struct parse-stream
   (result next-job scheduler)
@@ -278,7 +285,7 @@ The job->result-cache is a map from parser-job structs -> parser-stream OR parse
   #:mutable
   #:transparent)
 (define (make-scheduler port-broker)
-  (scheduler port-broker #f #f '() (hash) (hasheq)))
+  (scheduler port-broker #f #f '() (make-start-position-cache) (hasheq)))
 
 (define (pop-hint! scheduler)
   (set-scheduler-hint-stack! scheduler (cdr (scheduler-hint-stack scheduler))))
@@ -377,25 +384,84 @@ A weak hash port-broker->ephemeron with scheduler.
      (make-cycle-failure failure-job)]
     [else (hash-ref (scheduler-job->result-cache s) job #f)]))
 
+#|
+The job cache is a multi-level dictionary with the following keys / implementations:
+* start-position / gvector
+* parser / mutable hasheq
+* result-number / gvector
+* extra-args / mutable hashequal?
+* cp-params / mutable hashequal?
+
+TODO - does it make sense to use hasheq for extra-args and cp-params?
+TODO - should start-position use a gvector?  Many start positions will not actually be used for parsing, probably.
+TODO - perhaps alists instead of hashes for things that likely have a small number of entries?
+|#
+(define (make-start-position-cache)
+  (make-gvector #:capacity 1000))
+(define (make-parser-cache)
+  (make-hasheq))
+(define (make-result-number-cache)
+  (make-gvector #:capacity 10))
+(define (make-extra-args-cache)
+  (make-hash))
+(define (make-cp-params-cache)
+  (make-hash))
+
+
 (define (get-job! s parser extra-args cp-params start-position result-number)
-  (define existing (hash-ref+ #f (scheduler-job-info->job-cache s)
-                              parser extra-args cp-params start-position result-number))
-  (define (make-parser-job p extra-args cp-params start result-index)
-    (parser-job p extra-args cp-params start result-index #f '() #f))
+  (define (make-parser-job parser)
+    (parser-job parser extra-args cp-params start-position result-number #f '() #f))
+  ;; traverse-cache returns the contents if `update` is false.
+  (define (traverse-cache parser update)
+    (define c/start-pos (scheduler-job-info->job-cache s))
+    (define c/parser
+      (cond [(< start-position (gvector-count c/start-pos))
+             (gvector-ref c/start-pos start-position)]
+            [update (for ([i (in-range (gvector-count c/start-pos)
+                                       (add1 start-position))])
+                      (gvector-add! c/start-pos
+                                    (make-parser-cache)))
+                    (gvector-ref c/start-pos start-position)]
+            [else #f]))
+    (define c/result-n
+      (and c/parser
+           (let ([r (hash-ref c/parser parser #f)])
+             (cond [r r]
+                   [update (let ([c (make-result-number-cache)])
+                             (hash-set! c/parser parser c)
+                             c)]
+                   [else #f]))))
+    (define c/extra-args
+      (and c/result-n
+           (cond [(< result-number (gvector-count c/result-n))
+                  (gvector-ref c/result-n result-number)]
+                 [update (for ([i (in-range (gvector-count c/result-n)
+                                            (add1 result-number))])
+                           (gvector-add! c/result-n (make-extra-args-cache)))
+                         (gvector-ref c/result-n result-number)]
+                 [else #f])))
+    (define c/cp-params
+      (and c/extra-args
+           (let ([r (hash-ref c/extra-args extra-args #f)])
+             (cond [r r]
+                   [update (let ([c (make-cp-params-cache)])
+                             (hash-set! c/extra-args extra-args c)
+                             c)]
+                   [else #f]))))
+    (define value
+      (and c/extra-args
+           (let ([r (hash-ref c/cp-params cp-params #f)])
+             (cond [r r]
+                   [update
+                    (hash-set! c/cp-params cp-params update)
+                    update]
+                   [else #f]))))
+    value)
+
+  (define usable (parser->usable parser))
+  (define existing (traverse-cache usable #f))
   (or existing
-      (let* ([usable (parser->usable parser)]
-             [fresh-job (make-parser-job usable extra-args cp-params
-                                         start-position result-number)])
-        (set-scheduler-job-info->job-cache!
-         s
-         (hash-set+ (scheduler-job-info->job-cache s)
-                    parser extra-args cp-params start-position result-number fresh-job))
-        (when (not (eq? parser usable))
-          (set-scheduler-job-info->job-cache!
-           s
-           (hash-set+ (scheduler-job-info->job-cache s)
-                      usable extra-args cp-params start-position result-number fresh-job)))
-        fresh-job)))
+      (traverse-cache usable (make-parser-job usable))))
 
 (define (get-next-job! s job)
   (match job
