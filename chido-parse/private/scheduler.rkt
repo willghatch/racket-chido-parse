@@ -690,9 +690,10 @@ TODO - perhaps alists instead of hashes for things that likely have a small numb
      (match k/worker
        [(scheduled-continuation job k dependency (and ready? #t))
         (do-run! scheduler
-                 (λ () (k (scheduler-get-result scheduler dependency)))
+                 k
                  job
-                 #t)]
+                 #t
+                 (scheduler-get-result scheduler dependency))]
        [(alt-worker job remaining-jobs (list ready-job rjs ...) failures successful?)
         ;; TODO - remove ready-job from ready-jobs and remaining-jobs, if it's a success cache the result, set success flag, and add the next iteration of the job to the remaining jobs (this should check if it's also ready and add it to the ready list as appropriate), if failure add to failures.
         (set-alt-worker-remaining-jobs! k/worker (remove ready-job remaining-jobs))
@@ -737,7 +738,7 @@ TODO - perhaps alists instead of hashes for things that likely have a small numb
                (do-run! scheduler
                         (λ () (stream-rest result-stream))
                         job
-                        #f)]
+                        #f #f)]
               [(equal? 0 result-index)
                (match parsador
                  [(proc-parser name prefix procedure)
@@ -758,7 +759,7 @@ TODO - perhaps alists instead of hashes for things that likely have a small numb
                                          (stream-flatten result)
                                          result))))
                                job
-                               #f)
+                               #f #f)
                       (let ([result (parse-failure name start-position start-position
                                                    "prefix didn't match" '())])
                         (cache-result-and-ready-dependents! scheduler job result)
@@ -786,25 +787,34 @@ TODO - perhaps alists instead of hashes for things that likely have a small numb
                  (set-parser-job-continuation/worker! job #f)
                  (run-scheduler scheduler))])])]))
 
-(define (do-run! scheduler thunk job continuation-run?)
+(define (do-run! scheduler thunk job continuation-run? k-arg)
   (when (not job)
     (error 'chido-parse "Internal error - trying to recur with no job"))
+  #|
+  When continuation-run? is true, we are running a continuation (instead of a fresh thunk) and we want to supply k-arg.
+  This keeps us from growing the continuation at all when recurring.
+  |#
   #|
   Here the stuff about the recursive enter flag is an alternate protocol to having the scheduler done-k check for the recursive-enter-flag, where we instead use abort-current-continuation.
   A quick test seems to show that abusing done-k is faster than aborting.
   But I'm leaving the dead code here to be able to quickly test again later.
   |#
   (define result
-    (call-with-continuation-prompt
-     (if continuation-run?
+    (if continuation-run?
+        (call-with-continuation-prompt
          thunk
+         chido-parse-prompt
+         #;(λ () recursive-enter-flag)
+         #f
+         k-arg)
+        (call-with-continuation-prompt
          (λ ()
            (with-handlers ([(λ (e) #t) (λ (e) (exn->failure e job))])
              (parameterize ([current-chido-parse-job job])
-               (thunk)))))
-     chido-parse-prompt
-     #;(λ () recursive-enter-flag)
-     ))
+               (thunk))))
+         chido-parse-prompt
+         #;(λ () recursive-enter-flag)
+         #f)))
   (begin (cache-result-and-ready-dependents! scheduler job result)
          (run-scheduler scheduler))
   #;(if (eq? result recursive-enter-flag)
