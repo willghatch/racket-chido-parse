@@ -690,7 +690,8 @@ TODO - perhaps alists instead of hashes for things that likely have a small numb
        [(scheduled-continuation job k dependency (and ready? #t))
         (do-run! scheduler
                  (λ () (k (scheduler-get-result scheduler dependency)))
-                 job)]
+                 job
+                 #t)]
        [(alt-worker job remaining-jobs (list ready-job rjs ...) failures successful?)
         ;; TODO - remove ready-job from ready-jobs and remaining-jobs, if it's a success cache the result, set success flag, and add the next iteration of the job to the remaining jobs (this should check if it's also ready and add it to the ready list as appropriate), if failure add to failures.
         (set-alt-worker-remaining-jobs! k/worker (remove ready-job remaining-jobs))
@@ -734,7 +735,8 @@ TODO - perhaps alists instead of hashes for things that likely have a small numb
         (cond [(stream? result-stream)
                (do-run! scheduler
                         (λ () (stream-rest result-stream))
-                        job)]
+                        job
+                        #f)]
               [(equal? 0 result-index)
                (match parsador
                  [(proc-parser name prefix procedure)
@@ -745,7 +747,6 @@ TODO - perhaps alists instead of hashes for things that likely have a small numb
                   ;; TODO - optimize this peek for alt parsers, at least...
                   (if (equal? prefix
                               (peek-string prefix-length 0 port))
-                      ;; TODO - this interface should maybe be different...
                       (do-run! scheduler
                                (λ ()
                                  (parameterize ([current-chido-parse-parameters
@@ -755,7 +756,8 @@ TODO - perhaps alists instead of hashes for things that likely have a small numb
                                               (not (flattened-stream? result)))
                                          (stream-flatten result)
                                          result))))
-                               job)
+                               job
+                               #f)
                       (let ([result (parse-failure name start-position start-position
                                                    "prefix didn't match" '())])
                         (cache-result-and-ready-dependents! scheduler job result)
@@ -783,17 +785,17 @@ TODO - perhaps alists instead of hashes for things that likely have a small numb
                  (set-parser-job-continuation/worker! job #f)
                  (run-scheduler scheduler))])])]))
 
-(define (do-run! scheduler thunk job)
+(define (do-run! scheduler thunk job continuation-run?)
   (when (not job)
     (error 'chido-parse "Internal error - trying to recur with no job"))
   (define result
     (call-with-continuation-prompt
-     (λ ()
-       ;; TODO - this error handling should probably be done where thunk is created.
-       ;;        Here it will grow continuations each time they get re-scheduled...
-       (with-handlers ([(λ (e) #t) (λ (e) (exn->failure e job))])
-         (parameterize ([current-chido-parse-job job])
-           (thunk))))
+     (if continuation-run?
+         thunk
+         (λ ()
+           (with-handlers ([(λ (e) #t) (λ (e) (exn->failure e job))])
+             (parameterize ([current-chido-parse-job job])
+               (thunk)))))
      chido-parse-prompt))
   (cache-result-and-ready-dependents! scheduler job result)
   (run-scheduler scheduler))
