@@ -503,6 +503,7 @@ TODO - perhaps alists instead of hashes for things that likely have a small numb
                (set-parser-job-continuation/worker! parent-job sched-k)
                (push-parser-job-dependent! job sched-k)
                ;(push-hint! scheduler sched-k)
+               ;(abort-current-continuation chido-parse-prompt)
                ;; Launch the scheduler by being "done" with a flag value.
                ((scheduled-continuation-k (scheduler-done-k scheduler))
                 recursive-enter-flag))
@@ -788,6 +789,11 @@ TODO - perhaps alists instead of hashes for things that likely have a small numb
 (define (do-run! scheduler thunk job continuation-run?)
   (when (not job)
     (error 'chido-parse "Internal error - trying to recur with no job"))
+  #|
+  Here the stuff about the recursive enter flag is an alternate protocol to having the scheduler done-k check for the recursive-enter-flag, where we instead use abort-current-continuation.
+  A quick test seems to show that abusing done-k is faster than aborting.
+  But I'm leaving the dead code here to be able to quickly test again later.
+  |#
   (define result
     (call-with-continuation-prompt
      (if continuation-run?
@@ -796,9 +802,16 @@ TODO - perhaps alists instead of hashes for things that likely have a small numb
            (with-handlers ([(λ (e) #t) (λ (e) (exn->failure e job))])
              (parameterize ([current-chido-parse-job job])
                (thunk)))))
-     chido-parse-prompt))
-  (cache-result-and-ready-dependents! scheduler job result)
-  (run-scheduler scheduler))
+     chido-parse-prompt
+     #;(λ () recursive-enter-flag)
+     ))
+  (begin (cache-result-and-ready-dependents! scheduler job result)
+         (run-scheduler scheduler))
+  #;(if (eq? result recursive-enter-flag)
+      (run-scheduler scheduler)
+      (begin (cache-result-and-ready-dependents! scheduler job result)
+             (run-scheduler scheduler)))
+  )
 
 (define (ready-dependents! job)
   (for ([dep (parser-job-dependents job)])
