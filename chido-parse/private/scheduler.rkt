@@ -502,7 +502,6 @@ TODO - perhaps alists instead of hashes for things that likely have a small numb
           (error 'chido-parse
                  "Recursive parse tried to recursively parse to the left of its starting position: ~a"
                  (parser-name (parser-job-parser (current-chido-parse-job)))))
-        ;; TODO - I should also only do the expensive left-recursive case when the new job might also be left-recursive.
         (if (and left-recursive? (current-chido-parse-job))
             ;; This is a (potentially left-) recursive call.
             ;; So we de-schedule the current work by capturing its continuation,
@@ -515,10 +514,7 @@ TODO - perhaps alists instead of hashes for things that likely have a small numb
                  (set-parser-job-continuation/worker! parent-job sched-k)
                  (push-parser-job-dependent! job sched-k)
                  ;(push-hint! scheduler sched-k)
-                 (abort-current-continuation chido-parse-prompt)
-                 ;; Launch the scheduler by being "done" with a flag value.
-                 #;((scheduled-continuation-k (car (scheduler-done-k-stack scheduler)))
-                  recursive-enter-flag))
+                 (abort-current-continuation chido-parse-prompt))
                chido-parse-prompt))
             ;; This is the original entry into the parser machinery.
             ;; Or a recursive call that isn't a left-recursion.
@@ -837,18 +833,12 @@ TODO - perhaps alists instead of hashes for things that likely have a small numb
   When continuation-run? is true, we are running a continuation (instead of a fresh thunk) and we want to supply k-arg.
   This keeps us from growing the continuation at all when recurring.
   |#
-  #|
-  Here the stuff about the recursive enter flag is an alternate protocol to having the scheduler done-k check for the recursive-enter-flag, where we instead use abort-current-continuation.
-  A quick test seems to show that abusing done-k is faster than aborting.
-  But I'm leaving the dead code here to be able to quickly test again later.
-  |#
   (define result
     (if continuation-run?
         (call-with-continuation-prompt
          thunk
          chido-parse-prompt
          (λ () recursive-enter-flag)
-         ;#f
          k-arg)
         (call-with-continuation-prompt
          (λ ()
@@ -856,16 +846,11 @@ TODO - perhaps alists instead of hashes for things that likely have a small numb
              (parameterize ([current-chido-parse-job job])
                (thunk))))
          chido-parse-prompt
-         (λ () recursive-enter-flag)
-         ;#f
-         )))
-  #;(begin (cache-result-and-ready-dependents! scheduler job result)
-         (run-scheduler scheduler))
+         (λ () recursive-enter-flag))))
   (if (eq? result recursive-enter-flag)
       (run-scheduler scheduler)
       (begin (cache-result-and-ready-dependents! scheduler job result)
-             (run-scheduler scheduler)))
-  )
+             (run-scheduler scheduler))))
 
 (define (ready-dependents! job)
   (for ([dep (parser-job-dependents job)])
