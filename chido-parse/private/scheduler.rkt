@@ -515,42 +515,36 @@ TODO - perhaps alists instead of hashes for things that likely have a small numb
                  (set-parser-job-continuation/worker! parent-job sched-k)
                  (push-parser-job-dependent! job sched-k)
                  ;(push-hint! scheduler sched-k)
-                 ;(abort-current-continuation chido-parse-prompt)
+                 (abort-current-continuation chido-parse-prompt)
                  ;; Launch the scheduler by being "done" with a flag value.
-                 ((scheduled-continuation-k (car (scheduler-done-k-stack scheduler)))
+                 #;((scheduled-continuation-k (car (scheduler-done-k-stack scheduler)))
                   recursive-enter-flag))
                chido-parse-prompt))
             ;; This is the original entry into the parser machinery.
             ;; Or a recursive call that isn't a left-recursion.
-            ;; In this branch we want to capture the full continuation.
-            ;; We also use this continuation as a loop point for the
-            ;; scheduler until a result is ready.
             (let ()
               (define result
-                (call-with-current-continuation
-                 (λ (full-k)
-                   (define k-job (scheduled-continuation #f full-k job #f))
-                   (push-parser-job-dependent! job k-job)
-                   ;; As a fresh entry into the parser, we start a fresh hint stack.
-                   (set-scheduler-hint-stack-stack!
-                    scheduler (cons (list job)
-                                    (scheduler-hint-stack-stack scheduler)))
-                   (set-scheduler-done-k-stack!
-                    scheduler (cons k-job
-                                    (scheduler-done-k-stack scheduler)))
-                   (set-scheduler-top-job-stack!
-                    scheduler (cons job (scheduler-top-job-stack scheduler)))
-                   (run-scheduler scheduler))))
-              (if (eq? recursive-enter-flag result)
-                  (run-scheduler scheduler)
-                  (begin
-                    (set-scheduler-done-k-stack!
-                     scheduler (cdr (scheduler-done-k-stack scheduler)))
-                    (set-scheduler-top-job-stack!
-                     scheduler (cdr (scheduler-top-job-stack scheduler)))
-                    (set-scheduler-hint-stack-stack!
-                     scheduler (cdr (scheduler-hint-stack-stack scheduler)))
-                    result)))))))
+                (let ()
+                  (define k-job (scheduled-continuation #f #f job #f))
+                  (push-parser-job-dependent! job k-job)
+                  ;; As a fresh entry into the parser, we start a fresh hint stack.
+                  (set-scheduler-hint-stack-stack!
+                   scheduler (cons (list job)
+                                   (scheduler-hint-stack-stack scheduler)))
+                  (set-scheduler-done-k-stack!
+                   scheduler (cons k-job
+                                   (scheduler-done-k-stack scheduler)))
+                  (set-scheduler-top-job-stack!
+                   scheduler (cons job (scheduler-top-job-stack scheduler)))
+                  (run-scheduler scheduler)))
+              (begin
+                (set-scheduler-done-k-stack!
+                 scheduler (cdr (scheduler-done-k-stack scheduler)))
+                (set-scheduler-top-job-stack!
+                 scheduler (cdr (scheduler-top-job-stack scheduler)))
+                (set-scheduler-hint-stack-stack!
+                 scheduler (cdr (scheduler-hint-stack-stack scheduler)))
+                result))))))
 
 
 (define (find-work s job-stacks)
@@ -589,102 +583,104 @@ TODO - perhaps alists instead of hashes for things that likely have a small numb
 
 (define (run-scheduler s)
   (define done-k (car (scheduler-done-k-stack s)))
-  (when (scheduled-continuation-ready? done-k)
-    ;; Escape the mad world of delimited-continuation-based parsing!
-    ((scheduled-continuation-k done-k)
-     (scheduler-get-result s (scheduled-continuation-dependency done-k))))
-  (define using-hint? #t)
-  (when (null? (car (scheduler-hint-stack-stack s)))
-    (set! using-hint? #f)
-    (push-hint! s (car (scheduler-top-job-stack s))))
-  (define hint-stack (car (scheduler-hint-stack-stack s)))
-  (define hint-worker (parser-job-continuation/worker (car hint-stack)))
-  (define (run-actionable-job? j)
-    ;; TODO - this is probably not great, but for now I just want to get things working again...
-    (if (scheduler-get-result s j)
-        (run-scheduler s)
-        (run-actionable-job s j)))
-  (match hint-worker
-    [#f (if (scheduler-get-result s (car hint-stack))
-            (begin (pop-hint! s)
-                   (run-scheduler s))
-            (run-actionable-job? (car hint-stack)))]
-    [(scheduled-continuation job k dependency #t)
-     ;; also ready
-     (pop-hint! s)
-     (run-actionable-job? job)]
-    [(scheduled-continuation job k dependency ready?)
-     ;; Not ready
-     (let* ([actionable-job-stack (find-work s (list hint-stack))]
-            [actionable-job (and actionable-job-stack (car actionable-job-stack))])
-       (and actionable-job-stack (set-scheduler-hint-stack-stack!
-                                  s (cons actionable-job-stack
-                                          (cdr (scheduler-hint-stack-stack s)))))
-       (cond
-         [(and actionable-job (scheduler-get-result s actionable-job))
-          ;; TODO - fix this...
-          ;(eprintf "\n")
-          ;(eprintf "WARNING! A continuation was not marked ready when its dependency finished\n")
-          ;(eprintf "Continuation for job: ~a\n" (or (and job (job->display job))
-          ;                                          job))
-          ;(eprintf "Dependency that didn't mark it ready: ~a\n"
-          ;         (job->display actionable-job))
-          ;(eprintf "Result for the dependency: ~s\n"
-          ;         (scheduler-get-result s actionable-job))
-          ;(eprintf "\n\n")
-          ;(error 'chido-parse "Internal error, dependency tracking error")
-          (pop-hint! s)
-          (ready-dependents! actionable-job)
-          (run-scheduler s)
-          ]
-         [actionable-job (run-actionable-job? actionable-job)]
-         [using-hint?
-          ;; try to find work in another part of the work tree...
-          (set-scheduler-hint-stack-stack!
-           s (cons '() (cdr (scheduler-hint-stack-stack s))))
-          (run-scheduler s)]
-         [else
-          ;; TODO - This should be optimized so that if `find-work` also finds this cycle...
-          (fail-smallest-cycle! s)
-          (run-scheduler s)]))]
-    [(alt-worker job remaining-jobs (list ready-job rjs ...) failures successful?)
-     (pop-hint! s)
-     (run-actionable-job? job)]
-    [(alt-worker job (list) (list) failures successful?)
-     (pop-hint! s)
-     (run-actionable-job? job)]
-    [(alt-worker job remaining-jobs ready-jobs failures successful?)
-     ;; No ready jobs
-     (let* ([actionable-job-stack (find-work s (map (λ (rj) (cons rj hint-stack))
-                                                    remaining-jobs))]
-            [actionable-job (and actionable-job-stack (car actionable-job-stack))])
-       (and actionable-job-stack (set-scheduler-hint-stack-stack!
-                                  s (cons actionable-job-stack
-                                          (cdr (scheduler-hint-stack-stack s)))))
-       (cond
-         [(and actionable-job (scheduler-get-result s actionable-job))
-          ;; TODO - fix this...
-          ;(eprintf "\n")
-          ;(eprintf "WARNING! An alt-worker was not marked ready when its dependency finished\n")
-          ;(eprintf "Worker for job: ~a\n" (job->display job))
-          ;(eprintf "Dependency that didn't mark it ready: ~a\n"
-          ;         (job->display actionable-job))
-          ;(eprintf "result for the dependency: ~s\n" (scheduler-get-result s actionable-job))
-          ;(eprintf "\n\n")
-          ;(error 'chido-parse "Internal error -- dependency tracking issue")
-          (pop-hint! s)
-          (ready-dependents! actionable-job)
-          (run-scheduler s)]
-         [actionable-job
-          (run-actionable-job? actionable-job)]
-         ;; Try finding an actionable job without following hints
-         [using-hint?
-          (set-scheduler-hint-stack-stack!
-           s (cons '() (cdr (scheduler-hint-stack-stack s))))
-          (run-scheduler s)]
-         [else
-          (fail-smallest-cycle! s)
-          (run-scheduler s)]))]))
+  (define scheduler-done? (scheduled-continuation-ready? done-k))
+  (cond
+    [scheduler-done?
+     ;; Escape the mad world of delimited-continuation-based parsing!
+     (scheduler-get-result s (scheduled-continuation-dependency done-k))]
+    [else
+     (define using-hint? #t)
+     (when (null? (car (scheduler-hint-stack-stack s)))
+       (set! using-hint? #f)
+       (push-hint! s (car (scheduler-top-job-stack s))))
+     (define hint-stack (car (scheduler-hint-stack-stack s)))
+     (define hint-worker (parser-job-continuation/worker (car hint-stack)))
+     (define (run-actionable-job? j)
+       ;; TODO - this is probably not great, but for now I just want to get things working again...
+       (if (scheduler-get-result s j)
+           (run-scheduler s)
+           (run-actionable-job s j)))
+     (match hint-worker
+       [#f (if (scheduler-get-result s (car hint-stack))
+               (begin (pop-hint! s)
+                      (run-scheduler s))
+               (run-actionable-job? (car hint-stack)))]
+       [(scheduled-continuation job k dependency #t)
+        ;; also ready
+        (pop-hint! s)
+        (run-actionable-job? job)]
+       [(scheduled-continuation job k dependency ready?)
+        ;; Not ready
+        (let* ([actionable-job-stack (find-work s (list hint-stack))]
+               [actionable-job (and actionable-job-stack (car actionable-job-stack))])
+          (and actionable-job-stack (set-scheduler-hint-stack-stack!
+                                     s (cons actionable-job-stack
+                                             (cdr (scheduler-hint-stack-stack s)))))
+          (cond
+            [(and actionable-job (scheduler-get-result s actionable-job))
+             ;; TODO - fix this...
+             ;(eprintf "\n")
+             ;(eprintf "WARNING! A continuation was not marked ready when its dependency finished\n")
+             ;(eprintf "Continuation for job: ~a\n" (or (and job (job->display job))
+             ;                                          job))
+             ;(eprintf "Dependency that didn't mark it ready: ~a\n"
+             ;         (job->display actionable-job))
+             ;(eprintf "Result for the dependency: ~s\n"
+             ;         (scheduler-get-result s actionable-job))
+             ;(eprintf "\n\n")
+             ;(error 'chido-parse "Internal error, dependency tracking error")
+             (pop-hint! s)
+             (ready-dependents! actionable-job)
+             (run-scheduler s)
+             ]
+            [actionable-job (run-actionable-job? actionable-job)]
+            [using-hint?
+             ;; try to find work in another part of the work tree...
+             (set-scheduler-hint-stack-stack!
+              s (cons '() (cdr (scheduler-hint-stack-stack s))))
+             (run-scheduler s)]
+            [else
+             ;; TODO - This should be optimized so that if `find-work` also finds this cycle...
+             (fail-smallest-cycle! s)
+             (run-scheduler s)]))]
+       [(alt-worker job remaining-jobs (list ready-job rjs ...) failures successful?)
+        (pop-hint! s)
+        (run-actionable-job? job)]
+       [(alt-worker job (list) (list) failures successful?)
+        (pop-hint! s)
+        (run-actionable-job? job)]
+       [(alt-worker job remaining-jobs ready-jobs failures successful?)
+        ;; No ready jobs
+        (let* ([actionable-job-stack (find-work s (map (λ (rj) (cons rj hint-stack))
+                                                       remaining-jobs))]
+               [actionable-job (and actionable-job-stack (car actionable-job-stack))])
+          (and actionable-job-stack (set-scheduler-hint-stack-stack!
+                                     s (cons actionable-job-stack
+                                             (cdr (scheduler-hint-stack-stack s)))))
+          (cond
+            [(and actionable-job (scheduler-get-result s actionable-job))
+             ;; TODO - fix this...
+             ;(eprintf "\n")
+             ;(eprintf "WARNING! An alt-worker was not marked ready when its dependency finished\n")
+             ;(eprintf "Worker for job: ~a\n" (job->display job))
+             ;(eprintf "Dependency that didn't mark it ready: ~a\n"
+             ;         (job->display actionable-job))
+             ;(eprintf "result for the dependency: ~s\n" (scheduler-get-result s actionable-job))
+             ;(eprintf "\n\n")
+             ;(error 'chido-parse "Internal error -- dependency tracking issue")
+             (pop-hint! s)
+             (ready-dependents! actionable-job)
+             (run-scheduler s)]
+            [actionable-job
+             (run-actionable-job? actionable-job)]
+            ;; Try finding an actionable job without following hints
+            [using-hint?
+             (set-scheduler-hint-stack-stack!
+              s (cons '() (cdr (scheduler-hint-stack-stack s))))
+             (run-scheduler s)]
+            [else
+             (fail-smallest-cycle! s)
+             (run-scheduler s)]))])]))
 
 
 (define (fail-smallest-cycle! scheduler)
@@ -851,8 +847,8 @@ TODO - perhaps alists instead of hashes for things that likely have a small numb
         (call-with-continuation-prompt
          thunk
          chido-parse-prompt
-         #;(λ () recursive-enter-flag)
-         #f
+         (λ () recursive-enter-flag)
+         ;#f
          k-arg)
         (call-with-continuation-prompt
          (λ ()
@@ -860,11 +856,12 @@ TODO - perhaps alists instead of hashes for things that likely have a small numb
              (parameterize ([current-chido-parse-job job])
                (thunk))))
          chido-parse-prompt
-         #;(λ () recursive-enter-flag)
-         #f)))
-  (begin (cache-result-and-ready-dependents! scheduler job result)
+         (λ () recursive-enter-flag)
+         ;#f
+         )))
+  #;(begin (cache-result-and-ready-dependents! scheduler job result)
          (run-scheduler scheduler))
-  #;(if (eq? result recursive-enter-flag)
+  (if (eq? result recursive-enter-flag)
       (run-scheduler scheduler)
       (begin (cache-result-and-ready-dependents! scheduler job result)
              (run-scheduler scheduler)))
