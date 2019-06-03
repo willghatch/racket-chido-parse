@@ -5,6 +5,10 @@
   [stream-stack-cursor? flattened-stream?]))
 (require racket/stream)
 
+#|
+A flattened stream is flattened depth-first, a la `flatten` for lists.
+|#
+
 (define generic-stream-first stream-first)
 
 (struct stream-stack-cursor (stack)
