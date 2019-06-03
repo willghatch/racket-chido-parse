@@ -46,6 +46,7 @@
  racket/stream
  racket/match
  racket/struct
+ racket/string
  racket/exn
  data/gvector
  (for-syntax
@@ -125,16 +126,48 @@
 
 (struct alt-parser parser-struct
   ;; TODO - use a prefix trie for the parsers
-  (parsers extra-arg-lists left-recursive?)
+  (parsers extra-arg-lists left-recursive? null?)
   #:transparent)
 
 (define (make-alt-parser name parsers [extra-arg-lists #f])
   (define l-recursive? (ormap parser-potentially-left-recursive? parsers))
+  (define null? (ormap parser-potentially-null? parsers))
   (alt-parser name
               parsers
               (or extra-arg-lists (map (λ (p) '()) parsers))
-              l-recursive?))
+              l-recursive?
+              null?))
 
+(struct sequence-parser parser-struct
+  (parsers make-result-function left-recursive? null?))
+
+(define (make-sequence-parser #:name [name #f] #:result [result #f] . parsers)
+  (define (l-recursive? parsers)
+    (cond [(null? parsers) #f]
+          [(parser-potentially-left-recursive? (car parsers)) #t]
+          [(parser-potentially-null? (car parsers)) (l-recursive? (cdr parsers))]
+          [else #f]))
+  (define l-r (l-recursive? parsers))
+  (define null (andmap parser-potentially-null? parsers))
+  (define use-name (or name (format "sequence_~a"
+                                    (string-join (map parser-name parsers) "_"))))
+  (sequence-parser use-name parsers result l-r null))
+
+(struct repetition-parser parser-struct
+  (parser min max greedy? make-result-function left-recursive? null?))
+
+(define (make-repetition-parser parser
+                                #:name [name #f]
+                                #:result [result #f]
+                                #:greedy? [greedy? #f]
+                                #:min [min 0]
+                                #:max [max +inf.0])
+  (define l-recursive? (parser-potentially-left-recursive? parser))
+  (define null? (or (equal? 0 min) (parser-potentially-null? parser)))
+  (define use-name (or name (format "repeat_~a_~a_~a"
+                                    (parser-name parser)
+                                    min max)))
+  (repetition-parser use-name parser min max greedy? result l-recursive? null?))
 
 (define-values (prop:custom-parser custom-parser? custom-parser-ref)
   ;; TODO - document -- the property should be a function that accepts a `self` argument and returns a parser.
@@ -166,8 +199,19 @@
 (define (parser-potentially-left-recursive? p)
   (cond [(alt-parser? p) (alt-parser-left-recursive? p)]
         [(proc-parser? p) (equal? "" (proc-parser-prefix p))]
+        [(sequence-parser? p) (sequence-parser-left-recursive? p)]
+        [(repetition-parser? p) (repetition-parser-left-recursive? p)]
         [(string? p) #f]
-        [else (error 'parser-potentially-left-recursive
+        [else (error 'parser-potentially-left-recursive?
+                     "Not yet implemented for: ~s" p)]))
+(define (parser-potentially-null? p)
+  (cond [(alt-parser? p) (alt-parser-null? p)]
+        [(proc-parser? p) (equal? "" (proc-parser-prefix p))]
+        [(sequence-parser? p) (sequence-parser-null? p)]
+        [(repetition-parser? p) (repetition-parser-null? p)]
+        [(equal? p "") #t]
+        [(string? p) #f]
+        [else (error 'parser-potentially-null?
                      "Not yet implemented for: ~s" p)]))
 
 (define parser-cache (make-weak-hasheq))
@@ -241,7 +285,7 @@
        [(parser-job parser extra-arguments cp-params start-position result-index
                     k/worker dependents result-stream)
         (match parser
-          [(alt-parser name parsers extra-arg-lists l-rec)
+          [(alt-parser name parsers extra-arg-lists l-rec nullable)
            ;; TODO - what is the best fail position?
            ;;        Probably I should analyze the sub-failures...
            (define fail-position start-position)
@@ -787,7 +831,7 @@ TODO - perhaps alists instead of hashes for things that likely have a small numb
                                                    "prefix didn't match" '())])
                         (cache-result-and-ready-dependents! scheduler job result)
                         (run-scheduler scheduler)))]
-                 [(alt-parser name parsers extra-arg-lists l-rec)
+                 [(alt-parser name parsers extra-arg-lists l-rec nullable)
                   (define (mk-dep parsador extra-args)
                     (get-job! scheduler parsador extra-args cp-params start-position 0))
                   (define worker
@@ -797,6 +841,13 @@ TODO - perhaps alists instead of hashes for things that likely have a small numb
                   (set-parser-job-continuation/worker! job worker)
                   ;(push-hint! scheduler worker)
                   (run-scheduler scheduler)]
+                 [(sequence-parser name parsers make-result-function
+                                   left-recursive? nullable?)
+                  (error 'sequence-parser "not yet implemented")]
+                 [(repetition-parser name parser min max greedy?
+                                     make-result-function
+                                     left-recursive? nullable?)
+                  (error 'repetition-parser "not yet implemented")]
                  [(? string?)
                   (define s parsador)
                   (define port (port-broker->port/char (scheduler-port-broker
