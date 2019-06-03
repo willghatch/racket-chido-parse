@@ -30,7 +30,7 @@
 
 (require
  "scheduler.rkt"
- "basic-combinators.rkt"
+ "procedural-combinators.rkt"
  "trie.rkt"
  "parameters.rkt"
  racket/match
