@@ -125,11 +125,15 @@
 
 (struct alt-parser parser-struct
   ;; TODO - use a prefix trie for the parsers
-  (parsers extra-arg-lists)
+  (parsers extra-arg-lists left-recursive?)
   #:transparent)
 
 (define (make-alt-parser name parsers [extra-arg-lists #f])
-  (alt-parser name parsers (or extra-arg-lists (map (λ (p) '()) parsers))))
+  (define l-recursive? (ormap parser-potentially-left-recursive? parsers))
+  (alt-parser name
+              parsers
+              (or extra-arg-lists (map (λ (p) '()) parsers))
+              l-recursive?))
 
 
 (define-values (prop:custom-parser custom-parser? custom-parser-ref)
@@ -158,6 +162,13 @@
   (cond [(proc-parser? p) (proc-parser-prefix p)]
         [(string? p) p]
         [else ""]))
+
+(define (parser-potentially-left-recursive? p)
+  (cond [(alt-parser? p) (alt-parser-left-recursive? p)]
+        [(proc-parser? p) (equal? "" (proc-parser-prefix p))]
+        [(string? p) #f]
+        [else (error 'parser-potentially-left-recursive
+                     "Not yet implemented for: ~s" p)]))
 
 (define parser-cache (make-weak-hasheq))
 (define (parser->usable p)
@@ -230,7 +241,7 @@
        [(parser-job parser extra-arguments cp-params start-position result-index
                     k/worker dependents result-stream)
         (match parser
-          [(alt-parser name parsers extra-arg-lists)
+          [(alt-parser name parsers extra-arg-lists l-rec)
            ;; TODO - what is the best fail position?
            ;;        Probably I should analyze the sub-failures...
            (define fail-position start-position)
@@ -484,7 +495,9 @@ TODO - perhaps alists instead of hashes for things that likely have a small numb
       (let* ([old-start (and (current-chido-parse-job)
                              (parser-job-start-position (current-chido-parse-job)))]
              [new-start (parser-job-start-position job)]
-             [left-recursive? (eq? old-start new-start)])
+             [parser (parser-job-parser job)]
+             [left-recursive? (and (eq? old-start new-start)
+                                   (parser-potentially-left-recursive? parser))])
         (when (and old-start (< new-start old-start))
           (error 'chido-parse
                  "Recursive parse tried to recursively parse to the left of its starting position: ~a"
@@ -782,7 +795,7 @@ TODO - perhaps alists instead of hashes for things that likely have a small numb
                                                    "prefix didn't match" '())])
                         (cache-result-and-ready-dependents! scheduler job result)
                         (run-scheduler scheduler)))]
-                 [(alt-parser name parsers extra-arg-lists)
+                 [(alt-parser name parsers extra-arg-lists l-rec)
                   (define (mk-dep parsador extra-args)
                     (get-job! scheduler parsador extra-args cp-params start-position 0))
                   (define worker
