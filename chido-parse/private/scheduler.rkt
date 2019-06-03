@@ -585,6 +585,7 @@ TODO - perhaps alists instead of hashes for things that likely have a small numb
      ;; Not ready
      (let* ([actionable-job-stack (find-work s (list hint-stack))]
             [actionable-job (and actionable-job-stack (car actionable-job-stack))])
+       (and actionable-job-stack (set-scheduler-hint-stack! s actionable-job-stack))
        (cond
          [(and actionable-job (scheduler-get-result s actionable-job))
           ;; TODO - fix this...
@@ -622,6 +623,7 @@ TODO - perhaps alists instead of hashes for things that likely have a small numb
      (let* ([actionable-job-stack (find-work s (map (λ (rj) (cons rj hint-stack))
                                                     remaining-jobs))]
             [actionable-job (and actionable-job-stack (car actionable-job-stack))])
+       (and actionable-job-stack (set-scheduler-hint-stack! s actionable-job-stack))
        (cond
          [(and actionable-job (scheduler-get-result s actionable-job))
           (eprintf "\n")
