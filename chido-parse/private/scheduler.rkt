@@ -25,7 +25,6 @@
  (struct-out parse-failure)
  make-parse-failure
 
- string->parser
  regexp->parser
 
  parse*
@@ -165,7 +164,8 @@
   (define (rec p)
     (cond [(parser-struct? p) p]
           [(custom-parser? p) (rec ((custom-parser-ref p) p))]
-          [(string? p) (string->parser p)]
+          [(string? p) p]
+          ;[(string? p) (string->parser p)]
           [(regexp? p) (regexp->parser p)]
           [(procedure? p) (rec (p))]
           [else (error 'chido-parse "not a parser: ~s" p)]))
@@ -240,18 +240,6 @@
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;; Literal parsers
-(define (parse-literal-string port s failure-message)
-  (define-values (line col pos) (port-next-location port))
-  (define length (string-length s))
-  (define read-in (read-string length port))
-  (if (equal? s read-in)
-      (make-parse-derivation s #:end (+ pos length))
-      (make-parse-failure failure-message #:position pos)))
-
-(define (string->parser s #:name [name #f])
-  ;; TODO - add optional args for what to do with the result
-  (define failure-message (format "Didn't match string literal: ~s" s))
-  (proc-parser (or name s) s (λ (p) (parse-literal-string p s failure-message))))
 
 (define (parse-regexp port r failure-message)
   (define-values (line col pos) (port-next-location port))
@@ -773,6 +761,22 @@ TODO - perhaps alists instead of hashes for things that likely have a small numb
                     (push-parser-job-dependent! dep worker))
                   (set-parser-job-continuation/worker! job worker)
                   ;(push-hint! scheduler worker)
+                  (run-scheduler scheduler)]
+                 [(? string?)
+                  (define s parsador)
+                  (define port (port-broker->port/char (scheduler-port-broker
+                                                        scheduler)
+                                                       start-position))
+                  ;(define-values (line col pos) (port-next-location port))
+                  (define length (string-length s))
+                  (define read-in (read-string length port))
+                  (define result
+                    (parameterize ([current-chido-parse-job job])
+                      (if (equal? s read-in)
+                          (make-parse-derivation s #:end (+ start-position length))
+                          (make-parse-failure (format "literal didn't match: ~s" s)
+                                              #:position start-position))))
+                  (cache-result-and-ready-dependents! scheduler job result)
                   (run-scheduler scheduler)])]
               [else
                ;; In this case there has been a result stream but it is dried up.

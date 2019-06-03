@@ -249,7 +249,7 @@ I need to re-think the derivation result interface for all these combinators.
                       (syntax-e #'(check-not-exn (λ () (check-name arg ...))))
                       stx)]))
 
-  (define ap (string->parser "a"))
+  (define ap "a")
   (define bp "b")
   (define cp "c")
   (define (Bp) (make-alt-parser "B"
