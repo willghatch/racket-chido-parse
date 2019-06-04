@@ -183,22 +183,19 @@
               parsers-result)))))
     (set-chido-readtable-layout*+read1-parser!
      rt
-     (sequence
+     (make-sequence-parser
       (chido-readtable-layout*-parser rt)
       (chido-readtable-read1-parser rt)
-      #:derive (λ derivations
-                 (make-parse-derivation (parse-derivation-result (second derivations))
-                                        #:derivations derivations))))
+      #:result (λ (line col pos end-pos derivations)
+                 (parse-derivation-result (second derivations)))))
     (set-chido-readtable-read*-parser!
      rt
      (let ([with-content-parser
-             (sequence
+             (make-sequence-parser
               (kleene-plus (chido-readtable-layout*+read1-parser rt))
               (chido-readtable-layout*-parser rt)
-              #:derive (λ derivations
-                         (make-parse-derivation (parse-derivation-result
-                                                 (first derivations))
-                                                #:derivations derivations)))]
+              #:result (λ (line col pos end-pos derivations)
+                         (parse-derivation-result (first derivations))))]
            [no-content-parser (chido-readtable-layout*-parser rt)])
        ;; TODO - better name!
        (make-alt-parser "chido-readtable-read*"
@@ -336,15 +333,14 @@
                    (define inner-rt (current-chido-readtable))
                    (parse* port (chido-readtable->read* inner-rt)))))
   (define left-parser
-    (sequence left inner-parser right
-              ;; TODO - use the optional transformer argument
-              ;; TODO - the result should be a syntax object by default
-              #:derive (λ derivations
-                         (make-parse-derivation
-                          (parse-derivation-result (second derivations))
-                          #:derivations derivations))
-              ;#:result (λ (l inner right) inner)
-              ))
+    (make-sequence-parser
+     left inner-parser right
+     ;; TODO - use the optional transformer argument
+     ;; TODO - the result should be a syntax object by default
+     #:result (λ (line col pos end-pos derivations)
+                (parse-derivation-result (second derivations)))
+     ;#:result (λ (l inner right) inner)
+     ))
 
   (define right-parser
     (proc-parser (format "trailing-right-delimiter_~a" right)
