@@ -163,7 +163,7 @@
      rt (kleene-star (make-alt-parser "chido-readtable-layout"
                                       (chido-readtable-layout-parsers rt))
                      #:derive (λ (elems) (make-parse-derivation
-                                          #f #:derivations elems))))
+                                          '() #:derivations elems))))
     (set-chido-readtable-read1-parser!
      rt
      ;; TODO - better name!
@@ -183,17 +183,23 @@
               parsers-result)))))
     (set-chido-readtable-layout*+read1-parser!
      rt
-     (sequence (chido-readtable-layout*-parser rt)
-               (chido-readtable-read1-parser rt)
-               #:result (λ (l r) r)))
+     (sequence
+      (chido-readtable-layout*-parser rt)
+      (chido-readtable-read1-parser rt)
+      #:derive (λ derivations
+                 (make-parse-derivation (parse-derivation-result (second derivations))
+                                        #:derivations derivations))))
     (set-chido-readtable-read*-parser!
      rt
      (let ([with-content-parser
-             (sequence (kleene-plus (chido-readtable-layout*+read1-parser rt))
-                       (chido-readtable-layout*-parser rt)
-                       #:result (λ (vals layout) vals))]
-           [no-content-parser
-            (sequence (chido-readtable-layout*-parser rt) #:result (λ (layout) '()))])
+             (sequence
+              (kleene-plus (chido-readtable-layout*+read1-parser rt))
+              (chido-readtable-layout*-parser rt)
+              #:derive (λ derivations
+                         (make-parse-derivation (parse-derivation-result
+                                                 (first derivations))
+                                                #:derivations derivations)))]
+           [no-content-parser (chido-readtable-layout*-parser rt)])
        ;; TODO - better name!
        (make-alt-parser "chido-readtable-read*"
                         (list with-content-parser no-content-parser))))
@@ -290,6 +296,12 @@
             ))
         (make-parse-derivation result-func #:end (+ pos span)))))
 
+(define parse-sym/num-wrap
+  (λ args
+    (define r (apply parse-symbol/number-func args))
+    (eprintf "parse-sym/num returning: ~a\n" r)
+    r))
+
 (define symbol/number-parser
   (proc-parser "symbol/number-parser" "" parse-symbol/number-func))
 
@@ -327,7 +339,12 @@
     (sequence left inner-parser right
               ;; TODO - use the optional transformer argument
               ;; TODO - the result should be a syntax object by default
-              #:result (λ (l inner right) inner)))
+              #:derive (λ derivations
+                         (make-parse-derivation
+                          (parse-derivation-result (second derivations))
+                          #:derivations derivations))
+              ;#:result (λ (l inner right) inner)
+              ))
 
   (define right-parser
     (proc-parser (format "trailing-right-delimiter_~a" right)
@@ -371,8 +388,10 @@
      'layout "\t"))
 
   (define (p* string parser)
-    (define r (parse* (open-input-string string) parser))
-    (if (parse-failure? r)
+    (define r (with-handlers ([(λ(e)#t)(λ(e)e)])
+                (parse* (open-input-string string) parser)))
+    (if (or (parse-failure? r)
+            (exn? r))
         r
         (map parse-derivation-result
              (stream->list

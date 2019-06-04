@@ -17,7 +17,9 @@
  (struct-out alt-parser)
  make-alt-parser
  (struct-out proc-parser)
+ make-sequence-parser
  ;prop:custom-parser
+
  parser-name
  parser-prefix
  parser?
@@ -193,6 +195,7 @@
 
 (define (parser-prefix p)
   (cond [(proc-parser? p) (proc-parser-prefix p)]
+        [(sequence-parser? p) (parser-prefix (car (sequence-parser-parsers p)))]
         [(string? p) p]
         [else ""]))
 
@@ -237,8 +240,10 @@
    (define (stream-first s)
      (parse-stream-result s))
    (define (stream-rest s)
-     (enter-the-parser/job (parse-stream-scheduler s)
-                           (parse-stream-next-job s)))])
+     (if (parse-stream-next-job s)
+         (enter-the-parser/job (parse-stream-scheduler s)
+                               (parse-stream-next-job s))
+         empty-stream))])
 
 (struct parse-failure
   ;; TODO -- what should this contain?
@@ -376,9 +381,11 @@ The job->result-cache is a map from parser-job structs -> parser-stream OR parse
   #:transparent)
 
 (struct sequence-worker
-  (job [inner-jobs #:mutable] [dependency #:mutable] [ready? #:mutable]))
+  (job [inner-jobs #:mutable] [dependency #:mutable] [ready? #:mutable])
+  #:transparent)
 (struct repetition-worker
-  (job [dependency #:mutable] [ready? #:mutable]))
+  (job [dependency #:mutable] [ready? #:mutable])
+  #:transparent)
 
 (define (job->scheduled-continuation j k dep)
   (scheduled-continuation j k dep #f))
@@ -624,10 +631,13 @@ TODO - perhaps alists instead of hashes for things that likely have a small numb
                                                         remaining-jobs)
                                                    (cdr stacks))
                                            (cons j blocked))])]
-                        [(repetition-worker job dependency ready)
+                        [(repetition-worker job dependency ready?)
                          (error 'repetition-worker "not yet implemented")]
-                        [(sequence-worker job inner-jobs dependency ready)
-                         (error 'sequence-worker "not yet implemented")]
+                        [(sequence-worker job inner-jobs dependency ready?)
+                         (cond [ready? jstack]
+                               [else (loop (cons (cons dependency jstack)
+                                                 (cdr stacks))
+                                           (cons j blocked))])]
                         [#f jstack])])))))
 
 (define (find-and-run-actionable-job s hint-stacks using-hint?)
@@ -837,12 +847,17 @@ TODO - perhaps alists instead of hashes for things that likely have a small numb
                                        (sequence-worker-job k/worker)))])
                     (define make-result* (if make-result
                                              make-result
-                                             (λ args results-list)))
+                                             (λ args (map parse-derivation-result!
+                                                          results-list))))
                     (define derivation
                       (parameterize ([current-chido-parse-job job])
                         (make-parse-derivation make-result*
                                                #:derivations results-list)))
-                    (cache-result-and-ready-dependents! scheduler job derivation)
+                    (define result-stream
+                      (parse-stream derivation
+                                    (get-next-job! scheduler job)
+                                    scheduler))
+                    (cache-result-and-ready-dependents! scheduler job result-stream)
                     (step-inner-jobs (get-next-job! scheduler job))
                     (run-scheduler scheduler))
                   ;; Start the next parser.
@@ -857,7 +872,10 @@ TODO - perhaps alists instead of hashes for things that likely have a small numb
                     (if (scheduler-get-result
                          scheduler (sequence-worker-dependency k/worker))
                         (set-sequence-worker-ready?! k/worker #t)
-                        (set-sequence-worker-ready?! k/worker #f))
+                        (begin (set-sequence-worker-ready?! k/worker #f)
+                               (push-parser-job-dependent!
+                                (sequence-worker-dependency k/worker)
+                                k/worker)))
                     (run-scheduler scheduler)))))]
        [(repetition-worker job dependency ready)
         (error 'repetition-worker "not yet implemented")]
@@ -904,10 +922,19 @@ TODO - perhaps alists instead of hashes for things that likely have a small numb
                   (run-scheduler scheduler)]
                  [(sequence-parser name parsers make-result-function
                                    left-recursive? nullable?)
-                  (error 'sequence-parser "not yet implemented")]
+                  (define first-job
+                    (get-job! scheduler (car parsers) '() cp-params start-position 0))
+                  (define first-result (scheduler-get-result scheduler first-job))
+                  (define worker
+                    (sequence-worker job '() first-job (not (not first-result))))
+                  (when (not first-result)
+                    (push-parser-job-dependent! first-job worker))
+                  (set-parser-job-continuation/worker! job worker)
+                  (run-scheduler scheduler)]
                  [(repetition-parser name parser min max greedy?
                                      make-result-function
                                      left-recursive? nullable?)
+                  (error 'repetition-parser "not yet implemented")
                   (define worker (repetition-worker job #f #f))
                   (set-parser-job-continuation/worker! job worker)
                   (run-scheduler scheduler)]
@@ -925,7 +952,11 @@ TODO - perhaps alists instead of hashes for things that likely have a small numb
                           (make-parse-derivation s #:end (+ start-position length))
                           (make-parse-failure (format "literal didn't match: ~s" s)
                                               #:position start-position))))
-                  (cache-result-and-ready-dependents! scheduler job result)
+                  (define result-stream
+                    (if (parse-failure? result)
+                        result
+                        (parse-stream result #f scheduler)))
+                  (cache-result-and-ready-dependents! scheduler job result-stream)
                   (run-scheduler scheduler)])]
               [else
                ;; In this case there has been a result stream but it is dried up.
@@ -963,8 +994,9 @@ TODO - perhaps alists instead of hashes for things that likely have a small numb
          (λ () recursive-enter-flag))))
   (if (eq? result recursive-enter-flag)
       (run-scheduler scheduler)
-      (begin (cache-result-and-ready-dependents! scheduler job result)
-             (run-scheduler scheduler))))
+      (begin
+        (cache-result-and-ready-dependents! scheduler job result)
+        (run-scheduler scheduler))))
 
 (define (ready-dependents! job)
   (for ([dep (parser-job-dependents job)])
@@ -980,13 +1012,20 @@ TODO - perhaps alists instead of hashes for things that likely have a small numb
   (set-parser-job-dependents! job '()))
 
 (define (cache-result-and-ready-dependents! scheduler job result)
-  (if (alt-parser? (parser-job-parser job))
-      (cache-result-and-ready-dependents!/alt-job scheduler job result)
-      (cache-result-and-ready-dependents!/procedure-job
-       scheduler job result)))
+  (define p (parser-job-parser job))
+  (cond [(proc-parser? p)
+         (cache-result-and-ready-dependents!/procedure-job scheduler job result)]
+        [else
+         (cache-result-and-ready-dependents!/builtin scheduler job result)]))
 
-(define (cache-result-and-ready-dependents!/alt-job scheduler job result)
+(define (cache-result-and-ready-dependents!/builtin scheduler job result)
   ;; This version only gets pre-sanitized results, and is straightforward.
+  (when (and (not (parse-failure? result))
+             (not (parse-stream? result)))
+    (error 'chido-parse-cache-result-and-ready-dependents/builtin!
+           "trying to cache something for job ~s with a bad type: ~s\n"
+           (job->display job)
+           result))
   (scheduler-set-result! scheduler job result)
   (ready-dependents! job))
 
@@ -1014,7 +1053,7 @@ TODO - perhaps alists instead of hashes for things that likely have a small numb
      (define next-job (get-next-job! scheduler job))
      (set-parser-job-result-stream! next-job result)
      (cache-result-and-ready-dependents!/procedure-job
-      scheduler job (raw-result->parse-derivation (stream-first result)))]
+      scheduler job (raw-result->parse-derivation job (stream-first result)))]
     [(parse-derivation semantic-result result-forced?
                        parser
                        line column start-position end-position
@@ -1026,12 +1065,14 @@ TODO - perhaps alists instead of hashes for things that likely have a small numb
      (ready-dependents! job)]
     [else (cache-result-and-ready-dependents! scheduler
                                               job
-                                              (raw-result->parse-derivation result))]))
+                                              (raw-result->parse-derivation
+                                               job
+                                               result))]))
 
-(define (raw-result->parse-derivation result)
+(define (raw-result->parse-derivation job result)
   (if (parse-derivation? result)
       result
-      (error 'TODO "auto-transformation to proper parse result not yet implemented.  Got ~a\n" result)))
+      (error 'TODO "auto-transformation to proper parse result not yet implemented.  In job: ~a, got ~a\n" (job->display job) result)))
 
 
 
