@@ -2,18 +2,17 @@
 (provide
  (rename-out
   [stream->stream-stack-cursor stream-flatten]
-  [stream-stack-cursor? flattened-stream?]))
+  [stream-stack-cursor? flattened-stream?]
+  [stream-stack-cursor-failures flattened-stream-failures]))
 (require racket/stream)
 
 #|
 A flattened stream is flattened depth-first, a la `flatten` for lists.
 |#
 
-;; TODO - keep track of all parse-failure objects -- keep a list of them in the struct, and when the stream ends use the failures to synthesize a new failure object.
-
 (define generic-stream-first stream-first)
 
-(struct stream-stack-cursor (stack)
+(struct stream-stack-cursor (stack failures)
   #:transparent
   #:methods gen:stream
   [(define (stream-empty? ssc)
@@ -29,27 +28,39 @@ A flattened stream is flattened depth-first, a la `flatten` for lists.
          (error 'stream-rest "Empty stream")
          (stream-stack-cursor-next ssc)))])
 
+
 (define (stream-stack-cursor-next ssc)
   (define s (stream-stack-cursor-stack ssc))
+  (define failures (stream-stack-cursor-failures ssc))
   (cond [(null? s) ssc]
         [(stream-empty? (car s))
          (define s2 (cdr s))
-         (cond [(null? s2) (stream-stack-cursor '())]
-               [else (stack+v->scc (cdr s2) (stream-rest (car s2)))])]
+         (cond [(null? s2) (stream-stack-cursor
+                            '()
+                            (if (parse-failure? (car s))
+                                (cons (car s) failures)
+                                failures))]
+               [else (stack+v->scc (cdr s2) (stream-rest (car s2)) failures)])]
         [else
-         (stack+v->scc (cdr s) (stream-rest (car s)))]))
+         (stack+v->scc (cdr s) (stream-rest (car s)) failures)]))
 
-(define (stack+v->scc stack v)
+(define (stack+v->scc stack v failures)
   (cond [(and (stream? v) (not (stream-empty? v)))
-         (stack+v->scc (cons v stack) (stream-first v))]
+         (stack+v->scc (cons v stack) (stream-first v) failures)]
         [(and (stream? v) (null? stack))
-         (stream-stack-cursor '())]
+         (stream-stack-cursor '() (if (parse-failure? v)
+                                      (cons v failures)
+                                      failures))]
         [(stream? v)
-         (stack+v->scc (cdr stack) (stream-rest (car stack)))]
-        [else (stream-stack-cursor stack)]))
+         (stack+v->scc (cdr stack)
+                       (stream-rest (car stack))
+                       (if (parse-failure? v)
+                           (cons v failures)
+                           failures))]
+        [else (stream-stack-cursor stack failures)]))
 
 (define (stream->stream-stack-cursor s-tree)
-  (stack+v->scc '() s-tree))
+  (stack+v->scc '() s-tree '()))
 
 (module+ test
   (require rackunit)
