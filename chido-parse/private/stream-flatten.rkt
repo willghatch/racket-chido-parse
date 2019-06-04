@@ -9,6 +9,8 @@
 A flattened stream is flattened depth-first, a la `flatten` for lists.
 |#
 
+;; TODO - keep track of all parse-failure objects -- keep a list of them in the struct, and when the stream ends use the failures to synthesize a new failure object.
+
 (define generic-stream-first stream-first)
 
 (struct stream-stack-cursor (stack)

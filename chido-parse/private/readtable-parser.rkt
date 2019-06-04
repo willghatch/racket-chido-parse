@@ -398,13 +398,31 @@
   (chido-parse-parameterize
    ([current-chido-readtable my-rt])
 
+   (check-pred (λ(x) (and (not (parse-failure? x))
+                          (list? x)
+                          (< 0 (length x))))
+               (p* "   \t\n  " (chido-readtable-layout*-parser my-rt)))
    (check-equal? (p* "()" r1)
                  '(()))
    (check-equal? (p* "( )" r1)
                  '(()))
+   (check-equal? (p* "( ( ))" r1)
+                 '((())))
+   (check-equal? (p* "( ( ) )" r1)
+                 '((())))
    (check-equal? (p* "( ( ) )" r1)
                  '((())))
    (check-pred parse-failure? (p* ")" r1))
+   (check-equal? (p* "testing" r1)
+                 '(testing))
+   (check-equal? (p* "(testing)" r1)
+                 '((testing)))
+   (check-equal? (p* "( testing)" r1)
+                 '((testing)))
+   (check-equal? (p* "(testing )" r1)
+                 '((testing)))
+   (check-equal? (p* "( testing )" r1)
+                 '((testing)))
    (define s1 "(hello ( goodbye () ( ( ) ) ) aoeu aoeu ( aardvark   ))")
    (check-equal? (p* s1 r1)
                  (list (read (open-input-string s1))))
@@ -419,8 +437,6 @@
    ;; TODO - this one has an interesting error that I want to get to later...
    ;(p* "   \n   " (chido-readtable-layout*-parser my-rt))
 
-   ;; TODO - this is not returning the right failure object.
-   ;(p* "hello" "arg")
 
    )
 
