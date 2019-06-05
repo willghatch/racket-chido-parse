@@ -16,7 +16,9 @@
 
  (struct-out alt-parser)
  make-alt-parser
- (struct-out proc-parser)
+ ;(struct-out proc-parser)
+ (rename-out [make-proc-parser proc-parser])
+ proc-parser?
  make-sequence-parser
  ;prop:custom-parser
 
@@ -126,8 +128,14 @@
 
 (struct proc-parser parser-struct
   ;; TODO - document from notes
-  (prefix procedure)
+  (prefix procedure preserve-prefix? promise-no-left-recursion?)
   #:transparent)
+(define (make-proc-parser
+         prefix proc
+         #:name [name (object-name proc)]
+         #:preserve-prefix? [preserve-prefix? #f]
+         #:promise-no-left-recursion? [promise-no-left-recursion? #f])
+  (proc-parser name prefix proc preserve-prefix? promise-no-left-recursion?))
 
 (struct alt-parser parser-struct
   ;; TODO - use a prefix trie for the parsers
@@ -204,12 +212,15 @@
 
 (define (parser-potentially-left-recursive? p)
   (cond [(alt-parser? p) (alt-parser-left-recursive? p)]
-        [(proc-parser? p) (equal? "" (proc-parser-prefix p))]
+        [(proc-parser? p) (and (not (proc-parser-promise-no-left-recursion? p))
+                               (or (equal? "" (proc-parser-prefix p))
+                                   (proc-parser-preserve-prefix? p)))]
         [(sequence-parser? p) (sequence-parser-left-recursive? p)]
         [(repetition-parser? p) (repetition-parser-left-recursive? p)]
         [(string? p) #f]
         [else (error 'parser-potentially-left-recursive?
                      "Not yet implemented for: ~s" p)]))
+
 (define (parser-potentially-null? p)
   (cond [(alt-parser? p) (alt-parser-null? p)]
         [(proc-parser? p) (equal? "" (proc-parser-prefix p))]
@@ -303,9 +314,10 @@
 (define (regexp->parser rx #:name [name #f])
   ;; TODO - add optional args for what to do with the result
   (define failure-message (format "Didn't match regexp: ~a" (or name rx)))
-  (proc-parser (or name (format "~a" rx))
-               ""
-               (λ (p) (parse-regexp p rx failure-message))))
+  (make-proc-parser #:name (or name (format "~a" rx))
+                    ""
+                    (λ (p) (parse-regexp p rx failure-message))
+                    #:promise-no-left-recursion? #t))
 
 
 #|
@@ -878,7 +890,7 @@ TODO - perhaps alists instead of hashes for things that likely have a small numb
                         #f #f)]
               [(equal? 0 result-index)
                (match parsador
-                 [(proc-parser name prefix procedure)
+                 [(proc-parser name prefix procedure pp no-lr)
                   (define port (port-broker->port/char (scheduler-port-broker
                                                         scheduler)
                                                        start-position))
@@ -1033,7 +1045,7 @@ TODO - perhaps alists instead of hashes for things that likely have a small numb
                     result-index continuation/worker
                     dependents result-stream)
         (match parse
-          [(proc-parser name prefix procedure)
+          [(proc-parser name prefix procedure pp no-lr)
            (define failure
              (let ([inner-failures (and (flattened-stream? result)
                                         (flattened-stream-failures result))])
@@ -1119,7 +1131,7 @@ TODO
                                #:end (add1 pos)
                                #:derivations '())
         (make-parse-failure "Didn't match.")))
-  (define a1-parser-obj (proc-parser "a" "" a1-parser-proc))
+  (define a1-parser-obj (make-proc-parser #:name "a" "" a1-parser-proc))
 
   (define (Aa-parser-proc port)
     (for/parse
@@ -1131,7 +1143,7 @@ TODO
                                                     (parse-derivation-result! d/a)))
                              #:derivations (list d/A d/a)))))
 
-  (define Aa-parser-obj (proc-parser "Aa" "" Aa-parser-proc))
+  (define Aa-parser-obj (make-proc-parser #:name "Aa" "" Aa-parser-proc))
 
 
   (define A-parser (make-alt-parser "A"

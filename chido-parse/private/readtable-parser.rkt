@@ -168,7 +168,7 @@
      rt
      ;; TODO - better name!
      (proc-parser
-      "chido-readtable-read1"
+      #:name "chido-readtable-read1"
       ""
       (let* ([parsers (append
                        (chido-readtable-nonterminating-parsers rt)
@@ -300,7 +300,7 @@
     r))
 
 (define symbol/number-parser
-  (proc-parser "symbol/number-parser" "" parse-symbol/number-func))
+  (proc-parser #:name "symbol/number-parser" "" parse-symbol/number-func))
 
 
 (define (chido-readtable->read1 rt)
@@ -327,7 +327,7 @@
                                          ;#:inside-readtable
                                          )
   (define (inner-parser)
-    (proc-parser (format "list-inner-parser-~a-~a" left right)
+    (proc-parser #:name (format "list-inner-parser-~a-~a" left right)
                  ""
                  (λ (port)
                    (define inner-rt (current-chido-readtable))
@@ -343,7 +343,7 @@
      ))
 
   (define right-parser
-    (proc-parser (format "trailing-right-delimiter_~a" right)
+    (proc-parser #:name (format "trailing-right-delimiter_~a" right)
                  right
                  (λ (port) (make-parse-failure
                             (format "Trailing right delimiter: ~a"
@@ -356,7 +356,7 @@
   TODO)
 
 (define racket-style-string-parser
-  (proc-parser "racket-style-string-parser"
+  (proc-parser #:name "racket-style-string-parser"
                "\""
                (λ (port)
                  (define r (read port))

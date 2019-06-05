@@ -47,31 +47,6 @@ TODO -
 I need to re-think the derivation result interface for all these combinators.
 |#
 
-#;(define (sequence-2 l r
-                    #:name [name #f]
-                    #:derive [derive #f]
-                    #:result [result #f])
-  (define prefix (parser-prefix l))
-  (define use-name (or name (format "sequence-2_~a_~a"
-                                    (parser-name l)
-                                    (parser-name r))))
-  (define combiner
-    (cond [(and derive result)
-           (error 'sequence-2
-                  "must provide either result or derive function, not both")]
-          [derive derive]
-          [result (λ (l-d r-d)
-                    (make-parse-derivation
-                     (result (parse-derivation-result l-d)
-                             (parse-derivation-result r-d))
-                     #:derivations (list l-d r-d)))]
-          [else (error 'sequence-2
-                       "must provide a result or derivation transformer")]))
-  (define (proc port)
-    (for/parse ([l-result (parse* port l)])
-               (for/parse ([r-result (parse* port r #:start l-result)])
-                          (combiner l-result r-result))))
-  (proc-parser use-name prefix proc))
 
 (define (sequence #:name [name #f]
                   #:derive [derive #f]
@@ -103,7 +78,7 @@ I need to re-think the derivation result interface for all these combinators.
                                                           (car derivations)))])
                              (rec (cdr parsers) (cons result derivations)))]))
     (rec parsers '()))
-  (proc-parser use-name prefix proc))
+  (proc-parser #:name use-name prefix proc))
 
 (define (repetition #:name [name #f]
                     #:derive [derive #f]
@@ -145,7 +120,7 @@ I need to re-think the derivation result interface for all these combinators.
                                  empty-stream
                                  (get-more-streams derivations)))))
     (rec '()))
-  (proc-parser use-name "" proc))
+  (proc-parser #:name use-name "" proc))
 
 (define (kleene-star #:name [name #f]
                      #:derive [derive #f]
@@ -181,7 +156,9 @@ I need to re-think the derivation result interface for all these combinators.
 
 (define (epsilon-parser #:name [name "epsilon"]
                         #:result [result #f])
-  (proc-parser name "" (λ (p) (make-parse-derivation result #:end (port->pos p)))))
+  (proc-parser #:name name
+               ""
+               (λ (p) (make-parse-derivation result #:end (port->pos p)))))
 
 
 (define (between* main-parser between-parser
@@ -216,10 +193,10 @@ I need to re-think the derivation result interface for all these combinators.
                                          #:start d)])
                             (combiner
                              (cons d (parse-derivation-derivation-list d2))))))))
-  (proc-parser use-name "" proc))
+  (proc-parser #:name use-name "" proc))
 
 (define (wrap-derivation parser wrap-func #:name [name #f])
-  (proc-parser (or name (parser-name parser))
+  (proc-parser #:name (or name (parser-name parser))
                (parser-prefix parser)
                (λ (port)
                  (define s (parse* port parser))
@@ -309,7 +286,7 @@ I need to re-think the derivation result interface for all these combinators.
                  (make-parse-derivation c #:end (port->pos port))))
           (make-parse-failure "not whitespace"))))
   (define whitespace-char-parser
-    (proc-parser "whitespace-char" "" whitespace-char-func))
+    (proc-parser #:name "whitespace-char" "" whitespace-char-func))
 
   (define symbol-char-func
     (λ (port)
@@ -320,7 +297,8 @@ I need to re-think the derivation result interface for all these combinators.
                  (make-parse-derivation c #:end (port->pos port))))
           (make-parse-failure "not symbol char"))))
 
-  (define symbol-char-parser (proc-parser "symbol-char" "" symbol-char-func))
+  (define symbol-char-parser (proc-parser #:name "symbol-char"
+                                          "" symbol-char-func))
   (define symbol-parser (kleene-plus symbol-char-parser
                                      #:name "symbol"
                                      #:result (λ (chars)
@@ -355,10 +333,10 @@ I need to re-think the derivation result interface for all these combinators.
   ;; TODO - this test is causing an infinite loop and gobbling memory since a recent change.
   (check-equal? 'todo 'fix-the-test-next-to-this-that-i-commented-out)
   #;(c check-equal?
-     (map parse-derivation-result
-          (stream->list
-           (parse* (open-input-string "test") basic-s-exp)))
-     '(t te tes test))
+       (map parse-derivation-result
+            (stream->list
+             (parse* (open-input-string "test") basic-s-exp)))
+       '(t te tes test))
 
   (define s-exp-str-1 "(test test (test test) test (hello foo (bar aoeu)
                                    thaoneuth)
