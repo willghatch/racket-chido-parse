@@ -185,6 +185,9 @@
                                (or (equal? "" (proc-parser-prefix p))
                                    (proc-parser-preserve-prefix? p)))]
         [(string? p) #f]
+        ;; TODO - this is not great, but I need this predicate to work while
+        ;;        *constructing* parsers...
+        [(procedure? p) #t]
         [else (error 'parser-potentially-left-recursive?
                      "Not yet implemented for: ~s" p)]))
 

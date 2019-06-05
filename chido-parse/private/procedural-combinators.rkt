@@ -130,7 +130,9 @@ I need to re-think the derivation result interface for all these combinators.
                                  empty-stream
                                  (get-more-streams derivations)))))
     (rec '()))
-  (proc-parser #:name use-name "" proc))
+  (proc-parser #:name use-name "" proc
+               #:promise-no-left-recursion?
+               (not (parser-potentially-left-recursive? parser))))
 
 (define (kleene-star #:name [name #f]
                      #:derive [derive #f]
@@ -168,7 +170,8 @@ I need to re-think the derivation result interface for all these combinators.
                         #:result [result #f])
   (proc-parser #:name name
                ""
-               (λ (p) (make-parse-derivation result #:end (port->pos p)))))
+               (λ (p) (make-parse-derivation result #:end (port->pos p)))
+               #:promise-no-left-recursion? #t))
 
 
 (define (between* main-parser between-parser
@@ -215,7 +218,10 @@ I need to re-think the derivation result interface for all these combinators.
                      (stream-map (λ (d) (make-parse-derivation
                                          (wrap-func d)
                                          #:derivations (list d) ))
-                                 s)))))
+                                 s)))
+               #:preserve-prefix? #t
+               #:promise-no-left-recursion?
+               (not (parser-potentially-left-recursive? parser))))
 
 (define (traditional-read-func->parse-result-func f #:syntax? [syntax? #f])
   (λ (port)
@@ -250,6 +256,7 @@ I need to re-think the derivation result interface for all these combinators.
   (define str1 "abbbbbbc")
   (define p1 (open-input-string str1))
   (define r1 (parse* p1 aBcp))
+  (eprintf "r1: ~a\n" r1)
   (c check-equal?
      (parse-derivation-result (car (stream->list r1)))
      str1)

@@ -180,7 +180,13 @@
           (define parsers-result (parse* port alt))
           (if (parse-failure? parsers-result)
               (parse* port symbol/number-parser #:args (list rt))
-              parsers-result)))))
+              parsers-result)))
+      #:promise-no-left-recursion?
+      (not (ormap parser-potentially-left-recursive?
+                  (append (chido-readtable-nonterminating-parsers rt)
+                          (chido-readtable-soft-terminating-parsers rt)
+                          (chido-readtable-terminating-parsers rt)
+                          (chido-readtable-layout-parsers rt))))))
     (set-chido-readtable-layout*+read1-parser!
      rt
      (sequence
@@ -306,7 +312,8 @@
     r))
 
 (define symbol/number-parser
-  (proc-parser #:name "symbol/number-parser" "" parse-symbol/number-func))
+  (proc-parser #:name "symbol/number-parser" "" parse-symbol/number-func
+               #:promise-no-left-recursion? #t))
 
 
 (define (chido-readtable->read1 rt)
@@ -356,7 +363,8 @@
                  right
                  (λ (port) (make-parse-failure
                             (format "Trailing right delimiter: ~a"
-                                    right)))))
+                                    right)))
+                 #:promise-no-left-recursion? #t))
 
   (extend-chido-readtable (extend-chido-readtable rt 'terminating left-parser)
                           'terminating right-parser))
@@ -370,7 +378,9 @@
                (λ (port)
                  (define r (read port))
                  (define-values (line col pos) (port-next-location port))
-                 (make-parse-derivation r #:end pos))))
+                 (make-parse-derivation r #:end pos))
+               #:promise-no-left-recursion? #t
+               #:preserve-prefix? #t))
 
 (define hash-t-parser (wrap-derivation "#t" (λ(x)#t)))
 (define hash-f-parser (wrap-derivation "#f" (λ(x)#f)))
