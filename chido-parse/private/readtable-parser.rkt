@@ -183,19 +183,25 @@
               parsers-result)))))
     (set-chido-readtable-layout*+read1-parser!
      rt
-     (make-sequence-parser
+     (sequence
       (chido-readtable-layout*-parser rt)
       (chido-readtable-read1-parser rt)
-      #:result (λ (line col pos end-pos derivations)
-                 (parse-derivation-result (second derivations)))))
+      #:derive (λ derivations
+                 (make-parse-derivation
+                  (λ (line col pos end-pos derivations)
+                    (parse-derivation-result (second derivations)))
+                  #:derivations derivations))))
     (set-chido-readtable-read*-parser!
      rt
      (let ([with-content-parser
-             (make-sequence-parser
+             (sequence
               (kleene-plus (chido-readtable-layout*+read1-parser rt))
               (chido-readtable-layout*-parser rt)
-              #:result (λ (line col pos end-pos derivations)
-                         (parse-derivation-result (first derivations))))]
+              #:derive (λ derivations
+                         (make-parse-derivation
+                          (λ (line col pos end-pos derivations)
+                            (parse-derivation-result (first derivations)))
+                          #:derivations derivations)))]
            [no-content-parser (chido-readtable-layout*-parser rt)])
        ;; TODO - better name!
        (make-alt-parser "chido-readtable-read*"
@@ -333,12 +339,15 @@
                    (define inner-rt (current-chido-readtable))
                    (parse* port (chido-readtable->read* inner-rt)))))
   (define left-parser
-    (make-sequence-parser
+    (sequence
      left inner-parser right
      ;; TODO - use the optional transformer argument
      ;; TODO - the result should be a syntax object by default
-     #:result (λ (line col pos end-pos derivations)
-                (parse-derivation-result (second derivations)))
+     #:derive (λ derivations
+                (make-parse-derivation
+                 (λ (line col pos end-pos derivations)
+                   (parse-derivation-result (second derivations)))
+                 #:derivations derivations))
      ;#:result (λ (l inner right) inner)
      ))
 
