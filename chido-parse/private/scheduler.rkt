@@ -1061,6 +1061,8 @@ TODO - perhaps alists instead of hashes for things that likely have a small numb
                   (parse-failure name
                                  start-position
                                  (parse-failure-fail-position best-fail)
+                                 (format "Multiple failures: best choice: ~a"
+                                         (parse-failure-message best-fail))
                                  fail)])))
            (cache-result-and-ready-dependents!/procedure-job
             scheduler
