@@ -38,6 +38,7 @@
      (time (parse-derivation-result
             (stream-first
              (parse* (open-input-string s) my-parser))))))
+  (get-counts!)
   (eprintf "Time for racket's read function:\n")
   (define r-parse
     (time (read (open-input-string s))))

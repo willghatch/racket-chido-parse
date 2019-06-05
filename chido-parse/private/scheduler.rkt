@@ -30,6 +30,8 @@
  (struct-out parse-failure)
  make-parse-failure
 
+ get-counts!
+
  regexp->parser
 
  parse*
@@ -97,6 +99,23 @@
         (set-parse-derivation-result! pd r)
         (set-parse-derivation-result-forced?! pd #t)
         r)))
+
+(define parse-enter-counter 0)
+(define (inc-parse-enter!)
+  (set! parse-enter-counter (add1 parse-enter-counter)))
+(define find-work-counter 0)
+(define (inc-find-work!)
+  (set! find-work-counter (add1 find-work-counter)))
+(define run-scheduler-counter 0)
+(define (inc-run-scheduler!)
+  (set! run-scheduler-counter (add1 run-scheduler-counter)))
+(define (get-counts!)
+  (eprintf "enter: ~a, run scheduler: ~a, find work: ~a\n"
+           parse-enter-counter run-scheduler-counter find-work-counter)
+  (set! parse-enter-counter 0)
+  (set! find-work-counter 0)
+  (set! run-scheduler-counter 0)
+  )
 
 (define current-chido-parse-derivation-implicit-end (make-parameter #f))
 
@@ -519,6 +538,7 @@ TODO - perhaps alists instead of hashes for things that likely have a small numb
              [parser (parser-job-parser job)]
              [left-recursive? (and (eq? old-start new-start)
                                    (parser-potentially-left-recursive? parser))])
+        (inc-parse-enter!)
         (when (and old-start (< new-start old-start))
           (error 'chido-parse
                  "Recursive parse tried to recursively parse to the left of its starting position: ~a"
@@ -574,6 +594,7 @@ TODO - perhaps alists instead of hashes for things that likely have a small numb
   ;; s is a scheduler
   ;; job-stacks is a list of these dependency stacks
   ;; TODO - this is probably the best place to detect cycles.  I should maybe return some sort of flag object containing the job that contains the smallest dependency cycle so I know which job to return a cycle error for.
+  (inc-find-work!)
   (let loop ([stacks job-stacks]
              [blocked '()])
     (if (null? stacks)
@@ -633,6 +654,7 @@ TODO - perhaps alists instead of hashes for things that likely have a small numb
      ;; Escape the mad world of delimited-continuation-based parsing!
      (scheduler-get-result s (scheduled-continuation-dependency done-k))]
     [else
+     (inc-run-scheduler!)
      (define using-hint? #t)
      (when (null? (car (scheduler-hint-stack-stack s)))
        (set! using-hint? #f)
