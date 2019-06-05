@@ -19,11 +19,12 @@
  ;(struct-out proc-parser)
  (rename-out [make-proc-parser proc-parser])
  proc-parser?
- make-sequence-parser
  ;prop:custom-parser
 
  parser-name
  parser-prefix
+ parser-potentially-left-recursive?
+ parser-potentially-null?
  parser?
 
  (struct-out parse-failure)
@@ -151,37 +152,6 @@
               l-recursive?
               null?))
 
-(struct sequence-parser parser-struct
-  (parsers make-result-function left-recursive? null?))
-
-(define (make-sequence-parser #:name [name #f] #:result [result #f] . parsers)
-  (define (l-recursive? parsers)
-    (cond [(null? parsers) #f]
-          [(parser-potentially-left-recursive? (car parsers)) #t]
-          [(parser-potentially-null? (car parsers)) (l-recursive? (cdr parsers))]
-          [else #f]))
-  (define l-r (l-recursive? parsers))
-  (define null (andmap parser-potentially-null? parsers))
-  (define use-name (or name (format "sequence_~a"
-                                    (string-join (map parser-name parsers) "_"))))
-  (sequence-parser use-name parsers result l-r null))
-
-(struct repetition-parser parser-struct
-  (parser min max greedy? make-result-function left-recursive? null?))
-
-(define (make-repetition-parser parser
-                                #:name [name #f]
-                                #:result [result #f]
-                                #:greedy? [greedy? #f]
-                                #:min [min 0]
-                                #:max [max +inf.0])
-  (define l-recursive? (parser-potentially-left-recursive? parser))
-  (define null? (or (equal? 0 min) (parser-potentially-null? parser)))
-  (define use-name (or name (format "repeat_~a_~a_~a"
-                                    (parser-name parser)
-                                    min max)))
-  (repetition-parser use-name parser min max greedy? result l-recursive? null?))
-
 (define-values (prop:custom-parser custom-parser? custom-parser-ref)
   ;; TODO - document -- the property should be a function that accepts a `self` argument and returns a parser.
   ;; TODO - Is this really a good idea?  Perhaps I really just want to have objects that users can convert into parsing procedures, eg. readtable-like-object with ->single-read, ->multi-read functions.
@@ -206,7 +176,6 @@
 
 (define (parser-prefix p)
   (cond [(proc-parser? p) (proc-parser-prefix p)]
-        [(sequence-parser? p) (parser-prefix (car (sequence-parser-parsers p)))]
         [(string? p) p]
         [else ""]))
 
@@ -215,8 +184,6 @@
         [(proc-parser? p) (and (not (proc-parser-promise-no-left-recursion? p))
                                (or (equal? "" (proc-parser-prefix p))
                                    (proc-parser-preserve-prefix? p)))]
-        [(sequence-parser? p) (sequence-parser-left-recursive? p)]
-        [(repetition-parser? p) (repetition-parser-left-recursive? p)]
         [(string? p) #f]
         [else (error 'parser-potentially-left-recursive?
                      "Not yet implemented for: ~s" p)]))
@@ -224,8 +191,6 @@
 (define (parser-potentially-null? p)
   (cond [(alt-parser? p) (alt-parser-null? p)]
         [(proc-parser? p) (equal? "" (proc-parser-prefix p))]
-        [(sequence-parser? p) (sequence-parser-null? p)]
-        [(repetition-parser? p) (repetition-parser-null? p)]
         [(equal? p "") #t]
         [(string? p) #f]
         [else (error 'parser-potentially-null?
@@ -383,12 +348,6 @@ The job->result-cache is a map from parser-job structs -> parser-stream OR parse
   (job k [dependency #:mutable] [ready? #:mutable])
   #:transparent)
 
-(struct sequence-worker
-  (job [inner-jobs #:mutable] [ready? #:mutable])
-  #:transparent)
-(struct repetition-worker
-  (job [dependency #:mutable] [ready? #:mutable])
-  #:transparent)
 
 (define (job->scheduled-continuation j k dep)
   (scheduled-continuation j k dep #f))
@@ -634,13 +593,6 @@ TODO - perhaps alists instead of hashes for things that likely have a small numb
                                                         remaining-jobs)
                                                    (cdr stacks))
                                            (cons j blocked))])]
-                        [(repetition-worker job dependency ready?)
-                         (error 'repetition-worker "not yet implemented")]
-                        [(sequence-worker job inner-jobs ready?)
-                         (cond [ready? jstack]
-                               [else (loop (cons (cons (car inner-jobs) jstack)
-                                                 (cdr stacks))
-                                           (cons j blocked))])]
                         [#f jstack])])))))
 
 (define (find-and-run-actionable-job s hint-stacks using-hint?)
@@ -708,16 +660,6 @@ TODO - perhaps alists instead of hashes for things that likely have a small numb
        [(alt-worker job remaining-jobs ready-jobs failures successful?)
         ;; No ready jobs
         (find-and-run-actionable-job s (list hint-stack) using-hint?)]
-       [(sequence-worker job inner-jobs (and #t ready?))
-        (pop-hint! s)
-        (run-actionable-job? job)]
-       [(sequence-worker job inner-jobs ready?)
-        (find-and-run-actionable-job s (list hint-stack) using-hint?)]
-       [(repetition-worker job dependency (and #t ready?))
-        (pop-hint! s)
-        (run-actionable-job? job)]
-       [(repetition-worker job dependency ready?)
-        (find-and-run-actionable-job s (list hint-stack) using-hint?)]
        )]))
 
 
@@ -733,10 +675,6 @@ TODO - perhaps alists instead of hashes for things that likely have a small numb
        ;; are cyclic.  So let's just break the first one for now.
        (define next-job (car remaining-jobs))
        (rec (parser-job-continuation/worker next-job) (cons job jobs))]
-      [(sequence-worker job inner-jobs ready)
-       (rec (parser-job-continuation/worker (car inner-jobs)) (cons job jobs))]
-      [(repetition-worker job dependency ready)
-       (rec (parser-job-continuation/worker dependency) (cons job jobs))]
       [(scheduled-continuation job k dependency ready?)
        (if (memq dependency jobs)
            (begin
@@ -802,86 +740,6 @@ TODO - perhaps alists instead of hashes for things that likely have a small numb
         (define result (alt-worker->failure k/worker))
         (cache-result-and-ready-dependents! scheduler job result)
         (run-scheduler scheduler)]
-       [(sequence-worker job inner-jobs ready)
-        (define (step-inner-jobs fail-job)
-          (if (null? (sequence-worker-inner-jobs k/worker))
-              (cache-result-and-ready-dependents!
-               scheduler job
-               (parameterize ([current-chido-parse-job fail-job])
-                 (make-parse-failure "TODO - propogate sequence failure better"
-                                     #:position (parser-job-start-position
-                                                 fail-job))))
-              (let ([j1 (car (sequence-worker-inner-jobs k/worker))])
-                (if (parse-failure? (scheduler-get-result scheduler j1))
-                    (begin (set-sequence-worker-inner-jobs!
-                            k/worker (cdr (sequence-worker-inner-jobs k/worker)))
-                           (step-inner-jobs fail-job))
-                    (let* ([next-job (get-next-job! scheduler j1)]
-                           [next-result (scheduler-get-result scheduler next-job)])
-                      (set-sequence-worker-inner-jobs!
-                       k/worker
-                       (cons next-job
-                             (cdr (sequence-worker-inner-jobs k/worker))))
-                      (when (not next-result)
-                        (push-parser-job-dependent! next-job k/worker))
-                      (set-sequence-worker-ready?!
-                       k/worker (not (not next-result))))))))
-        (define rs (scheduler-get-result scheduler (car inner-jobs)))
-        (if (parse-failure? rs)
-            (begin (step-inner-jobs job)
-                   (run-scheduler scheduler))
-            (let* ([r1 (stream-first rs)]
-                   [results-len (length (sequence-worker-inner-jobs k/worker))]
-                   [parsers-len (length (sequence-parser-parsers
-                                         (parser-job-parser job)))])
-              (if (equal? results-len parsers-len)
-                  ;; A result is ready!
-                  (let ([results-list
-                         (map (λ (j) (scheduler-get-result scheduler j))
-                              (reverse (sequence-worker-inner-jobs k/worker)))]
-                        [make-result (sequence-parser-make-result-function
-                                      (parser-job-parser
-                                       (sequence-worker-job k/worker)))])
-                    (define make-result* (if make-result
-                                             make-result
-                                             (λ args
-                                               (make-parse-derivation
-                                                (map parse-derivation-result!
-                                                     results-list)
-                                                #:derivations (map stream-first
-                                                                   results-list)))))
-                    (define derivation
-                      (parameterize ([current-chido-parse-job job])
-                        (make-parse-derivation make-result*
-                                               #:derivations (map stream-first
-                                                                  results-list))))
-                    (define result-stream
-                      (parse-stream derivation
-                                    (get-next-job! scheduler job)
-                                    scheduler))
-                    (cache-result-and-ready-dependents! scheduler job result-stream)
-                    (step-inner-jobs (get-next-job! scheduler job))
-                    (run-scheduler scheduler))
-                  ;; Start the next parser.
-                  (let* ([next-parser (list-ref (sequence-parser-parsers
-                                                 (parser-job-parser
-                                                  (sequence-worker-job k/worker)))
-                                                results-len)]
-                         [next-start-pos (parse-derivation-end-position r1)]
-                         [next-job (get-job! scheduler next-parser '()
-                                             cp-params next-start-pos 0)])
-                    (set-sequence-worker-inner-jobs!
-                     k/worker
-                     (cons next-job (sequence-worker-inner-jobs k/worker)))
-                    (if (scheduler-get-result
-                         scheduler next-job)
-                        (set-sequence-worker-ready?! k/worker #t)
-                        (begin (set-sequence-worker-ready?! k/worker #f)
-                               (push-parser-job-dependent! next-job
-                                                           k/worker)))
-                    (run-scheduler scheduler)))))]
-       [(repetition-worker job dependency ready)
-        (error 'repetition-worker "not yet implemented")]
        [#f
         (cond [(stream? result-stream)
                (do-run! scheduler
@@ -922,24 +780,6 @@ TODO - perhaps alists instead of hashes for things that likely have a small numb
                     (push-parser-job-dependent! dep worker))
                   (set-parser-job-continuation/worker! job worker)
                   ;(push-hint! scheduler worker)
-                  (run-scheduler scheduler)]
-                 [(sequence-parser name parsers make-result-function
-                                   left-recursive? nullable?)
-                  (define first-job
-                    (get-job! scheduler (car parsers) '() cp-params start-position 0))
-                  (define first-result (scheduler-get-result scheduler first-job))
-                  (define worker
-                    (sequence-worker job (list first-job) (not (not first-result))))
-                  (when (not first-result)
-                    (push-parser-job-dependent! first-job worker))
-                  (set-parser-job-continuation/worker! job worker)
-                  (run-scheduler scheduler)]
-                 [(repetition-parser name parser min max greedy?
-                                     make-result-function
-                                     left-recursive? nullable?)
-                  (error 'repetition-parser "not yet implemented")
-                  (define worker (repetition-worker job #f #f))
-                  (set-parser-job-continuation/worker! job worker)
                   (run-scheduler scheduler)]
                  [(? string?)
                   (define s parsador)
@@ -1006,10 +846,6 @@ TODO - perhaps alists instead of hashes for things that likely have a small numb
     (match dep
       [(alt-worker alt-job remaining-jobs ready-jobs failures successful?)
        (set-alt-worker-ready-jobs! dep (cons job ready-jobs))]
-      [(sequence-worker job inner-jobs ready)
-       (set-sequence-worker-ready?! dep #t)]
-      [(repetition-worker job dependency ready)
-       (set-repetition-worker-ready?! dep #t)]
       [(scheduled-continuation parent-job k dependency ready?)
        (set-scheduled-continuation-ready?! dep #t)]))
   (set-parser-job-dependents! job '()))
@@ -1159,15 +995,6 @@ TODO
                 (list "a" "aa" "aaa" "aaaa" "aaaaa"))
 
 
-  (define hello-parser
-    (make-sequence-parser "h" "e" "l" "l" "o"
-                          #:result (λ (line col pos end-pos derivations)
-                                     "hello")))
-
-  (check-equal?
-   (map parse-derivation-result!
-        (stream->list (parse* (open-input-string "hello") hello-parser)))
-   '("hello"))
   )
 
 

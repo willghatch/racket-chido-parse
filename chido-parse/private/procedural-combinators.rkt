@@ -52,6 +52,14 @@ I need to re-think the derivation result interface for all these combinators.
                   #:derive [derive #f]
                   #:result [make-result #f]
                   . parsers)
+  (define (l-recursive? parsers)
+    ;; TODO - I should disallow a null list of parsers...
+    (cond [(null? parsers) #f]
+          [(parser-potentially-left-recursive? (car parsers)) #t]
+          [(parser-potentially-null? (car parsers)) (l-recursive? (cdr parsers))]
+          [else #f]))
+  (define l-r (l-recursive? parsers))
+  ;(define null (andmap parser-potentially-null? parsers))
   (define prefix (parser-prefix (car parsers)))
 
   (define use-name (or name (format "sequence_~a"
@@ -78,7 +86,9 @@ I need to re-think the derivation result interface for all these combinators.
                                                           (car derivations)))])
                              (rec (cdr parsers) (cons result derivations)))]))
     (rec parsers '()))
-  (proc-parser #:name use-name prefix proc))
+  (proc-parser #:name use-name prefix proc
+               #:promise-no-left-recursion? (not l-r)
+               #:preserve-prefix? #t))
 
 (define (repetition #:name [name #f]
                     #:derive [derive #f]
