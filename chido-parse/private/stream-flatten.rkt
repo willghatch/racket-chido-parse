@@ -4,7 +4,11 @@
   [stream->stream-stack-cursor stream-flatten]
   [stream-stack-cursor? flattened-stream?]
   [stream-stack-cursor-failures flattened-stream-failures]))
-(require racket/stream)
+
+(require
+ racket/stream
+ "structs.rkt"
+ )
 
 #|
 A flattened stream is flattened depth-first, a la `flatten` for lists.

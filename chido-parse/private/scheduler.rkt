@@ -43,6 +43,7 @@
 (require
  "port-broker.rkt"
  "util.rkt"
+ "structs.rkt"
  "stream-flatten.rkt"
  "parameters.rkt"
  racket/stream
@@ -246,18 +247,6 @@
          (enter-the-parser/job (parse-stream-scheduler s)
                                (parse-stream-next-job s))
          empty-stream))])
-
-(struct parse-failure
-  ;; TODO -- what should this contain?
-  (name start-position fail-position message sub-failures)
-  #:transparent
-  #:methods gen:stream
-  [(define (stream-empty? s) #t)
-   ;; TODO - better error messages
-   (define (stream-first s)
-     (error 'stream-first "empty stream"))
-   (define (stream-rest s)
-     (error 'stream-rest "empty stream"))])
 
 (define (make-parse-failure message #:position [pos #f] #:failures [failures '()])
   (define job (current-chido-parse-job))
@@ -1045,11 +1034,26 @@ TODO - perhaps alists instead of hashes for things that likely have a small numb
                     dependents result-stream)
         (match parse
           [(proc-parser name prefix procedure)
+           (define failure
+             (let ([inner-failures (and (flattened-stream? result)
+                                        (flattened-stream-failures result))])
+               (match inner-failures
+                 [(or #f (list))
+                  (parse-failure name start-position start-position
+                                 "parse returned empty stream" '())]
+                 [(list one-fail) one-fail]
+                 [(list fail ...)
+                  (define best-fail (car (sort fail <
+                                               #:key parse-failure-fail-position
+                                               #:cache-keys? #t)))
+                  (parse-failure name
+                                 start-position
+                                 (parse-failure-fail-position best-fail)
+                                 fail)])))
            (cache-result-and-ready-dependents!/procedure-job
             scheduler
             job
-            (parse-failure name start-position start-position
-                           "parse returned empty stream" '()))])])]
+            failure)])])]
     [(? stream?)
      ;; Recur with stream-first, setting the stream as the result-stream
      (define next-job (get-next-job! scheduler job))
