@@ -752,9 +752,9 @@ TODO - perhaps alists instead of hashes for things that likely have a small numb
               [(equal? 0 result-index)
                (match parsador
                  [(proc-parser name prefix procedure pp no-lr)
-                  (define port (port-broker->port/char (scheduler-port-broker
-                                                        scheduler)
-                                                       start-position))
+                  (define port (port-broker->port (scheduler-port-broker
+                                                   scheduler)
+                                                  start-position))
                   (define prefix-length (string-length prefix))
                   ;; TODO - optimize this peek for alt parsers, at least...
                   (if (equal? prefix
@@ -786,9 +786,9 @@ TODO - perhaps alists instead of hashes for things that likely have a small numb
                   (run-scheduler scheduler)]
                  [(? string?)
                   (define s parsador)
-                  (define port (port-broker->port/char (scheduler-port-broker
-                                                        scheduler)
-                                                       start-position))
+                  (define port (port-broker->port (scheduler-port-broker
+                                                   scheduler)
+                                                  start-position))
                   ;(define-values (line col pos) (port-next-location port))
                   (define length (string-length s))
                   (define read-in (read-string length port))

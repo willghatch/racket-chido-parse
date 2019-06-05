@@ -256,7 +256,6 @@ I need to re-think the derivation result interface for all these combinators.
   (define str1 "abbbbbbc")
   (define p1 (open-input-string str1))
   (define r1 (parse* p1 aBcp))
-  (eprintf "r1: ~a\n" r1)
   (c check-equal?
      (parse-derivation-result (car (stream->list r1)))
      str1)
