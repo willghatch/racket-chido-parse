@@ -120,12 +120,17 @@
 (define run-scheduler-counter 0)
 (define (inc-run-scheduler!)
   (set! run-scheduler-counter (add1 run-scheduler-counter)))
+(define traverse-cache-counter 0)
+(define (inc-traverse-cache!)
+  (set! traverse-cache-counter (add1 traverse-cache-counter)))
 (define (get-counts!)
-  (eprintf "enter: ~a, run scheduler: ~a, find work: ~a\n"
-           parse-enter-counter run-scheduler-counter find-work-counter)
+  (eprintf "enter: ~a, run scheduler: ~a, find work: ~a, traverse cache: ~a\n"
+           parse-enter-counter run-scheduler-counter find-work-counter
+           traverse-cache-counter)
   (set! parse-enter-counter 0)
   (set! find-work-counter 0)
   (set! run-scheduler-counter 0)
+  (set! traverse-cache-counter 0)
   )
 
 (define current-chido-parse-derivation-implicit-end (make-parameter #f))
@@ -453,6 +458,17 @@ TODO - does it make sense to use hasheq for extra-args and cp-params?
 TODO - should start-position use a gvector?  Many start positions will not actually be used for parsing, probably.
 TODO - perhaps alists instead of hashes for things that likely have a small number of entries?
 |#
+
+(struct malist ([content #:mutable]))
+(define (malist-ref malist key)
+  (let ([pair (assq key (malist-content malist))])
+    (and pair (cdr pair))))
+(define (malist-set! malist key val)
+  (set-malist-content! malist
+                       (cons (cons key val)
+                             (malist-content malist))))
+(define (make-malist) (malist '()))
+
 (define (make-start-position-cache)
   (make-gvector #:capacity 1000))
 (define (make-parser-cache)
@@ -470,6 +486,7 @@ TODO - perhaps alists instead of hashes for things that likely have a small numb
     (parser-job parser extra-args cp-params start-position result-number #f '() #f))
   ;; traverse-cache returns the contents if `update` is false.
   (define (traverse-cache parser update)
+    (inc-traverse-cache!)
     (define c/start-pos (scheduler-job-info->job-cache s))
     (define c/parser
       (cond [(< start-position (gvector-count c/start-pos))
@@ -506,14 +523,16 @@ TODO - perhaps alists instead of hashes for things that likely have a small numb
                              c)]
                    [else #f]))))
     (define value
-      (and c/extra-args
+      (and c/cp-params
            (let ([r (hash-ref c/cp-params cp-params #f)])
              (cond [r r]
                    [update
                     (hash-set! c/cp-params cp-params update)
                     update]
                    [else #f]))))
-    value)
+
+    value
+    )
 
   (define usable (parser->usable parser))
   (define existing (traverse-cache usable #f))
