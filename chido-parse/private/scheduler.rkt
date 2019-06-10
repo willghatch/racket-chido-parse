@@ -489,7 +489,8 @@ TODO - perhaps alists instead of hashes for things that likely have a small numb
   (define (make-parser-job parser)
     (parser-job parser extra-args cp-params start-position result-number #f '() #f))
   ;; traverse-cache returns the contents if `update` is false.
-  (define (traverse-cache parser update)
+  (define (traverse-cache parser)
+    (define update #t)
     (inc-traverse-cache!)
     (define c/start-pos (scheduler-job-info->job-cache s))
     (define c/parser
@@ -531,17 +532,16 @@ TODO - perhaps alists instead of hashes for things that likely have a small numb
            (let ([r (hash-ref c/cp-params cp-params #f)])
              (cond [r r]
                    [update
-                    (hash-set! c/cp-params cp-params update)
-                    update]
+                    (define new (make-parser-job usable))
+                    (hash-set! c/cp-params cp-params new)
+                    new]
                    [else #f]))))
 
     value
     )
 
   (define usable (parser->usable parser))
-  (define existing (traverse-cache usable #f))
-  (or existing
-      (traverse-cache usable (make-parser-job usable))))
+  (traverse-cache usable))
 
 (define (get-next-job! s job)
   (match job
