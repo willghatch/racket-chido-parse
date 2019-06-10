@@ -120,16 +120,20 @@
 (define run-scheduler-counter 0)
 (define (inc-run-scheduler!)
   (set! run-scheduler-counter (add1 run-scheduler-counter)))
+(define no-hint-counter 0)
+(define (inc-no-hint!)
+  (set! no-hint-counter (add1 no-hint-counter)))
 (define traverse-cache-counter 0)
 (define (inc-traverse-cache!)
   (set! traverse-cache-counter (add1 traverse-cache-counter)))
 (define (get-counts!)
-  (eprintf "enter: ~a, run scheduler: ~a, find work: ~a, traverse cache: ~a\n"
-           parse-enter-counter run-scheduler-counter find-work-counter
+  (eprintf "enter: ~a, run scheduler/without-hint: ~a/~a, find work: ~a, traverse cache: ~a\n"
+           parse-enter-counter run-scheduler-counter no-hint-counter find-work-counter
            traverse-cache-counter)
   (set! parse-enter-counter 0)
   (set! find-work-counter 0)
   (set! run-scheduler-counter 0)
+  (set! no-hint-counter 0)
   (set! traverse-cache-counter 0)
   )
 
@@ -649,7 +653,12 @@ But I still need to encapsulate the port and give a start position.
                 result))))))
 
 
-(define (find-work s job-stacks)
+(define (get-last-alt-stack job-stack)
+  (cond [(null? job-stack) #f]
+        [(alt-parser? (parser-job-parser (car job-stack))) job-stack]
+        [else (get-last-alt-stack (cdr job-stack))]))
+
+(define (find-work s job-stack)
   ;; Returns a hint stack for an actionable job -- IE a list where the
   ;; first element is an actionable job, the second element is a job
   ;; that depends on the first, etc
@@ -658,22 +667,59 @@ But I still need to encapsulate the port and give a start position.
   ;;
   ;; s is a scheduler
   ;; job-stacks is a list of these dependency stacks
-  ;; TODO - this is probably the best place to detect cycles.  I should maybe return some sort of flag object containing the job that contains the smallest dependency cycle so I know which job to return a cycle error for.
+
+  #|
+  TODO - fail-chain-dependent!, do-alt-fail!, and anything about finding the last alt was an attempt at optimizing that wasn't very useful, so it's all commented out or unused.  Maybe I should delete it.  At any rate I want the code checked into my repo history.  Maybe later I'll realize that the code is useful but I did something that ruined it.  Or maybe I'll delete it later.  I don't know.
+  |#
+  (define (fail-chain-dependent! job stack)
+    (define dep
+      (match (parser-job-continuation/worker job)
+        [(scheduled-continuation j k dep ready?) dep]
+        [else (error
+               'find-work
+               "TODO - this shouldn't happen -- alt-job in fail-chain-dependent")]))
+    (if (memq dep stack)
+        (match (parser-job-continuation/worker dep)
+          [(and sk (scheduled-continuation j k dep-dep ready?))
+           (set-scheduled-continuation-dependency! sk
+                                                   (cycle-breaker-job dep-dep))
+           (set-scheduled-continuation-ready?! sk #t)]
+          [(and aw (alt-worker job remaining-jobs ready-jobs
+                               failures successful?))
+           (set-alt-worker-remaining-jobs! aw '())])
+        (fail-chain-dependent! dep (cons dep stack))))
+  (define (do-alt-fail! alt-stack)
+    (define last-alt (car alt-stack))
+    (match (parser-job-continuation/worker last-alt)
+      [(alt-worker job remaining-jobs ready-jobs
+                   failures successful?)
+       (for ([rj remaining-jobs])
+         (fail-chain-dependent! rj alt-stack))
+       (find-work s alt-stack)]))
+
   (inc-find-work!)
-  (let loop ([stacks job-stacks]
-             [blocked '()])
+  (let loop ([stacks (list job-stack)]
+             [blocked '()]
+             [last-alt-stack #f #;(get-last-alt-stack job-stack)])
     (if (null? stacks)
         #f
+        #;(if last-alt-stack
+            (do-alt-fail! last-alt-stack)
+            #f)
         (let* ([jstack (car stacks)]
-               [j (car jstack)])
-          (cond [(memq j blocked) (loop (cdr stacks) blocked)]
+               [j (car jstack)]
+               #;[last-alt (and last-alt-stack (car last-alt-stack))]
+               #;[alt-fail (and last-alt (not (memq last-alt jstack)))])
+          (cond #;[alt-fail (do-alt-fail! last-alt-stack)]
+                [(memq j blocked) (loop (cdr stacks) blocked last-alt-stack)]
                 ;; if it has a continuation/worker, add dependencies to jobs
                 [else (match (parser-job-continuation/worker j)
                         [(scheduled-continuation job k dependency ready?)
                          (cond [ready? jstack]
                                [else (loop (cons (cons dependency jstack)
                                                  (cdr stacks))
-                                           (cons j blocked))])]
+                                           (cons j blocked)
+                                           last-alt-stack)])]
                         [(alt-worker job remaining-jobs ready-jobs
                                      failures successful?)
                          (cond [(not (null? ready-jobs)) jstack]
@@ -681,16 +727,17 @@ But I still need to encapsulate the port and give a start position.
                                [else (loop (append (map (λ (rj) (cons rj jstack))
                                                         remaining-jobs)
                                                    (cdr stacks))
-                                           (cons j blocked))])]
+                                           (cons j blocked)
+                                           jstack)])]
                         [#f jstack])])))))
 
-(define (find-and-run-actionable-job s hint-stacks using-hint?)
+(define (find-and-run-actionable-job s hint-stack using-hint?)
   (define (run-actionable-job? j)
     ;; TODO - this is probably not great, but for now I just want to get things working again...
     (if (scheduler-get-result s j)
         (run-scheduler s)
         (run-actionable-job s j)))
-  (let* ([actionable-job-stack (find-work s hint-stacks)]
+  (let* ([actionable-job-stack (find-work s hint-stack)]
          [actionable-job (and actionable-job-stack (car actionable-job-stack))])
     (and actionable-job-stack (set-scheduler-hint-stack-stack!
                                s (cons actionable-job-stack
@@ -703,8 +750,11 @@ But I still need to encapsulate the port and give a start position.
       [actionable-job (run-actionable-job? actionable-job)]
       [using-hint?
        ;; try to find work in another part of the work tree...
+       ;; TODO - this should always be able to make progress, so the else case should not be necessary...
+       #;(define new-work-stack
+         (get-last-alt-stack (car (scheduler-hint-stack-stack s))))
        (set-scheduler-hint-stack-stack!
-        s (cons '() (cdr (scheduler-hint-stack-stack s))))
+        s (cons #;new-work-stack '() (cdr (scheduler-hint-stack-stack s))))
        (run-scheduler s)]
       [else
        ;; TODO - This should be optimized so that if `find-work` also finds this cycle...
@@ -722,6 +772,7 @@ But I still need to encapsulate the port and give a start position.
      (inc-run-scheduler!)
      (define using-hint? #t)
      (when (null? (car (scheduler-hint-stack-stack s)))
+       (inc-no-hint!)
        (set! using-hint? #f)
        (push-hint! s (car (scheduler-top-job-stack s))))
      (define hint-stack (car (scheduler-hint-stack-stack s)))
@@ -729,7 +780,8 @@ But I still need to encapsulate the port and give a start position.
      (define (run-actionable-job? j)
        ;; TODO - this is probably not great, but for now I just want to get things working again...
        (if (scheduler-get-result s j)
-           (run-scheduler s)
+           (begin (pop-hint! s)
+                  (run-scheduler s))
            (run-actionable-job s j)))
      (match hint-worker
        [#f (if (scheduler-get-result s (car hint-stack))
@@ -737,19 +789,17 @@ But I still need to encapsulate the port and give a start position.
                       (run-scheduler s))
                (run-actionable-job? (car hint-stack)))]
        [(scheduled-continuation job k dependency (and #t ready?))
-        (pop-hint! s)
+        ;(pop-hint! s)
         (run-actionable-job? job)]
        [(scheduled-continuation job k dependency ready?)
-        (find-and-run-actionable-job s (list hint-stack) using-hint?)]
+        (find-and-run-actionable-job s hint-stack using-hint?)]
        [(alt-worker job remaining-jobs (list ready-job rjs ...) failures successful?)
-        (pop-hint! s)
         (run-actionable-job? job)]
        [(alt-worker job (list) (list) failures successful?)
-        (pop-hint! s)
         (run-actionable-job? job)]
        [(alt-worker job remaining-jobs ready-jobs failures successful?)
         ;; No ready jobs
-        (find-and-run-actionable-job s (list hint-stack) using-hint?)]
+        (find-and-run-actionable-job s hint-stack using-hint?)]
        )]))
 
 
