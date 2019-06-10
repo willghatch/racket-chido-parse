@@ -9,9 +9,12 @@
  ;close-port-broker
  ;port-broker-commit-bytes
 
+ port-broker?
  port-broker-char
  port-broker-line
  port-broker-column
+ port-broker-substring?
+ port-broker-substring
  )
 
 (require
@@ -138,6 +141,23 @@
        (vector-ref (gvector-ref (port-broker-contents pb)
                                 (sub1 (gvector-count (port-broker-contents pb))))
                    info-char-offset))))
+
+(define (port-broker-substring? pb position string)
+  (define len (string-length string))
+  (for/and ([string-index (in-range len)]
+            [pb-index (in-range position (+ position len))])
+    (define info (info-for pb pb-index))
+    (and info (eq? (vector-ref info info-char-offset)
+                   (string-ref string string-index)))))
+
+(define (port-broker-substring pb position length)
+  (apply
+   string
+   (for/list ([i (in-range position (+ position length))])
+     (define info (info-for pb i))
+     (when (not info)
+       (error 'port-broker-substring "substring goes beyond end of port"))
+     (vector-ref info info-char-offset))))
 
 
 (define (port-broker->wrapped-port pb char-offset)
@@ -346,6 +366,10 @@ A wrapped port should be able to give a handle to the broker it is wrapping.
   (define wp3-read (λ () (parameterize ([current-input-port wp3])
                            (read-syntax))))
   (check-true (se? (wp3-read) r2))
+
+  (check-true (port-broker-substring? pb1 3 "his"))
+  (check-equal? (port-broker-substring pb1 3 3)
+                "his")
 
   #|
   TODO - port-broker-commit-bytes is broken.  The following test fails.

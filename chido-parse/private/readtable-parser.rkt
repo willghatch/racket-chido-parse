@@ -181,6 +181,7 @@
           (if (parse-failure? parsers-result)
               (parse* port symbol/number-parser #:args (list rt))
               parsers-result)))
+      #:use-port? #f
       #:promise-no-left-recursion?
       (not (ormap parser-potentially-left-recursive?
                   (append (chido-readtable-nonterminating-parsers rt)
@@ -215,13 +216,13 @@
     (set-chido-readtable-flush-state?! rt #f)))
 
 
-(define (parse-symbol/number-func port rt)
+(define (parse-symbol/number-func pb rt)
   ;; TODO - handle symbol escapes and literal delimiters
 
-  (define-values (start-line start-col start-pos) (port-next-location port))
+  (define start-pos (port-broker-start-position pb))
   ;; Trie-pairs are (cons trie n),
   ;; where n is the prefix length of trie that has matched so far.
-  (define (rec/main len hard-trie-pairs soft-trie-pairs peek-offsets)
+  (define (rec/main len hard-trie-pairs soft-trie-pairs)
     ;; The trie pairs always come in sorted by prefix length matched, small to large.
     (define new-hard-tries (cons (cons (chido-readtable-terminating-trie rt) 0)
                                  hard-trie-pairs))
@@ -252,7 +253,7 @@
                   ([parser (trie-values (car soft-pair))]
                    #:break delimit-length)
           (define start-offset (- len (cdr soft-pair)))
-          (define soft-result (parse* port parser
+          (define soft-result (parse* pb parser
                                       #:start (+ start-pos start-offset)))
           (if (not (parse-failure? soft-result))
               (cdr soft-pair)
@@ -265,17 +266,15 @@
 
     (if delimit-length
         (- len delimit-length)
-        (rec/step len new-hard-tries new-soft-tries peek-offsets)))
+        (rec/step len new-hard-tries new-soft-tries)))
 
-  (define (rec/step len hard-trie-pairs soft-trie-pairs peek-offsets)
-    (define c (peek-char port (car peek-offsets)))
+  (define (rec/step len hard-trie-pairs soft-trie-pairs)
+    (define c (port-broker-char pb (+ len start-pos)))
     (if (eof-object? c)
         len
-        (let ([c-len (char-utf-8-length c)])
-          (rec/main (add1 len)
-                    (filter-map (step-trie-pair c) hard-trie-pairs)
-                    (filter-map (step-trie-pair c) soft-trie-pairs)
-                    (cons (+ c-len (car peek-offsets)) peek-offsets)))))
+        (rec/main (add1 len)
+                  (filter-map (step-trie-pair c) hard-trie-pairs)
+                  (filter-map (step-trie-pair c) soft-trie-pairs))))
   (define ((step-trie-pair c) tp)
     (define next-trie (trie-step (car tp) c #f))
     (and next-trie (cons next-trie (add1 (cdr tp)))))
@@ -283,14 +282,13 @@
   ;; actual start of parsing symbols and numbers...
 
   (chido-readtable-populate-cache! rt)
-  (define sym/num-length (rec/main 0 '() '() '(0)))
+  (define sym/num-length (rec/main 0 '() '()))
   (if (equal? 0 sym/num-length)
       (make-parse-failure "Can't parse symbol because delimiter succeeded parsing."
                           #:position start-pos)
       (let ()
-        (define-values (line col pos) (port-next-location port))
         (define span sym/num-length)
-        (define str (read-string sym/num-length port))
+        (define str (port-broker-substring pb start-pos sym/num-length))
         (define result-func
           (λ (line column start-position end-position derivations)
 
@@ -303,7 +301,7 @@
             ;; TODO - by default this should be a syntax object, but for now I'll return a datum
             datum
             ))
-        (make-parse-derivation result-func #:end (+ pos span)))))
+        (make-parse-derivation result-func #:end (+ start-pos span)))))
 
 (define parse-sym/num-wrap
   (λ args
@@ -313,7 +311,8 @@
 
 (define symbol/number-parser
   (proc-parser #:name "symbol/number-parser" "" parse-symbol/number-func
-               #:promise-no-left-recursion? #t))
+               #:promise-no-left-recursion? #t
+               #:use-port? #f))
 
 
 (define (chido-readtable->read1 rt)
@@ -344,7 +343,8 @@
                  ""
                  (λ (port)
                    (define inner-rt (current-chido-readtable))
-                   (parse* port (chido-readtable->read* inner-rt)))))
+                   (parse* port (chido-readtable->read* inner-rt)))
+                 #:use-port? #f))
   (define left-parser
     (sequence
      left inner-parser right
@@ -364,7 +364,8 @@
                  (λ (port) (make-parse-failure
                             (format "Trailing right delimiter: ~a"
                                     right)))
-                 #:promise-no-left-recursion? #t))
+                 #:promise-no-left-recursion? #t
+                 #:use-port? #f))
 
   (extend-chido-readtable (extend-chido-readtable rt 'terminating left-parser)
                           'terminating right-parser))

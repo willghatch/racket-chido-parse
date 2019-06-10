@@ -77,10 +77,11 @@ I need to re-think the derivation result interface for all these combinators.
                           #:derivations derivations))]
           [else (error 'sequence
                        "must provide a result or derivation transformer")]))
-  (define (proc port)
+  (define (proc pb)
     (define (rec parsers derivations)
-      (cond [(null? parsers) (/end (port->pos port) (apply combiner (reverse derivations)))]
-            [else (for/parse ([result (parse* port (car parsers)
+      (cond [(null? parsers) (/end (port-broker-start-position pb)
+                                   (apply combiner (reverse derivations)))]
+            [else (for/parse ([result (parse* pb (car parsers)
                                               #:start (if (null? derivations)
                                                           #f
                                                           (car derivations)))])
@@ -88,7 +89,8 @@ I need to re-think the derivation result interface for all these combinators.
     (rec parsers '()))
   (proc-parser #:name use-name prefix proc
                #:promise-no-left-recursion? (not l-r)
-               #:preserve-prefix? #t))
+               #:preserve-prefix? #t
+               #:use-port? #f))
 
 (define (repetition #:name [name #f]
                     #:derive [derive #f]
@@ -114,17 +116,17 @@ I need to re-think the derivation result interface for all these combinators.
                    (λ args
                      (map parse-derivation-result derivations))
                    #:derivations derivations))]))
-  (define (proc port)
+  (define (proc pb)
     (define (get-more-streams derivations)
-      (for/parse ([derivation (parse* port parser #:start (if (null? derivations)
-                                                              #f
-                                                              (car derivations)))])
+      (for/parse ([derivation (parse* pb parser #:start (if (null? derivations)
+                                                            #f
+                                                            (car derivations)))])
                  (rec (cons derivation derivations))))
     (define (rec derivations)
       (define len (length derivations))
       (if (< len min)
           (get-more-streams derivations)
-          (parse-stream-cons (/end (port->pos port)
+          (parse-stream-cons (/end (port-broker-start-position pb)
                                    (combiner (reverse derivations)))
                              (if (>= len max)
                                  empty-stream
@@ -132,7 +134,8 @@ I need to re-think the derivation result interface for all these combinators.
     (rec '()))
   (proc-parser #:name use-name "" proc
                #:promise-no-left-recursion?
-               (not (parser-potentially-left-recursive? parser))))
+               (not (parser-potentially-left-recursive? parser))
+               #:use-port? #f))
 
 (define (kleene-star #:name [name #f]
                      #:derive [derive #f]
@@ -170,8 +173,10 @@ I need to re-think the derivation result interface for all these combinators.
                         #:result [result #f])
   (proc-parser #:name name
                ""
-               (λ (p) (make-parse-derivation result #:end (port->pos p)))
-               #:promise-no-left-recursion? #t))
+               (λ (p) (make-parse-derivation result
+                                             #:end (port-broker-start-position p)))
+               #:promise-no-left-recursion? #t
+               #:use-port? #f))
 
 
 (define (between* main-parser between-parser
@@ -221,7 +226,8 @@ I need to re-think the derivation result interface for all these combinators.
                                  s)))
                #:preserve-prefix? #t
                #:promise-no-left-recursion?
-               (not (parser-potentially-left-recursive? parser))))
+               (not (parser-potentially-left-recursive? parser))
+               #:use-port? #f))
 
 (define (traditional-read-func->parse-result-func f #:syntax? [syntax? #f])
   (λ (port)

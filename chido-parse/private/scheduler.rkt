@@ -43,6 +43,17 @@
   )
  ;; TODO - other parse functions
 
+ ;; From port-broker
+ (rename-out
+  [port-broker->port/wrap port-broker->port]
+  [port-broker-char/wrap port-broker-char]
+  [port-broker-line/wrap port-broker-line]
+  [port-broker-column/wrap port-broker-column]
+  [port-broker-substring?/wrap port-broker-substring?]
+  [port-broker-substring/wrap port-broker-substring]
+  [port-broker-wrap-position port-broker-start-position]
+  )
+
  )
 
 (require
@@ -148,14 +159,16 @@
 
 (struct proc-parser parser-struct
   ;; TODO - document from notes
-  (prefix procedure preserve-prefix? promise-no-left-recursion?)
+  (prefix procedure preserve-prefix? promise-no-left-recursion? use-port?)
   #:transparent)
 (define (make-proc-parser
          prefix proc
          #:name [name (object-name proc)]
          #:preserve-prefix? [preserve-prefix? #f]
-         #:promise-no-left-recursion? [promise-no-left-recursion? #f])
-  (proc-parser name prefix proc preserve-prefix? promise-no-left-recursion?))
+         #:promise-no-left-recursion? [promise-no-left-recursion? #f]
+         #:use-port? [use-port? #t])
+  (proc-parser name prefix proc
+               preserve-prefix? promise-no-left-recursion? use-port?))
 
 (struct alt-parser parser-struct
   ;; TODO - use a prefix trie for the parsers
@@ -514,6 +527,39 @@ TODO - perhaps alists instead of hashes for things that likely have a small numb
      (get-job! s parser extra-args cp-params start-position (add1 result-index))]))
 
 
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;; port-broker wraps
+
+#|
+I want to avoid using the port interface where possible, since it imposes a constant back-and-forth between bytes and strings.
+So I want to use port-brokers directly to use *fewer* custom port calls.
+But I still need to encapsulate the port and give a start position.
+|#
+(struct port-broker-wrap (broker position) #:transparent)
+
+(define (range-err pb/w pos name message)
+  (when (< pos
+           (port-broker-wrap-position pb/w))
+    (error name message)))
+
+(define (port-broker->port/wrap pb/w pos)
+  (range-err pb/w pos 'port-broker->port "Can't create a port with a start position lower that the current parse start position.")
+  (port-broker->port (port-broker-wrap-broker pb/w) pos))
+(define (port-broker-char/wrap pb/w pos)
+  (range-err pb/w pos 'port-broker-char "Can't read a position lower that the current parse start position.")
+  (port-broker-char (port-broker-wrap-broker pb/w) pos))
+(define (port-broker-line/wrap pb/w pos)
+  (range-err pb/w pos 'port-broker-line "Can't read a position lower that the current parse start position.")
+  (port-broker-line (port-broker-wrap-broker pb/w) pos))
+(define (port-broker-column/wrap pb/w pos)
+  (range-err pb/w pos 'port-broker-column "Can't read a position lower that the current parse start position.")
+  (port-broker-column (port-broker-wrap-broker pb/w) pos))
+(define (port-broker-substring?/wrap pb/w pos str)
+  (range-err pb/w pos 'port-broker-substring? "Can't read a position lower that the current parse start position.")
+  (port-broker-substring? (port-broker-wrap-broker pb/w) pos str))
+(define (port-broker-substring/wrap pb/w pos len)
+  (range-err pb/w pos 'port-broker-substring "Can't read a position lower that the current parse start position.")
+  (port-broker-substring (port-broker-wrap-broker pb/w) pos len))
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -773,19 +819,22 @@ TODO - perhaps alists instead of hashes for things that likely have a small numb
                         #f #f)]
               [(equal? 0 result-index)
                (match parsador
-                 [(proc-parser name prefix procedure pp no-lr)
-                  (define port (port-broker->port (scheduler-port-broker
-                                                   scheduler)
-                                                  start-position))
-                  (define prefix-length (string-length prefix))
+                 [(proc-parser name prefix procedure pp no-lr use-port?)
+                  (define port-broker (scheduler-port-broker scheduler))
+                  (define proc-input (if use-port?
+                                         (port-broker->port port-broker
+                                                            start-position)
+                                         (port-broker-wrap port-broker
+                                                           start-position)))
                   ;; TODO - optimize this peek for alt parsers, at least...
-                  (if (equal? prefix
-                              (peek-string prefix-length 0 port))
+                  (if (port-broker-substring? port-broker start-position prefix)
                       (do-run! scheduler
                                (λ ()
                                  (parameterize ([current-chido-parse-parameters
                                                  cp-params])
-                                   (let ([result (apply procedure port extra-args)])
+                                   (let ([result (apply procedure
+                                                        proc-input
+                                                        extra-args)])
                                      (if (and (stream? result)
                                               (not (flattened-stream? result)))
                                          (stream-flatten result)
@@ -809,18 +858,14 @@ TODO - perhaps alists instead of hashes for things that likely have a small numb
                  [(? string?)
                   (define s parsador)
                   (define pb (scheduler-port-broker scheduler))
-                  (define length (string-length s))
                   (define match?
-                    (for/and ([string-index (in-range length)]
-                              [input-index (in-range start-position
-                                                     (+ start-position length))])
-                      (eq? (string-ref s string-index)
-                           (port-broker-char pb input-index))))
+                    (port-broker-substring? pb start-position s))
                   (define result
                     (parameterize ([current-chido-parse-job job])
                       (if match?
                           (parse-stream
-                           (make-parse-derivation s #:end (+ start-position length))
+                           (make-parse-derivation s #:end (+ start-position
+                                                             (string-length s)))
                            #f
                            scheduler)
                           (make-parse-failure (format "literal didn't match: ~s" s)
@@ -907,7 +952,7 @@ TODO - perhaps alists instead of hashes for things that likely have a small numb
                     result-index continuation/worker
                     dependents result-stream)
         (match parse
-          [(proc-parser name prefix procedure pp no-lr)
+          [(proc-parser name prefix procedure pp no-lr use-port?)
            (define failure
              (let ([inner-failures (and (flattened-stream? result)
                                         (flattened-stream-failures result))])
@@ -961,16 +1006,21 @@ TODO - perhaps alists instead of hashes for things that likely have a small numb
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;;; Parsing outer API
 
-(define (parse* port parser
+(define (parse* port/pbw parser
                 #:args [extra-args '()]
                 #:start [start #f])
-  (define pb (or (port->port-broker port)
-                 (port-broker port)))
+  (define pb (if (port-broker-wrap? port/pbw)
+                 (port-broker-wrap-broker port/pbw)
+                 (or (port->port-broker port/pbw)
+                     (port-broker port/pbw))))
+  (define (port->pos p)
+    (let-values ([(line col pos) (port-next-location p)]) pos))
   (define start-pos (match start
                       [(? number?) start]
                       [(? parse-derivation?) (parse-derivation-end-position start)]
-                      [#f (let-values ([(line col pos) (port-next-location port)])
-                            pos)]))
+                      [#f (if (port-broker-wrap? port/pbw)
+                              (port-broker-wrap-position port/pbw)
+                              (port->pos port/pbw))]))
   (enter-the-parser pb parser extra-args start-pos))
 
 #|
