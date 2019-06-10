@@ -808,23 +808,24 @@ TODO - perhaps alists instead of hashes for things that likely have a small numb
                   (run-scheduler scheduler)]
                  [(? string?)
                   (define s parsador)
-                  (define port (port-broker->port (scheduler-port-broker
-                                                   scheduler)
-                                                  start-position))
-                  ;(define-values (line col pos) (port-next-location port))
+                  (define pb (scheduler-port-broker scheduler))
                   (define length (string-length s))
-                  (define read-in (read-string length port))
+                  (define match?
+                    (for/and ([string-index (in-range length)]
+                              [input-index (in-range start-position
+                                                     (+ start-position length))])
+                      (eq? (string-ref s string-index)
+                           (port-broker-char pb input-index))))
                   (define result
                     (parameterize ([current-chido-parse-job job])
-                      (if (equal? s read-in)
-                          (make-parse-derivation s #:end (+ start-position length))
+                      (if match?
+                          (parse-stream
+                           (make-parse-derivation s #:end (+ start-position length))
+                           #f
+                           scheduler)
                           (make-parse-failure (format "literal didn't match: ~s" s)
                                               #:position start-position))))
-                  (define result-stream
-                    (if (parse-failure? result)
-                        result
-                        (parse-stream result #f scheduler)))
-                  (cache-result-and-ready-dependents! scheduler job result-stream)
+                  (cache-result-and-ready-dependents! scheduler job result)
                   (run-scheduler scheduler)])]
               [else
                ;; In this case there has been a result stream but it is dried up.

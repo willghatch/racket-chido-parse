@@ -8,6 +8,10 @@
  port->port-broker
  ;close-port-broker
  ;port-broker-commit-bytes
+
+ port-broker-char
+ port-broker-line
+ port-broker-column
  )
 
 (require
@@ -15,6 +19,11 @@
  data/gvector
  "util.rkt"
  )
+
+(define info-byte-offset-offset 0)
+(define info-char-offset 1)
+(define info-line-offset 2)
+(define info-col-offset 3)
 
 (struct port-broker
   (port
@@ -112,6 +121,24 @@
       (gvector-ref (port-broker-contents pb)
                    (- char-offset (port-broker-offset pb)))))
 
+(define (port-broker-char pb position)
+  (define info (info-for pb position))
+  (or (and info (vector-ref info info-char-offset))
+      eof))
+(define (port-broker-line pb position)
+  (define info (info-for pb position))
+  (or (and info (vector-ref info info-line-offset))
+      (vector-ref (gvector-ref (port-broker-contents pb)
+                               (sub1 (gvector-count (port-broker-contents pb))))
+                  info-line-offset)))
+(define (port-broker-column pb position)
+  (define info (info-for pb position))
+  (or (and info (vector-ref info info-line-offset))
+      (add1
+       (vector-ref (gvector-ref (port-broker-contents pb)
+                                (sub1 (gvector-count (port-broker-contents pb))))
+                   info-char-offset))))
+
 
 (define (port-broker->wrapped-port pb char-offset)
   #|
@@ -173,11 +200,11 @@
       (if (not info)
           (let* ([contents (port-broker-contents pb)]
                  [last-info (gvector-ref contents (sub1 (gvector-count contents)))])
-            (values (vector-ref last-info 2)
-                    (add1 (vector-ref last-info 3))
+            (values (vector-ref last-info info-line-offset)
+                    (add1 (vector-ref last-info info-col-offset))
                     (+ -1 (gvector-count contents) (port-broker-offset pb))))
-          (values (vector-ref info 2)
-                  (vector-ref info 3)
+          (values (vector-ref info info-line-offset)
+                  (vector-ref info info-col-offset)
                   char-pos))))
 
   (make-input-port
