@@ -62,6 +62,7 @@
    [layout-trie #:mutable]
 
    ;; These exist to ensure parsers created with chido-readtable are always eq?
+   [symbol-parser #:mutable]
    [layout*-parser #:mutable]
    [read1-parser #:mutable]
    [layout*+read1-parser #:mutable]
@@ -97,6 +98,7 @@
    empty-trie
    empty-trie
    ;; parsers
+   #f
    #f
    #f
    #f
@@ -156,6 +158,7 @@
     (set-chido-readtable-nonterminating-trie!
      rt
      (parser-list->trie (chido-readtable-nonterminating-parsers rt)))
+    (set-chido-readtable-symbol-parser! rt (symbol/number-parser rt))
     (set-chido-readtable-layout-trie!
      rt
      (parser-list->trie (chido-readtable-layout-parsers rt)))
@@ -179,7 +182,7 @@
         (λ (port)
           (define parsers-result (parse* port alt))
           (if (parse-failure? parsers-result)
-              (parse* port symbol/number-parser #:args (list rt))
+              (parse* port (chido-readtable-symbol-parser rt))
               parsers-result)))
       #:use-port? #f
       #:promise-no-left-recursion?
@@ -216,7 +219,7 @@
     (set-chido-readtable-flush-state?! rt #f)))
 
 
-(define (parse-symbol/number-func pb rt)
+(define ((parse-symbol/number-func rt) pb)
   ;; TODO - handle symbol escapes and literal delimiters
 
   (define start-pos (port-broker-start-position pb))
@@ -303,14 +306,8 @@
             ))
         (make-parse-derivation result-func #:end (+ start-pos span)))))
 
-(define parse-sym/num-wrap
-  (λ args
-    (define r (apply parse-symbol/number-func args))
-    (eprintf "parse-sym/num returning: ~a\n" r)
-    r))
-
-(define symbol/number-parser
-  (proc-parser #:name "symbol/number-parser" "" parse-symbol/number-func
+(define (symbol/number-parser rt)
+  (proc-parser #:name "symbol/number-parser" "" (parse-symbol/number-func rt)
                #:promise-no-left-recursion? #t
                #:use-port? #f))
 

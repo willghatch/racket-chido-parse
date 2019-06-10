@@ -146,7 +146,7 @@
   ;; line column start-position end-position derivation-list
   (define job (current-chido-parse-job))
   (match job
-    [(parser-job parser extra-arguments cp-params start-position result-index
+    [(parser-job parser cp-params start-position result-index
                  continuation/worker dependents result-stream)
      (define end-use (or end
                          (and (not (null? derivation-list))
@@ -181,15 +181,14 @@
 
 (struct alt-parser parser-struct
   ;; TODO - use a prefix trie for the parsers
-  (parsers extra-arg-lists left-recursive? null?)
+  (parsers left-recursive? null?)
   #:transparent)
 
-(define (make-alt-parser name parsers [extra-arg-lists #f])
+(define (make-alt-parser name parsers)
   (define l-recursive? (ormap parser-potentially-left-recursive? parsers))
   (define null? (ormap parser-potentially-null? parsers))
   (alt-parser name
               parsers
-              (or extra-arg-lists (map (λ (p) '()) parsers))
               l-recursive?
               null?))
 
@@ -271,14 +270,14 @@
 (define (make-parse-failure message #:position [pos #f] #:failures [failures '()])
   (define job (current-chido-parse-job))
   (match job
-    [(parser-job parser extra-arguments cp-params start-position result-index
+    [(parser-job parser cp-params start-position result-index
                  continuation/worker dependents result-stream)
      (parse-failure (parser-name parser) start-position (or pos start-position)
                     message failures)]))
 
 (define (make-cycle-failure job)
   (match job
-    [(parser-job parser extra-arguments cp-params start-position result-index
+    [(parser-job parser cp-params start-position result-index
                  k/worker dependents result-stream)
      (parse-failure (parser-name parser)
                     start-position
@@ -289,7 +288,7 @@
 (define (exn->failure e job)
   (let ([message (format "Exception while parsing: ~a\n" (exn->string e))])
     (match job
-      [(parser-job parser extra-arguments cp-params start-position
+      [(parser-job parser cp-params start-position
                    result-index continuation/worker dependents result-stream)
        (parse-failure (parser-name parser)
                       start-position start-position message '())])))
@@ -298,10 +297,10 @@
   (match aw
     [(alt-worker job remaining-jobs ready-jobs failures successful?)
      (match job
-       [(parser-job parser extra-arguments cp-params start-position result-index
+       [(parser-job parser cp-params start-position result-index
                     k/worker dependents result-stream)
         (match parser
-          [(alt-parser name parsers extra-arg-lists l-rec nullable)
+          [(alt-parser name parsers l-rec nullable)
            ;; TODO - what is the best fail position?
            ;;        Probably I should analyze the sub-failures...
            (define fail-position start-position)
@@ -362,7 +361,6 @@ The job->result-cache is a map from parser-job structs -> parser-stream OR parse
   (
    ;; parser is either a parser struct or an alt-parser struct
    parser
-   extra-arguments
    ;; chido-parse-parameters
    cp-params
    start-position
@@ -455,7 +453,6 @@ The job cache is a multi-level dictionary with the following keys / implementati
 * start-position / gvector
 * parser / mutable hasheq
 * result-number / gvector
-* extra-args / mutable hashequal?
 * cp-params / mutable hashequal?
 
 TODO - does it make sense to use hasheq for extra-args and cp-params?
@@ -479,15 +476,13 @@ TODO - perhaps alists instead of hashes for things that likely have a small numb
   (make-hasheq))
 (define (make-result-number-cache)
   (make-gvector #:capacity 10))
-(define (make-extra-args-cache)
-  (make-hash))
 (define (make-cp-params-cache)
   (make-hash))
 
 
-(define (get-job! s parser extra-args cp-params start-position result-number)
+(define (get-job! s parser cp-params start-position result-number)
   (define (make-parser-job parser)
-    (parser-job parser extra-args cp-params start-position result-number #f '() #f))
+    (parser-job parser cp-params start-position result-number #f '() #f))
   ;; traverse-cache returns the contents if `update` is false.
   (define (traverse-cache parser)
     (define update #t)
@@ -510,23 +505,15 @@ TODO - perhaps alists instead of hashes for things that likely have a small numb
                              (hash-set! c/parser parser c)
                              c)]
                    [else #f]))))
-    (define c/extra-args
+    (define c/cp-params
       (and c/result-n
            (cond [(< result-number (gvector-count c/result-n))
                   (gvector-ref c/result-n result-number)]
                  [update (for ([i (in-range (gvector-count c/result-n)
                                             (add1 result-number))])
-                           (gvector-add! c/result-n (make-extra-args-cache)))
+                           (gvector-add! c/result-n (make-cp-params-cache)))
                          (gvector-ref c/result-n result-number)]
                  [else #f])))
-    (define c/cp-params
-      (and c/extra-args
-           (let ([r (hash-ref c/extra-args extra-args #f)])
-             (cond [r r]
-                   [update (let ([c (make-cp-params-cache)])
-                             (hash-set! c/extra-args extra-args c)
-                             c)]
-                   [else #f]))))
     (define value
       (and c/cp-params
            (let ([r (hash-ref c/cp-params cp-params #f)])
@@ -536,6 +523,18 @@ TODO - perhaps alists instead of hashes for things that likely have a small numb
                     (hash-set! c/cp-params cp-params new)
                     new]
                    [else #f]))))
+    #|
+    This is an experiment that ignores extra-args and cp-params for caching.  That's definitely semantically wrong, but for benchmarks that only end up using one value for those, it works OK.  At the time of writing skipping those last two levels of cache (which are also possibly the most expensive -- hash with equal?) makes it about 17% faster.
+    |#
+    #;(define value
+      (and c/result-n
+           (cond [(< result-number (gvector-count c/result-n))
+                  (gvector-ref c/result-n result-number)]
+                 [update
+                  (define new (make-parser-job usable))
+                  (gvector-add! c/result-n new)
+                  new]
+                 [else #f])))
 
     value
     )
@@ -545,9 +544,9 @@ TODO - perhaps alists instead of hashes for things that likely have a small numb
 
 (define (get-next-job! s job)
   (match job
-    [(parser-job parser extra-args cp-params start-position
+    [(parser-job parser cp-params start-position
                  result-index k/w deps result-stream)
-     (get-job! s parser extra-args cp-params start-position (add1 result-index))]))
+     (get-job! s parser cp-params start-position (add1 result-index))]))
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -592,10 +591,10 @@ But I still need to encapsulate the port and give a start position.
 (define current-chido-parse-job (make-parameter #f))
 (define recursive-enter-flag (gensym 'recursive-enter-flag))
 
-(define (enter-the-parser port-broker parser extra-args start-position)
+(define (enter-the-parser port-broker parser start-position)
   (define s (port-broker-scheduler port-broker))
   (define cp-params (current-chido-parse-parameters))
-  (define j (get-job! s parser extra-args cp-params start-position 0))
+  (define j (get-job! s parser cp-params start-position 0))
   (enter-the-parser/job s j))
 
 (define (enter-the-parser/job scheduler job)
@@ -832,7 +831,7 @@ But I still need to encapsulate the port and give a start position.
            "internal error - run-actionable-job got a job that was already done: ~a"
            (job->display job)))
   (match job
-    [(parser-job parsador extra-args cp-params start-position
+    [(parser-job parsador cp-params start-position
                  result-index k/worker dependents result-stream)
      (match k/worker
        [(scheduled-continuation job k dependency (and ready? #t))
@@ -901,9 +900,7 @@ But I still need to encapsulate the port and give a start position.
                                (λ ()
                                  (parameterize ([current-chido-parse-parameters
                                                  cp-params])
-                                   (let ([result (apply procedure
-                                                        proc-input
-                                                        extra-args)])
+                                   (let ([result (procedure proc-input)])
                                      (if (and (stream? result)
                                               (not (flattened-stream? result)))
                                          (stream-flatten result)
@@ -914,11 +911,12 @@ But I still need to encapsulate the port and give a start position.
                                                    "prefix didn't match" '())])
                         (cache-result-and-ready-dependents! scheduler job result)
                         (run-scheduler scheduler)))]
-                 [(alt-parser name parsers extra-arg-lists l-rec nullable)
-                  (define (mk-dep parsador extra-args)
-                    (get-job! scheduler parsador extra-args cp-params start-position 0))
+                 [(alt-parser name parsers l-rec nullable)
+                  (define (mk-dep parsador)
+                    (get-job! scheduler parsador cp-params start-position 0))
                   (define worker
-                    (alt-worker job (map mk-dep parsers extra-arg-lists) '() '() #f))
+                    ;(job remaining-jobs ready-jobs failures successful?)
+                    (alt-worker job (map mk-dep parsers) '() '() #f))
                   (for ([dep (alt-worker-remaining-jobs worker)])
                     (push-parser-job-dependent! dep worker))
                   (set-parser-job-continuation/worker! job worker)
@@ -1017,7 +1015,7 @@ But I still need to encapsulate the port and give a start position.
     [(? (λ (x) (and (stream? x) (stream-empty? x))))
      ;; Turn it into a parse failure and recur.
      (match job
-       [(parser-job parse extra-arguments cp-params start-position
+       [(parser-job parse cp-params start-position
                     result-index continuation/worker
                     dependents result-stream)
         (match parse
@@ -1076,7 +1074,6 @@ But I still need to encapsulate the port and give a start position.
 ;;;;; Parsing outer API
 
 (define (parse* port/pbw parser
-                #:args [extra-args '()]
                 #:start [start #f])
   (define pb (if (port-broker-wrap? port/pbw)
                  (port-broker-wrap-broker port/pbw)
@@ -1090,7 +1087,7 @@ But I still need to encapsulate the port and give a start position.
                       [#f (if (port-broker-wrap? port/pbw)
                               (port-broker-wrap-position port/pbw)
                               (port->pos port/pbw))]))
-  (enter-the-parser pb parser extra-args start-pos))
+  (enter-the-parser pb parser start-pos))
 
 #|
 TODO
