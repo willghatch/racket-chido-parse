@@ -64,6 +64,7 @@
  "structs.rkt"
  "stream-flatten.rkt"
  "parameters.rkt"
+ "trie.rkt"
  racket/stream
  racket/match
  racket/struct
@@ -183,17 +184,20 @@
                preserve-prefix? promise-no-left-recursion? use-port?))
 
 (struct alt-parser parser-struct
-  ;; TODO - use a prefix trie for the parsers
-  (parsers left-recursive? null?)
+  (parsers left-recursive? null? trie)
   #:transparent)
 
 (define (make-alt-parser name parsers)
   (define l-recursive? (ormap parser-potentially-left-recursive? parsers))
   (define null? (ormap parser-potentially-null? parsers))
+  (define trie (for/fold ([t empty-trie])
+                         ([p parsers])
+                 (trie-add t (parser-prefix p) p)))
   (alt-parser name
               parsers
               l-recursive?
-              null?))
+              null?
+              trie))
 
 (define-values (prop:custom-parser custom-parser? custom-parser-ref)
   ;; TODO - document -- the property should be a function that accepts a `self` argument and returns a parser.
@@ -811,6 +815,30 @@ But I still need to encapsulate the port and give a start position.
                 (cons job jobs)))]))
   (rec (car (scheduler-done-k-stack scheduler)) '()))
 
+(define (prefix-fail! scheduler job)
+  (match job
+    [(s/kw parser-job #:parser p #:start-position pos #:result #f)
+     (cache-result-and-ready-dependents!
+      scheduler
+      job
+      (parse-failure (parser-name p) pos pos "prefix didn't match" '()))]
+    [else (void)]))
+
+(define (string-job-finalize! scheduler job match?)
+  (match job
+    [(s/kw parser-job #:parser s #:start-position start-position)
+     (define result
+       (parameterize ([current-chido-parse-job job])
+         (if match?
+             (parse-stream
+              (make-parse-derivation s #:end (+ start-position
+                                                (string-length s)))
+              #f
+              scheduler)
+             (make-parse-failure (format "literal didn't match: ~s" s)
+                                 #:position start-position))))
+     (cache-result-and-ready-dependents! scheduler job result)]))
+
 (define (run-actionable-job scheduler job)
   (when (job->result job)
     (error 'chido-parse
@@ -903,16 +931,32 @@ But I still need to encapsulate the port and give a start position.
                                          result))))
                                job
                                #f #f)
-                      (let ([result (parse-failure name start-position start-position
-                                                   "prefix didn't match" '())])
-                        (cache-result-and-ready-dependents! scheduler job result)
-                        (run-scheduler scheduler)))]
-                 [(s/kw alt-parser #:parsers parsers)
+                      (begin (prefix-fail! scheduler job)
+                             (run-scheduler scheduler)))]
+                 [(s/kw alt-parser #:trie trie #:parsers parsers)
                   (define (mk-dep p)
-                    (get-job-0! scheduler p cp-params start-position))
+                    (define j (get-job-0! scheduler p cp-params start-position))
+                    ;(when (string? p) (string-job-finalize! scheduler j #t))
+                    j)
+                  (define pb (scheduler-port-broker scheduler))
+                  (define deps-with-matched-prefixes
+                    (let loop ([matches '()]
+                               [t trie]
+                               [pos start-position])
+                      (define new-matches (append (trie-values t) matches))
+                      (define new-trie (trie-step t (port-broker-char pb pos) #f))
+                      (if new-trie
+                          (loop new-matches new-trie (add1 pos))
+                          new-matches)))
+                  (for ([p parsers])
+                    (when (not (memq p deps-with-matched-prefixes))
+                      (prefix-fail! scheduler (mk-dep p))))
+                  (define dep-jobs (map mk-dep deps-with-matched-prefixes))
+                  (define ready-deps (filter parser-job-result dep-jobs))
+                  (define unready-deps
+                    (filter (λ (x) (not (parser-job-result x))) dep-jobs))
                   (define worker
-                    ;(job remaining-jobs ready-jobs failures successful?)
-                    (alt-worker job (map mk-dep parsers) '() '() #f))
+                    (alt-worker job unready-deps ready-deps '() #f))
                   (for ([dep (alt-worker-remaining-jobs worker)])
                     (push-parser-job-dependent! dep worker))
                   (set-parser-job-continuation/worker! job worker)
@@ -923,17 +967,7 @@ But I still need to encapsulate the port and give a start position.
                   (define pb (scheduler-port-broker scheduler))
                   (define match?
                     (port-broker-substring? pb start-position s))
-                  (define result
-                    (parameterize ([current-chido-parse-job job])
-                      (if match?
-                          (parse-stream
-                           (make-parse-derivation s #:end (+ start-position
-                                                             (string-length s)))
-                           #f
-                           scheduler)
-                          (make-parse-failure (format "literal didn't match: ~s" s)
-                                              #:position start-position))))
-                  (cache-result-and-ready-dependents! scheduler job result)
+                  (string-job-finalize! scheduler job match?)
                   (run-scheduler scheduler)])]
               [else
                ;; In this case there has been a result stream but it is dried up.
