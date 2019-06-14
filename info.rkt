@@ -6,6 +6,7 @@
     "racket-doc"
     "rackunit-lib"
     "data-lib"
+    "kw-make-struct"
 
     "profile-lib"
     ))

@@ -68,6 +68,8 @@
  racket/string
  racket/exn
  data/gvector
+ (rename-in kw-make-struct
+            [make/kw s/kw])
  (for-syntax
   racket/base
   syntax/parse
@@ -146,8 +148,7 @@
   ;; line column start-position end-position derivation-list
   (define job (current-chido-parse-job))
   (match job
-    [(parser-job parser cp-params start-position result-index
-                 continuation/worker dependents result-stream)
+    [(s/kw parser-job #:parser parser #:start-position start-position)
      (define end-use (or end
                          (and (not (null? derivation-list))
                               (apply max
@@ -270,15 +271,13 @@
 (define (make-parse-failure message #:position [pos #f] #:failures [failures '()])
   (define job (current-chido-parse-job))
   (match job
-    [(parser-job parser cp-params start-position result-index
-                 continuation/worker dependents result-stream)
+    [(s/kw parser-job #:parser parser #:start-position start-position)
      (parse-failure (parser-name parser) start-position (or pos start-position)
                     message failures)]))
 
 (define (make-cycle-failure job)
   (match job
-    [(parser-job parser cp-params start-position result-index
-                 k/worker dependents result-stream)
+    [(s/kw parser-job #:parser parser #:start-position start-position)
      (parse-failure (parser-name parser)
                     start-position
                     start-position
@@ -288,8 +287,7 @@
 (define (exn->failure e job)
   (let ([message (format "Exception while parsing: ~a\n" (exn->string e))])
     (match job
-      [(parser-job parser cp-params start-position
-                   result-index continuation/worker dependents result-stream)
+      [(s/kw parser-job #:parser parser #:start-position start-position)
        (parse-failure (parser-name parser)
                       start-position start-position message '())])))
 
@@ -297,8 +295,7 @@
   (match aw
     [(alt-worker job remaining-jobs ready-jobs failures successful?)
      (match job
-       [(parser-job parser cp-params start-position result-index
-                    k/worker dependents result-stream)
+       [(s/kw parser-job #:parser parser #:start-position start-position)
         (match parser
           [(alt-parser name parsers l-rec nullable)
            ;; TODO - what is the best fail position?
@@ -544,8 +541,8 @@ TODO - perhaps alists instead of hashes for things that likely have a small numb
 
 (define (get-next-job! s job)
   (match job
-    [(parser-job parser cp-params start-position
-                 result-index k/w deps result-stream)
+    [(s/kw parser-job #:parser parser #:cp-params cp-params
+           #:start-position start-position #:result-index result-index)
      (get-job! s parser cp-params start-position (add1 result-index))]))
 
 
@@ -831,8 +828,9 @@ But I still need to encapsulate the port and give a start position.
            "internal error - run-actionable-job got a job that was already done: ~a"
            (job->display job)))
   (match job
-    [(parser-job parsador cp-params start-position
-                 result-index k/worker dependents result-stream)
+    [(s/kw parser-job #:parser parser #:continuation/worker k/worker
+           #:result-stream result-stream #:result-index result-index
+           #:start-position start-position #:cp-params cp-params)
      (match k/worker
        [(scheduled-continuation job k dependency (and ready? #t))
         (do-run! scheduler
@@ -886,7 +884,7 @@ But I still need to encapsulate the port and give a start position.
                         job
                         #f #f)]
               [(equal? 0 result-index)
-               (match parsador
+               (match parser
                  [(proc-parser name prefix procedure pp no-lr use-port?)
                   (define port-broker (scheduler-port-broker scheduler))
                   (define proc-input (if use-port?
@@ -912,8 +910,8 @@ But I still need to encapsulate the port and give a start position.
                         (cache-result-and-ready-dependents! scheduler job result)
                         (run-scheduler scheduler)))]
                  [(alt-parser name parsers l-rec nullable)
-                  (define (mk-dep parsador)
-                    (get-job! scheduler parsador cp-params start-position 0))
+                  (define (mk-dep p)
+                    (get-job! scheduler p cp-params start-position 0))
                   (define worker
                     ;(job remaining-jobs ready-jobs failures successful?)
                     (alt-worker job (map mk-dep parsers) '() '() #f))
@@ -923,7 +921,7 @@ But I still need to encapsulate the port and give a start position.
                   ;(push-hint! scheduler worker)
                   (run-scheduler scheduler)]
                  [(? string?)
-                  (define s parsador)
+                  (define s parser)
                   (define pb (scheduler-port-broker scheduler))
                   (define match?
                     (port-broker-substring? pb start-position s))
@@ -1015,10 +1013,8 @@ But I still need to encapsulate the port and give a start position.
     [(? (λ (x) (and (stream? x) (stream-empty? x))))
      ;; Turn it into a parse failure and recur.
      (match job
-       [(parser-job parse cp-params start-position
-                    result-index continuation/worker
-                    dependents result-stream)
-        (match parse
+       [(s/kw parser-job #:parser parser #:start-position start-position)
+        (match parser
           [(proc-parser name prefix procedure pp no-lr use-port?)
            (define failure
              (let ([inner-failures (and (flattened-stream? result)
