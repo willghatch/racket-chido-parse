@@ -323,6 +323,9 @@
 (define (chido-readtable->read1/layout rt)
   (chido-readtable-populate-cache! rt)
   (chido-readtable-layout*+read1-parser rt))
+(define (chido-readtable->symbol rt)
+  (chido-readtable-populate-cache! rt)
+  (chido-readtable-symbol-parser rt))
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -413,6 +416,21 @@
              (make-parse-derivation #t #:end pos))
            (begin (read-char port)
                   (loop)))))))
+
+(define (make-keyword-parser prefix)
+  (sequence #:name "keyword"
+            prefix
+            (proc-parser
+             ""
+             (λ (port) (parse* port (chido-readtable->symbol
+                                     (current-chido-readtable)))))
+            #:derive (λ derivations
+                       (make-parse-derivation
+                        (λ (line col pos end-pos derivations)
+                          (string->keyword
+                           (symbol->string
+                            (parse-derivation-result (second derivations)))))
+                        #:derivations derivations))))
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -506,6 +524,11 @@
      'terminating (make-quote-parser "`" 'quasiquote)
      'terminating (make-quote-parser "," 'unquote)
      'terminating (make-quote-parser ",@" 'unquote-splicing)
+     'terminating (make-quote-parser "#'" 'syntax)
+     'terminating (make-quote-parser "#`" 'quasisyntax)
+     'terminating (make-quote-parser "#," 'unsyntax)
+     'terminating (make-quote-parser "#,@" 'unsyntax-splicing)
+     'terminating (make-keyword-parser "#:")
      'layout " "
      'layout "\n"
      'layout "\t"
