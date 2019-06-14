@@ -362,9 +362,13 @@ The job->result-cache is a map from parser-job structs -> parser-stream OR parse
    cp-params
    start-position
    result-index
+   ;; gvector of siblings indexed by result-index
+   siblings
    [continuation/worker #:mutable]
    ;; dependents are scheduled-continuations or alt-workers
    [dependents #:mutable]
+   ;; The actual result.
+   [result #:mutable]
    ;; This one is not used for alt-parsers, but is used to keep track of the
    ;; stream from a procedure.
    [result-stream #:mutable]
@@ -471,15 +475,18 @@ TODO - perhaps alists instead of hashes for things that likely have a small numb
   (make-gvector #:capacity 1000))
 (define (make-parser-cache)
   (make-hasheq))
-(define (make-result-number-cache)
-  (make-gvector #:capacity 10))
 (define (make-cp-params-cache)
   (make-hash))
 
 
-(define (get-job! s parser cp-params start-position result-number)
-  (define (make-parser-job parser)
-    (parser-job parser cp-params start-position result-number #f '() #f))
+(define (get-job-0! s parser cp-params start-position)
+  (define (make-fresh-parser-job usable)
+    (define siblings-vec (make-gvector))
+    (define job
+      (parser-job usable cp-params start-position
+                  0 siblings-vec #f '() #f #f))
+    (gvector-add! siblings-vec job)
+    job)
   ;; traverse-cache returns the contents if `update` is false.
   (define (traverse-cache parser)
     (define update #t)
@@ -494,45 +501,23 @@ TODO - perhaps alists instead of hashes for things that likely have a small numb
                                     (make-parser-cache)))
                     (gvector-ref c/start-pos start-position)]
             [else #f]))
-    (define c/result-n
+    (define c/cp-params
       (and c/parser
            (let ([r (hash-ref c/parser parser #f)])
              (cond [r r]
-                   [update (let ([c (make-result-number-cache)])
+                   [update (let ([c (make-cp-params-cache)])
                              (hash-set! c/parser parser c)
                              c)]
                    [else #f]))))
-    (define c/cp-params
-      (and c/result-n
-           (cond [(< result-number (gvector-count c/result-n))
-                  (gvector-ref c/result-n result-number)]
-                 [update (for ([i (in-range (gvector-count c/result-n)
-                                            (add1 result-number))])
-                           (gvector-add! c/result-n (make-cp-params-cache)))
-                         (gvector-ref c/result-n result-number)]
-                 [else #f])))
     (define value
       (and c/cp-params
            (let ([r (hash-ref c/cp-params cp-params #f)])
              (cond [r r]
                    [update
-                    (define new (make-parser-job usable))
+                    (define new (make-fresh-parser-job usable))
                     (hash-set! c/cp-params cp-params new)
                     new]
                    [else #f]))))
-    #|
-    This is an experiment that ignores extra-args and cp-params for caching.  That's definitely semantically wrong, but for benchmarks that only end up using one value for those, it works OK.  At the time of writing skipping those last two levels of cache (which are also possibly the most expensive -- hash with equal?) makes it about 17% faster.
-    |#
-    #;(define value
-      (and c/result-n
-           (cond [(< result-number (gvector-count c/result-n))
-                  (gvector-ref c/result-n result-number)]
-                 [update
-                  (define new (make-parser-job usable))
-                  (gvector-add! c/result-n new)
-                  new]
-                 [else #f])))
-
     value
     )
 
@@ -542,8 +527,15 @@ TODO - perhaps alists instead of hashes for things that likely have a small numb
 (define (get-next-job! s job)
   (match job
     [(s/kw parser-job #:parser parser #:cp-params cp-params
-           #:start-position start-position #:result-index result-index)
-     (get-job! s parser cp-params start-position (add1 result-index))]))
+           #:start-position start-position #:result-index result-index
+           #:siblings siblings)
+     (define next-index (add1 result-index))
+     (if (< next-index (gvector-count siblings))
+         (gvector-ref siblings next-index)
+         (let ([new-job (parser-job parser cp-params start-position
+                                    next-index siblings #f '() #f #f)])
+           (gvector-add! siblings new-job)
+           new-job))]))
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -591,7 +583,7 @@ But I still need to encapsulate the port and give a start position.
 (define (enter-the-parser port-broker parser start-position)
   (define s (port-broker-scheduler port-broker))
   (define cp-params (current-chido-parse-parameters))
-  (define j (get-job! s parser cp-params start-position 0))
+  (define j (get-job-0! s parser cp-params start-position))
   (enter-the-parser/job s j))
 
 (define (enter-the-parser/job scheduler job)
@@ -911,7 +903,7 @@ But I still need to encapsulate the port and give a start position.
                         (run-scheduler scheduler)))]
                  [(alt-parser name parsers l-rec nullable)
                   (define (mk-dep p)
-                    (get-job! scheduler p cp-params start-position 0))
+                    (get-job-0! scheduler p cp-params start-position))
                   (define worker
                     ;(job remaining-jobs ready-jobs failures successful?)
                     (alt-worker job (map mk-dep parsers) '() '() #f))
