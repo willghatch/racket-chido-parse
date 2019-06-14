@@ -337,12 +337,11 @@ The job->result-cache is a map from parser-job structs -> parser-stream OR parse
 |#
 (struct scheduler
   ;; TODO - document
-  (port-broker top-job-stack done-k-stack hint-stack-stack
-               job-info->job-cache job->result-cache)
+  (port-broker top-job-stack done-k-stack hint-stack-stack job-info->job-cache)
   #:mutable
   #:transparent)
 (define (make-scheduler port-broker)
-  (scheduler port-broker '() '() '() (make-start-position-cache) (hasheq)))
+  (scheduler port-broker '() '() '() (make-start-position-cache)))
 
 (define (pop-hint! scheduler)
   (define hss (scheduler-hint-stack-stack scheduler))
@@ -381,6 +380,12 @@ The job->result-cache is a map from parser-job structs -> parser-stream OR parse
    (cons new-dependent (parser-job-dependents job))))
 
 (struct cycle-breaker-job (failure-job) #:transparent)
+
+(define (job->result job)
+  (match job
+    [(cycle-breaker-job failure-job)
+     (make-cycle-failure failure-job)]
+    [(s/kw parser-job #:result r) r]))
 
 (struct alt-worker
   (job remaining-jobs ready-jobs failures successful?)
@@ -437,17 +442,6 @@ A weak hash port-broker->ephemeron with scheduler.
                 (fail-thunk)
                 fail-thunk)
             (apply hash-ref+ fail-thunk hr1 args)))))
-
-(define (scheduler-set-result! s job result)
-  (set-scheduler-job->result-cache!
-   s
-   (hash-set (scheduler-job->result-cache s) job result)))
-
-(define (scheduler-get-result s job)
-  (match job
-    [(cycle-breaker-job failure-job)
-     (make-cycle-failure failure-job)]
-    [else (hash-ref (scheduler-job->result-cache s) job #f)]))
 
 #|
 The job cache is a multi-level dictionary with the following keys / implementations:
@@ -587,7 +581,7 @@ But I still need to encapsulate the port and give a start position.
   (enter-the-parser/job s j))
 
 (define (enter-the-parser/job scheduler job)
-  (define ready-result (scheduler-get-result scheduler job))
+  (define ready-result (job->result job))
   (or ready-result
       (let* ([old-start (and (current-chido-parse-job)
                              (parser-job-start-position (current-chido-parse-job)))]
@@ -722,7 +716,7 @@ But I still need to encapsulate the port and give a start position.
 (define (find-and-run-actionable-job s hint-stack using-hint?)
   (define (run-actionable-job? j)
     ;; TODO - this is probably not great, but for now I just want to get things working again...
-    (if (scheduler-get-result s j)
+    (if (job->result j)
         (run-scheduler s)
         (run-actionable-job s j)))
   (let* ([actionable-job-stack (find-work s hint-stack)]
@@ -731,7 +725,7 @@ But I still need to encapsulate the port and give a start position.
                                s (cons actionable-job-stack
                                        (cdr (scheduler-hint-stack-stack s)))))
     (cond
-      [(and actionable-job (scheduler-get-result s actionable-job))
+      [(and actionable-job (job->result actionable-job))
        (pop-hint! s)
        (ready-dependents! actionable-job)
        (run-scheduler s)]
@@ -755,7 +749,7 @@ But I still need to encapsulate the port and give a start position.
   (cond
     [scheduler-done?
      ;; Escape the mad world of delimited-continuation-based parsing!
-     (scheduler-get-result s (scheduled-continuation-dependency done-k))]
+     (job->result (scheduled-continuation-dependency done-k))]
     [else
      (inc-run-scheduler!)
      (define using-hint? #t)
@@ -767,12 +761,12 @@ But I still need to encapsulate the port and give a start position.
      (define hint-worker (parser-job-continuation/worker (car hint-stack)))
      (define (run-actionable-job? j)
        ;; TODO - this is probably not great, but for now I just want to get things working again...
-       (if (scheduler-get-result s j)
+       (if (job->result j)
            (begin (pop-hint! s)
                   (run-scheduler s))
            (run-actionable-job s j)))
      (match hint-worker
-       [#f (if (scheduler-get-result s (car hint-stack))
+       [#f (if (job->result (car hint-stack))
                (begin (pop-hint! s)
                       (run-scheduler s))
                (run-actionable-job? (car hint-stack)))]
@@ -815,7 +809,7 @@ But I still need to encapsulate the port and give a start position.
   (rec (car (scheduler-done-k-stack scheduler)) '()))
 
 (define (run-actionable-job scheduler job)
-  (when (scheduler-get-result scheduler job)
+  (when (job->result job)
     (error 'chido-parse
            "internal error - run-actionable-job got a job that was already done: ~a"
            (job->display job)))
@@ -829,12 +823,12 @@ But I still need to encapsulate the port and give a start position.
                  k
                  job
                  #t
-                 (scheduler-get-result scheduler dependency))]
+                 (job->result dependency))]
        [(alt-worker job remaining-jobs (list ready-job rjs ...) failures successful?)
         ;; TODO - remove ready-job from ready-jobs and remaining-jobs, if it's a success cache the result, set success flag, and add the next iteration of the job to the remaining jobs (this should check if it's also ready and add it to the ready list as appropriate), if failure add to failures.
         (set-alt-worker-remaining-jobs! k/worker (remove ready-job remaining-jobs))
         (set-alt-worker-ready-jobs! k/worker rjs)
-        (define result (scheduler-get-result scheduler ready-job))
+        (define result (job->result ready-job))
         (cond
           [(parse-failure? result)
            (set-alt-worker-failures! k/worker (cons result failures))]
@@ -853,7 +847,7 @@ But I still need to encapsulate the port and give a start position.
              (set-alt-worker-remaining-jobs!
               k/worker
               (cons dep-next-job (alt-worker-remaining-jobs k/worker)))
-             (when (scheduler-get-result scheduler dep-next-job)
+             (when (job->result dep-next-job)
                (set-alt-worker-ready-jobs!
                 k/worker
                 (cons dep-next-job (alt-worker-ready-jobs k/worker)))))]
@@ -993,14 +987,14 @@ But I still need to encapsulate the port and give a start position.
            "trying to cache something for job ~s with a bad type: ~s\n"
            (job->display job)
            result))
-  (scheduler-set-result! scheduler job result)
+  (set-parser-job-result! job result)
   (ready-dependents! job))
 
 (define (cache-result-and-ready-dependents!/procedure-job
          scheduler job result)
   (match result
     [(parse-failure name start-position fail-position message sub-failures)
-     (scheduler-set-result! scheduler job result)
+     (set-parser-job-result! job result)
      (ready-dependents! job)]
     [(? (λ (x) (and (stream? x) (stream-empty? x))))
      ;; Turn it into a parse failure and recur.
@@ -1043,7 +1037,7 @@ But I still need to encapsulate the port and give a start position.
      (define next-job (get-next-job! scheduler job))
      (define wrapped-result
        (parse-stream result next-job scheduler))
-     (scheduler-set-result! scheduler job wrapped-result)
+     (set-parser-job-result! job wrapped-result)
      (ready-dependents! job)]
     [else (cache-result-and-ready-dependents! scheduler
                                               job
