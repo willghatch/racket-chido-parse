@@ -432,6 +432,60 @@
                             (parse-derivation-result (second derivations)))))
                         #:derivations derivations))))
 
+(define (make-raw-string-parser l-delim r-delim)
+  (proc-parser
+   #:name "raw-string"
+   l-delim
+   (λ (port)
+     ;; eat the prefix that isn't yet auto-eaten...
+     (read-string (string-length l-delim) port)
+     (define the-string
+       (let loop ([current-depth 1]
+                  [left-partials '()]
+                  [right-partials '()]
+                  [chars '()])
+         (define c (read-char port))
+         (when (eof-object? c)
+           (error 'raw-string (format "Reached EOF before string terminator (~a)"
+                                      r-delim)))
+         (define matched-right? #f)
+         (define new-right-partials
+           (filter (λ(x)x)
+                   (for/list ([i (cons 0 right-partials)])
+                     (define match (eq? c (string-ref r-delim i)))
+                     (when (and match (eq? i (sub1 (string-length r-delim))))
+                       (set! matched-right? #t))
+                     (and match
+                          (add1 i)))))
+         (define matched-left? #f)
+         (define new-left-partials
+           (filter (λ(x)x)
+                   (for/list ([i (cons 0 left-partials)])
+                     (define match (eq? c (string-ref l-delim i)))
+                     (when (and match (eq? i (sub1 (string-length l-delim))))
+                       (set! matched-left? #t))
+                     (and match
+                          (add1 i)))))
+         ;; TODO - there is a problem here if the left and right delimiters can overlap such that the right delimiter starts before the right delimiter but ends after the left delimiter
+         (cond [(and matched-right? (eq? current-depth 1))
+                (apply string (reverse
+                               (list-tail chars (sub1 (string-length r-delim)))))]
+               [matched-right? (loop (sub1 current-depth)
+                                     '()
+                                     '()
+                                     (cons c chars))]
+               [matched-left? (loop (add1 current-depth)
+                                    '()
+                                    '()
+                                    (cons c chars))]
+               [else (loop current-depth
+                           new-left-partials
+                           new-right-partials
+                           (cons c chars))])))
+     (define-values (line col pos) (port-next-location port))
+
+     (make-parse-derivation the-string #:end pos))))
+
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;;; Testing
@@ -443,6 +497,8 @@
      (chido-readtable-add-list-parser empty-chido-readtable "(" ")")
      'terminating "##"
      'terminating racket-style-string-parser
+     'terminating (make-raw-string-parser "<<" ">>")
+     'terminating (make-raw-string-parser "!!" "!!")
      'nonterminating hash-t-parser
      'nonterminating hash-f-parser
      'layout " "
@@ -500,6 +556,11 @@
    (check-equal? (p* "(this (is \"a test\") of string reading)" r1)
                  '((this (is "a test") of string reading)))
 
+   (check-equal? (p* "(this (is <<a test <<of raw>> string>>) reading)" r1)
+                 '((this (is "a test <<of raw>> string") reading)))
+   ;; If the left and right delimiters are the same, a raw string is not nestable.
+   (check-equal? (p* "(this (is !!a test !!of raw!! string!!) reading)" r1)
+                 '((this (is "a test " of raw " string") reading)))
    ;; TODO - this one has an interesting error that I want to get to later...
    ;(p* "   \n   " (chido-readtable-layout*-parser my-rt))
 
@@ -533,5 +594,6 @@
      'layout "\n"
      'layout "\t"
      'layout (make-line-comment-parser ";")
+     'layout (make-raw-string-parser "#|" "|#")
      ))
   )
