@@ -4,6 +4,7 @@
   (require
    "scheduler.rkt"
    "readtable-parser.rkt"
+   (submod "readtable-parser.rkt" an-s-exp-readtable)
    "parameters.rkt"
    racket/cmdline
    racket/port
@@ -12,20 +13,7 @@
    rackunit
    )
 
-  (define my-s-exp-readtable
-    (extend-chido-readtable*
-     (chido-readtable-add-list-parser
-      (chido-readtable-add-list-parser
-       (chido-readtable-add-list-parser empty-chido-readtable "(" ")")
-       "[" "]")
-      "{" "}")
-     'nonterminating hash-t-parser
-     'nonterminating hash-f-parser
-     'terminating racket-style-string-parser
-     'layout " "
-     'layout "\n"
-     'layout "\t"))
-  (define my-parser (chido-readtable->read1 my-s-exp-readtable))
+  (define my-parser (chido-readtable->read1 an-s-exp-readtable))
 
   (define f (command-line #:args (filename) filename))
 

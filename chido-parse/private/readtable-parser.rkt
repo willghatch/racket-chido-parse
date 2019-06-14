@@ -180,10 +180,12 @@
              [alt (make-alt-parser "chido-readtable-read1/alt"
                                    parsers)])
         (λ (port)
-          (define parsers-result (parse* port alt))
-          (if (parse-failure? parsers-result)
-              (parse* port (chido-readtable-symbol-parser rt))
-              parsers-result)))
+          (chido-parse-parameterize
+           ([current-chido-readtable rt])
+           (define parsers-result (parse* port alt))
+           (if (parse-failure? parsers-result)
+               (parse* port (chido-readtable-symbol-parser rt))
+               parsers-result))))
       #:use-port? #f
       #:promise-no-left-recursion?
       (not (ormap parser-potentially-left-recursive?
@@ -383,6 +385,35 @@
 (define hash-t-parser (wrap-derivation "#t" (λ(x)#t)))
 (define hash-f-parser (wrap-derivation "#f" (λ(x)#f)))
 
+(define post-quote-read-1
+  (proc-parser
+   ""
+   (λ (port)
+     (parse* port (chido-readtable->read1/layout (current-chido-readtable))))))
+
+(define (make-quote-parser prefix quotey-symbol)
+  (sequence #:name (symbol->string quotey-symbol)
+            prefix
+            post-quote-read-1
+            #:derive (λ derivations
+                       (make-parse-derivation
+                        (λ (line col pos end-pos derivations)
+                          (list quotey-symbol
+                                (parse-derivation-result (second derivations))))
+                        #:derivations derivations))))
+
+(define (make-line-comment-parser prefix)
+  (proc-parser
+   prefix
+   (λ (port)
+     (let loop ()
+       (define c (peek-char port))
+       (if (or (eof-object? c) (eq? c #\newline))
+           (let-values ([(line col pos) (port-next-location port)])
+             (make-parse-derivation #t #:end pos))
+           (begin (read-char port)
+                  (loop)))))))
+
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;;; Testing
@@ -457,4 +488,27 @@
 
    )
 
+  )
+
+(module+ an-s-exp-readtable
+  (provide an-s-exp-readtable)
+  (define an-s-exp-readtable
+    (extend-chido-readtable*
+     (chido-readtable-add-list-parser
+      (chido-readtable-add-list-parser
+       (chido-readtable-add-list-parser empty-chido-readtable "(" ")")
+       "[" "]")
+      "{" "}")
+     'nonterminating hash-t-parser
+     'nonterminating hash-f-parser
+     'terminating racket-style-string-parser
+     'terminating (make-quote-parser "'" 'quote)
+     'terminating (make-quote-parser "`" 'quasiquote)
+     'terminating (make-quote-parser "," 'unquote)
+     'terminating (make-quote-parser ",@" 'unquote-splicing)
+     'layout " "
+     'layout "\n"
+     'layout "\t"
+     'layout (make-line-comment-parser ";")
+     ))
   )
