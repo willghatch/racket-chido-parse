@@ -501,9 +501,21 @@
      'terminating (make-raw-string-parser "!!" "!!")
      'nonterminating hash-t-parser
      'nonterminating hash-f-parser
+     'terminating (make-quote-parser "'" 'quote)
+     'terminating (make-quote-parser "`" 'quasiquote)
+     'terminating (make-quote-parser "," 'unquote)
+     'terminating (make-quote-parser ",@" 'unquote-splicing)
+     'terminating (make-quote-parser "#'" 'syntax)
+     'terminating (make-quote-parser "#`" 'quasisyntax)
+     'terminating (make-quote-parser "#," 'unsyntax)
+     'terminating (make-quote-parser "#,@" 'unsyntax-splicing)
+     'terminating (make-keyword-parser "#:")
      'layout " "
      'layout "\n"
-     'layout "\t"))
+     'layout "\t"
+     'layout (make-quote-parser "#;" 'quote)
+     'layout (make-line-comment-parser ";")
+     ))
 
   (define (p* string parser)
     (define r (with-handlers ([(λ(e)#t)(λ(e)e)])
@@ -564,6 +576,12 @@
    ;; TODO - this one has an interesting error that I want to get to later...
    ;(p* "   \n   " (chido-readtable-layout*-parser my-rt))
 
+   (check-equal? (p* "(hello `(foo ,bar ,(#:testing #t #f #;(quoted #t))))" r1)
+                 '((hello `(foo ,bar ,(#:testing #t #f)))))
+
+   ;; TODO - I need to add a follow filter or something here...
+   #;(check-equal? (p* "`(hello ,@foo)" r1)
+                 '(`(hello ,@foo)))
 
    )
 
@@ -593,6 +611,7 @@
      'layout " "
      'layout "\n"
      'layout "\t"
+     'layout (make-quote-parser "#;" 'quote)
      'layout (make-line-comment-parser ";")
      'layout (make-raw-string-parser "#|" "|#")
      ))
