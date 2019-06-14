@@ -520,7 +520,7 @@ TODO - perhaps alists instead of hashes for things that likely have a small numb
   (define usable (parser->usable parser))
   (traverse-cache usable))
 
-(define (get-next-job! s job)
+(define (get-next-job! job)
   (match job
     [(s/kw parser-job #:parser parser #:cp-params cp-params
            #:start-position start-position #:result-index result-index
@@ -840,8 +840,8 @@ But I still need to encapsulate the port and give a start position.
            (set-alt-worker-failures! k/worker (cons result failures))]
           [(parse-stream? result)
            (let ([result-contents (stream-first result)]
-                 [this-next-job (get-next-job! scheduler job)]
-                 [dep-next-job (get-next-job! scheduler ready-job)])
+                 [this-next-job (get-next-job! job)]
+                 [dep-next-job (get-next-job! ready-job)])
              (define result-stream
                (parse-stream result-contents this-next-job scheduler))
              (cache-result-and-ready-dependents! scheduler job result-stream)
@@ -1038,12 +1038,12 @@ But I still need to encapsulate the port and give a start position.
             failure)])])]
     [(? stream?)
      ;; Recur with stream-first, setting the stream as the result-stream
-     (define next-job (get-next-job! scheduler job))
+     (define next-job (get-next-job! job))
      (set-parser-job-result-stream! next-job result)
      (cache-result-and-ready-dependents!/procedure-job
       scheduler job (raw-result->parse-derivation job (stream-first result)))]
     [(s/kw parse-derivation)
-     (define next-job (get-next-job! scheduler job))
+     (define next-job (get-next-job! job))
      (define wrapped-result
        (parse-stream result next-job scheduler))
      (set-parser-job-result! job wrapped-result)
