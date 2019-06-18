@@ -326,6 +326,9 @@
 (define (chido-readtable->symbol rt)
   (chido-readtable-populate-cache! rt)
   (chido-readtable-symbol-parser rt))
+(define (chido-readtable->layout* rt)
+  (chido-readtable-populate-cache! rt)
+  (chido-readtable-layout*-parser rt))
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -337,6 +340,7 @@
 
 ;; TODO - left and right must be strings
 (define (chido-readtable-add-list-parser rt left right
+                                         #:wrapper [wrapper #f]
                                          ;#:result-transformer
                                          ;#:inside-readtable
                                          )
@@ -355,7 +359,11 @@
      #:derive (λ derivations
                 (make-parse-derivation
                  (λ (line col pos end-pos derivations)
-                   (parse-derivation-result (second derivations)))
+                   (define pre-result (parse-derivation-result (second derivations)))
+                   (match wrapper
+                     [(? procedure?) (wrapper pre-result)]
+                     [(? symbol?) (cons wrapper pre-result)]
+                     [#f pre-result]))
                  #:derivations derivations))
      ;#:result (λ (l inner right) inner)
      ))
@@ -486,6 +494,32 @@
 
      (make-parse-derivation the-string #:end pos))))
 
+(define current-readtable-read1-parser
+  (proc-parser
+   ""
+   (λ (port) (parse* port (chido-readtable->read1
+                           (current-chido-readtable))))))
+(define current-readtable-layout*-parser
+  (proc-parser
+   ""
+   (λ (port) (parse* port (chido-readtable->layout*
+                           (current-chido-readtable))))))
+
+(define (make-readtable-infix-operator op-string)
+  (sequence
+   current-readtable-read1-parser
+   current-readtable-layout*-parser
+   op-string
+   current-readtable-layout*-parser
+   current-readtable-read1-parser
+   #:derive (λ derivations
+              (make-parse-derivation
+               (λ (line col pos end-pos derivations)
+                 `(#%readtable-infix ,(string->symbol op-string)
+                                     ,(parse-derivation-result (first derivations))
+                                     ,(parse-derivation-result (fifth derivations))))
+               #:derivations derivations))))
+
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;;; Testing
@@ -494,7 +528,11 @@
   (require racket/stream)
   (define my-rt
     (extend-chido-readtable*
-     (chido-readtable-add-list-parser empty-chido-readtable "(" ")")
+     (chido-readtable-add-list-parser
+      (chido-readtable-add-list-parser
+       (chido-readtable-add-list-parser empty-chido-readtable "(" ")")
+       "[" "]")
+      "$(" ")" #:wrapper '#%dollar-paren)
      'terminating "##"
      'terminating racket-style-string-parser
      'terminating (make-raw-string-parser "<<" ">>")
@@ -510,6 +548,7 @@
      'terminating (make-quote-parser "#," 'unsyntax)
      'terminating (make-quote-parser "#,@" 'unsyntax-splicing)
      'terminating (make-keyword-parser "#:")
+     'nonterminating (make-readtable-infix-operator "<+>")
      'layout " "
      'layout "\n"
      'layout "\t"
@@ -582,6 +621,14 @@
    ;; TODO - I need to add a follow filter or something here...
    #;(check-equal? (p* "`(hello ,@foo)" r1)
                  '(`(hello ,@foo)))
+
+   (check-equal? (p* "$(test foo (bar $(qwer)))" r1)
+                 '((#%dollar-paren test foo (bar (#%dollar-paren qwer)))))
+
+   ;; TODO - I need to add some kind of filter here too...  Probably if I want to support this sort of thing I need to simultaneously add the infix operator AND add a failure parser for that specific symbol, such that it fails as a symbol.
+   ;; TODO - This kind of infix operator is a bad idea for multiple reasons, I think, beyond it adding ambiguity to read1
+   #;(check-equal? (p* "[(testing 123) <+> (foo (bar))]" r1)
+                 '[(#%readtable-infix <+> (testing 123) (foo (bar)))])
 
    )
 

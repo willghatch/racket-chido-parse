@@ -176,7 +176,7 @@
   #:transparent)
 (define (make-proc-parser
          prefix proc
-         #:name [name (object-name proc)]
+         #:name [name (format "~a" (object-name proc))]
          #:preserve-prefix? [preserve-prefix? #f]
          #:promise-no-left-recursion? [promise-no-left-recursion? #f]
          #:use-port? [use-port? #t])
