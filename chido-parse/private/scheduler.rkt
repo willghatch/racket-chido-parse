@@ -948,9 +948,11 @@ But I still need to encapsulate the port and give a start position.
                       (if new-trie
                           (loop new-matches new-trie (add1 pos))
                           new-matches)))
-                  (for ([p parsers])
-                    (when (not (memq p deps-with-matched-prefixes))
-                      (prefix-fail! scheduler (mk-dep p))))
+                  ;; We could fail all parses here, but if we just ignore them
+                  ;; instead it is significantly faster.
+                  #;(for ([p parsers])
+                      (when (not (memq p deps-with-matched-prefixes))
+                        (prefix-fail! scheduler (mk-dep p))))
                   (define dep-jobs (map mk-dep deps-with-matched-prefixes))
                   (define ready-deps (filter parser-job-result dep-jobs))
                   (define unready-deps
