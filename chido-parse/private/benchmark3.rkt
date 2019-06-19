@@ -25,6 +25,7 @@
            (stream-first
             (parse* (open-input-string s) my-parser)))))
   (get-counts!)
+  (collect-garbage 'major)
   (eprintf "Time for racket's read function:\n")
   (define r-parse
     (time (read (open-input-string s))))
