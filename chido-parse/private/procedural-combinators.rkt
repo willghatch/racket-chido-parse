@@ -151,21 +151,25 @@ I need to re-think the derivation result interface for all these combinators.
 (define (kleene-star #:name [name #f]
                      #:derive [derive #f]
                      #:result [make-result #f]
+                     #:greedy? [greedy? #f]
                      parser)
   (repetition parser
               #:name (or name (format "~a*" (parser-name parser)))
               #:derive derive
               #:result make-result
+              #:greedy? greedy?
               #:min 0))
 
 (define (kleene-plus #:name [name #f]
                      #:derive [derive #f]
                      #:result [make-result #f]
+                     #:greedy? [greedy? #f]
                      parser)
   (repetition parser
               #:name (or name (format "~a+" (parser-name parser)))
               #:derive derive
               #:result make-result
+              #:greedy? greedy?
               #:min 1))
 
 (define (optional #:name [name #f]

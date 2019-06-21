@@ -166,7 +166,8 @@
      rt (kleene-star (make-alt-parser "chido-readtable-layout"
                                       (chido-readtable-layout-parsers rt))
                      #:derive (λ (elems) (make-parse-derivation
-                                          '() #:derivations elems))))
+                                          '() #:derivations elems))
+                     #:greedy? #t))
     (set-chido-readtable-read1-parser!
      rt
      ;; TODO - better name!
@@ -207,7 +208,7 @@
      rt
      (let ([with-content-parser
              (sequence
-              (kleene-plus (chido-readtable-layout*+read1-parser rt))
+              (kleene-plus (chido-readtable-layout*+read1-parser rt) #:greedy? #t)
               (chido-readtable-layout*-parser rt)
               #:derive (λ derivations
                          (make-parse-derivation
