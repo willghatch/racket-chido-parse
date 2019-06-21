@@ -99,6 +99,7 @@ I need to re-think the derivation result interface for all these combinators.
                     #:result [make-result #f]
                     #:min [min 0]
                     #:max [max +inf.0]
+                    #:greedy? [greedy? #f]
                     parser)
   (define use-name (or name (format "repeat_~a_~a_~a"
                                     (parser-name parser)
@@ -119,20 +120,28 @@ I need to re-think the derivation result interface for all these combinators.
                      (map parse-derivation-result derivations))
                    #:derivations derivations))]))
   (define (proc pb)
+    (define (finalize reversed-derivations)
+      (/end (port-broker-start-position pb)
+            (combiner (reverse reversed-derivations))))
     (define (get-more-streams derivations)
-      (for/parse ([derivation (parse* pb parser #:start (if (null? derivations)
-                                                            #f
-                                                            (car derivations)))])
-                 (rec (cons derivation derivations))))
+      (define next-stream (parse* pb parser #:start (if (null? derivations)
+                                                        #f
+                                                        (car derivations))))
+      (if (and greedy?
+               (stream-empty? next-stream)
+               (<= min (length derivations)))
+          (finalize derivations)
+          (for/parse ([derivation next-stream])
+                     (rec (cons derivation derivations)))))
     (define (rec derivations)
       (define len (length derivations))
-      (if (< len min)
-          (get-more-streams derivations)
-          (parse-stream-cons (/end (port-broker-start-position pb)
-                                   (combiner (reverse derivations)))
-                             (if (>= len max)
-                                 empty-stream
-                                 (get-more-streams derivations)))))
+      (cond [(or (< len min)
+                 (and greedy? (< len max)))
+             (get-more-streams derivations)]
+            [else (parse-stream-cons (finalize derivations)
+                                     (if (>= len max)
+                                         empty-stream
+                                         (get-more-streams derivations)))]))
     (rec '()))
   (proc-parser #:name use-name "" proc
                #:promise-no-left-recursion?
@@ -398,6 +407,20 @@ I need to re-think the derivation result interface for all these combinators.
        (parse* (open-input-string "aaaa")
                (regexp->parser #px"a*"))))
      1)
+
+  (c check-equal?
+     (length
+      (stream->list
+       (parse* (open-input-string "aaaa")
+               (repetition "a" #:greedy? #t))))
+     1)
+  (c check-equal?
+     (parse-derivation-result
+      (car
+       (stream->list
+        (parse* (open-input-string "aaaa")
+                (repetition "a" #:greedy? #t)))))
+     (list "a" "a" "a" "a"))
 
   #|
   S-expression tests:
