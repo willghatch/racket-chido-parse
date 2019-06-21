@@ -76,6 +76,7 @@
  (for-syntax
   racket/base
   syntax/parse
+  racket/syntax
   ))
 
 (module+ test
@@ -116,31 +117,26 @@
         (set-parse-derivation-result-forced?! pd #t)
         r)))
 
-(define parse-enter-counter 0)
-(define (inc-parse-enter!)
-  (set! parse-enter-counter (add1 parse-enter-counter)))
-(define find-work-counter 0)
-(define (inc-find-work!)
-  (set! find-work-counter (add1 find-work-counter)))
-(define run-scheduler-counter 0)
-(define (inc-run-scheduler!)
-  (set! run-scheduler-counter (add1 run-scheduler-counter)))
-(define no-hint-counter 0)
-(define (inc-no-hint!)
-  (set! no-hint-counter (add1 no-hint-counter)))
-(define traverse-cache-counter 0)
-(define (inc-traverse-cache!)
-  (set! traverse-cache-counter (add1 traverse-cache-counter)))
-(define (get-counts!)
-  (eprintf "enter: ~a, run scheduler/without-hint: ~a/~a, find work: ~a, traverse cache: ~a\n"
-           parse-enter-counter run-scheduler-counter no-hint-counter find-work-counter
-           traverse-cache-counter)
-  (set! parse-enter-counter 0)
-  (set! find-work-counter 0)
-  (set! run-scheduler-counter 0)
-  (set! no-hint-counter 0)
-  (set! traverse-cache-counter 0)
-  )
+(define-syntax (define-counters stx)
+  (syntax-parse stx
+    [(_ get-counts-name! [name ...])
+     (with-syntax ([(inc! ...) (map (λ (x) (format-id x "inc-~a!" x))
+                                    (syntax->list #'(name ...)))]
+                   [(counter ...) (generate-temporaries #'(name ...))])
+       #'(begin
+           (define counter 0) ...
+           (define (inc!) (set! counter (add1 counter))) ...
+           (define (get-counts-name!)
+             (eprintf "~a: ~a\n" 'name counter) ...
+             (eprintf "\n")
+             (set! counter 0) ...)))]))
+(define-counters get-counts! (parse-enter
+                              find-work
+                              find-work-loop
+                              run-scheduler
+                              no-hint
+                              traverse-cache
+                              ))
 
 (define current-chido-parse-derivation-implicit-end (make-parameter #f))
 
@@ -687,6 +683,7 @@ But I still need to encapsulate the port and give a start position.
   (let loop ([stacks (list job-stack)]
              [blocked '()]
              [last-alt-stack #f #;(get-last-alt-stack job-stack)])
+    (inc-find-work-loop!)
     (if (null? stacks)
         #f
         #;(if last-alt-stack
