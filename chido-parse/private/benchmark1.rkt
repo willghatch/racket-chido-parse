@@ -40,8 +40,8 @@
   (collect-garbage 'major)
   (eprintf "Time for racket's read function:\n")
   (define r-parse
-    (time (read (open-input-string s))))
+    (time (read-syntax "my-input-name" (open-input-string s))))
 
-  (check-equal? my-parse r-parse)
+  (check-equal? (syntax->datum my-parse) (syntax->datum r-parse))
 
   )

@@ -301,11 +301,13 @@
             ;; TODO - check options for whether complex numbers, rational numbers, and numbers of any kind are supported in this readtable...
             (define number (string->number str))
             (define datum (or number (string->symbol str)))
-            #;(define stx (datum->syntax #f datum (list (object-name port)
-                                                      line col pos span)))
+            (define stx
+              (datum->syntax #f datum (list "TODO-need-port-name-here"
+                                            line column start-position
+                                            (- end-position start-position))))
             ;; TODO - use result transformer
-            ;; TODO - by default this should be a syntax object, but for now I'll return a datum
-            datum
+            ;datum
+            stx
             ))
         (make-parse-derivation result-func #:end (+ start-pos span)))))
 
@@ -342,7 +344,6 @@
 ;; TODO - left and right must be strings
 (define (chido-readtable-add-list-parser rt left right
                                          #:wrapper [wrapper #f]
-                                         ;#:result-transformer
                                          ;#:inside-readtable
                                          )
   (define (inner-parser)
@@ -361,10 +362,18 @@
                 (make-parse-derivation
                  (λ (line col pos end-pos derivations)
                    (define pre-result (parse-derivation-result (second derivations)))
+                   (define (->stx pre-result)
+                     (datum->syntax #f pre-result
+                                    (list "TODO-need-port-name-here"
+                                          line col pos (- end-pos pos))))
                    (match wrapper
-                     [(? procedure?) (wrapper pre-result)]
-                     [(? symbol?) (cons wrapper pre-result)]
-                     [#f pre-result]))
+                     [(? procedure?) (wrapper (->stx pre-result))]
+                     [(? symbol?) (->stx (cons (datum->syntax
+                                                #f wrapper
+                                                (list "TODO-need-port-name-here"
+                                                      line col pos (length left)))
+                                               pre-result))]
+                     [#f (->stx pre-result)]))
                  #:derivations derivations))
      ;#:result (λ (l inner right) inner)
      ))
@@ -388,14 +397,22 @@
   (proc-parser #:name "racket-style-string-parser"
                "\""
                (λ (port)
-                 (define r (read port))
+                 (define r (read-syntax (object-name port) port))
                  (define-values (line col pos) (port-next-location port))
                  (make-parse-derivation r #:end pos))
                #:promise-no-left-recursion? #t
                #:preserve-prefix? #t))
 
-(define hash-t-parser (wrap-derivation "#t" (λ(x)#t)))
-(define hash-f-parser (wrap-derivation "#f" (λ(x)#f)))
+(define (mk-stx v derivation)
+  (datum->syntax #f v (list "TODO-need-port-name-here"
+                            (parse-derivation-line derivation)
+                            (parse-derivation-column derivation)
+                            (parse-derivation-start-position derivation)
+                            (- (parse-derivation-end-position derivation)
+                               (parse-derivation-start-position derivation)))))
+
+(define hash-t-parser (wrap-derivation "#t" (λ(x)(mk-stx #t x))))
+(define hash-f-parser (wrap-derivation "#f" (λ(x)(mk-stx #f x))))
 
 (define post-quote-read-1
   (proc-parser
@@ -410,8 +427,12 @@
             #:derive (λ derivations
                        (make-parse-derivation
                         (λ (line col pos end-pos derivations)
-                          (list quotey-symbol
-                                (parse-derivation-result (second derivations))))
+                          (datum->syntax
+                           #f
+                           (list (mk-stx quotey-symbol (first derivations))
+                                 (parse-derivation-result (second derivations)))
+                           (list "TODO-need-port-name-here"
+                                 line col pos (- end-pos pos))))
                         #:derivations derivations))))
 
 (define (make-line-comment-parser prefix)
@@ -436,9 +457,14 @@
             #:derive (λ derivations
                        (make-parse-derivation
                         (λ (line col pos end-pos derivations)
-                          (string->keyword
-                           (symbol->string
-                            (parse-derivation-result (second derivations)))))
+                          (datum->syntax
+                           #f
+                           (string->keyword
+                            (symbol->string
+                             (syntax->datum
+                              (parse-derivation-result (second derivations)))))
+                           (list "TODO-need-port-name-here"
+                                 line col pos (- end-pos pos))))
                         #:derivations derivations))))
 
 (define (make-raw-string-parser l-delim r-delim)
@@ -491,7 +517,12 @@
                            (cons c chars))])))
      (define-values (line col pos) (port-next-location port))
 
-     (make-parse-derivation the-string #:end pos))))
+     (make-parse-derivation
+      (λ (line col pos end-pos derivations)
+        (datum->syntax #f the-string
+                       (list "TODO-need-port-name-here"
+                             line col pos (- end-pos pos))))
+      #:end pos))))
 
 (define current-readtable-read1-parser
   (proc-parser
@@ -514,9 +545,11 @@
    #:derive (λ derivations
               (make-parse-derivation
                (λ (line col pos end-pos derivations)
-                 `(#%readtable-infix ,(string->symbol op-string)
-                                     ,(parse-derivation-result (first derivations))
-                                     ,(parse-derivation-result (fifth derivations))))
+                 (datum->syntax
+                  #f
+                  `(#%readtable-infix ,(string->symbol op-string)
+                                      ,(parse-derivation-result (first derivations))
+                                      ,(parse-derivation-result (fifth derivations)))))
                #:derivations derivations))))
 
 

@@ -28,8 +28,8 @@
   (collect-garbage 'major)
   (eprintf "Time for racket's read function:\n")
   (define r-parse
-    (time (read (open-input-string s))))
+    (time (read-syntax "TODO-need-port-name-here" (open-input-string s))))
 
-  (check-equal? my-parse r-parse)
+  (check-equal? (syntax->datum my-parse) (syntax->datum r-parse))
 
   )
