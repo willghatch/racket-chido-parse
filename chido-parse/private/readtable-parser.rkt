@@ -446,8 +446,6 @@
    #:name "raw-string"
    l-delim
    (λ (port)
-     ;; eat the prefix that isn't yet auto-eaten...
-     (read-string (string-length l-delim) port)
      (define the-string
        (let loop ([current-depth 1]
                   [left-partials '()]

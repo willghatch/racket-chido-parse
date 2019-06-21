@@ -883,13 +883,18 @@ But I still need to encapsulate the port and give a start position.
                         #:name name
                         #:prefix prefix
                         #:procedure procedure
+                        #:preserve-prefix? preserve-prefix?
                         #:use-port? use-port?)
                   (define port-broker (scheduler-port-broker scheduler))
+                  (define proc-start-position
+                    (if preserve-prefix?
+                        start-position
+                        (+ start-position (string-length prefix))))
                   (define proc-input (if use-port?
                                          (port-broker->port port-broker
-                                                            start-position)
+                                                            proc-start-position)
                                          (port-broker-wrap port-broker
-                                                           start-position)))
+                                                           proc-start-position)))
                   ;; TODO - optimize this peek for alt parsers, at least...
                   (if (port-broker-substring? port-broker start-position prefix)
                       (do-run! scheduler
