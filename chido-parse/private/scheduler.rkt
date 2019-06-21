@@ -34,8 +34,6 @@
 
  get-counts!
 
- regexp->parser
-
  parse*
  #;(contract-out
   [parse* (->* (input-port? parser?)
@@ -87,7 +85,6 @@
 
 ;; TODO - explanation from notes about the big picture of how this parsing library works
 
-;; TODO - literal strings and regexps should be accepted as parsers
 ;; TODO - procedures with the contract (-> parser) should be accepted as parsers
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -204,7 +201,6 @@
   (cond [(parser-struct? p)]
         [(custom-parser? p)]
         [(string? p)]
-        [(regexp? p)]
         ;; TODO - this is not a great predicate...
         [(procedure? p)]
         [else #f]))
@@ -213,7 +209,6 @@
   (cond [(parser-struct? p) (parser-struct-name p)]
         [(custom-parser? p) (parser-name (parser->usable p))]
         [(string? p) p]
-        [(regexp? p) (format "~s" p)]
         [(procedure? p) (parser-name (p))]
         [else (error 'parser-name "not a parser: ~s" p)]))
 
@@ -249,7 +244,6 @@
           [(custom-parser? p) (rec ((custom-parser-ref p) p))]
           [(string? p) p]
           ;[(string? p) (string->parser p)]
-          [(regexp? p) (regexp->parser p)]
           [(procedure? p) (rec (p))]
           [else (error 'chido-parse "not a parser: ~s" p)]))
   (define cached (hash-ref parser-cache p #f))
@@ -306,25 +300,6 @@
            (parse-failure name start-position fail-position
                           "TODO - better failure message" failures)])])]))
 
-
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;;;; Literal parsers
-
-(define (parse-regexp port r failure-message)
-  (define-values (line col pos) (port-next-location port))
-  (define m (regexp-match r port))
-  (define length (and m (string-length (car m))))
-  (if m
-      (make-parse-derivation m #:end (+ pos length))
-      (make-parse-failure failure-message #:position pos)))
-
-(define (regexp->parser rx #:name [name #f])
-  ;; TODO - add optional args for what to do with the result
-  (define failure-message (format "Didn't match regexp: ~a" (or name rx)))
-  (make-proc-parser #:name (or name (format "~a" rx))
-                    ""
-                    (λ (p) (parse-regexp p rx failure-message))
-                    #:promise-no-left-recursion? #t))
 
 
 #|

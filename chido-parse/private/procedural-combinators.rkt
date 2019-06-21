@@ -11,6 +11,8 @@
  ;between*
  traditional-read-func->parse-result-func
  wrap-derivation
+
+ regexp->parser
  )
 
 (require
@@ -240,6 +242,21 @@ I need to re-think the derivation result interface for all these combinators.
                            #:derivations '())))
 
 
+
+(define (regexp->parser rx #:name [name #f])
+  (define (parse-regexp port r failure-message)
+    (define-values (line col pos) (port-next-location port))
+    (define m (regexp-match r port))
+    (define-values (end-line end-col end-pos) (port-next-location port))
+    (if m
+        (make-parse-derivation m #:end end-pos)
+        (make-parse-failure failure-message #:position pos)))
+  (define failure-message (format "Didn't match regexp: ~a" (or name rx)))
+  (proc-parser #:name (or name (format "~a" rx))
+               ""
+               (λ (p) (parse-regexp p rx failure-message))
+               #:promise-no-left-recursion? #t))
+
 (module+ test
   (define-syntax (c stx)
     (syntax-parse stx
@@ -374,6 +391,13 @@ I need to re-think the derivation result interface for all these combinators.
           (stream->list
            (parse* (open-input-string s-exp-str-1) basic-s-exp)))
      (list (read (open-input-string s-exp-str-1))))
+
+  (c check-equal?
+     (length
+      (stream->list
+       (parse* (open-input-string "aaaa")
+               (regexp->parser #px"a*"))))
+     1)
 
   #|
   S-expression tests:
