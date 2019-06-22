@@ -694,4 +694,31 @@
      'layout (make-line-comment-parser ";")
      'layout (make-raw-string-parser "#|" "|#")
      ))
+
+  (module+ read-syntax-proc
+    (require racket/stream)
+    (provide read-syntax-proc)
+    (define read-syntax-proc
+      (λ (src-name port)
+        (define result
+          (stream-filter
+           (λ (x) (not (null? (parse-derivation-result x))))
+           (parse* port (chido-readtable->read* an-s-exp-readtable))))
+        #;(eprintf "results: ~a\n" (car (map parse-derivation-result (stream->list result))))
+        (cond [(stream-empty? result)
+               (error 'my-read "parse error: ~s\n" result)]
+              [(stream-empty? (stream-rest result))
+               ;; This is what we want.
+               (define out
+                 (parse-derivation-result (stream-first result)))
+               ;(eprintf "out: ~a\n" out)
+               (datum->syntax #f (cons '#%module-begin out)
+                              (list src-name #f #f #f #f))
+               #;out]
+              [else
+               (eprintf "num parses: ~a\n" (length (stream->list result)))
+               (eprintf "parses:\n ~s\n" (map parse-derivation-result
+                                              (stream->list result)))
+               (error 'my-read "ambiguous parse")])))
+    )
   )
