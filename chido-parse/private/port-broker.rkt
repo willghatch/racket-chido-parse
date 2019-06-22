@@ -226,6 +226,8 @@
                              [buf-length (bytes-length mbytes-buffer)]
                              [sbytes (string->bytes/utf-8 str)]
                              [sbytes-length (bytes-length sbytes)])
+                        ;; Extend a bit just to be sure I'm ahead.  TODO - is this necessary?
+                        (port-broker-extend-to pb (+ 1 char-pos))
                         (if (< buf-length sbytes-length)
                             (let ()
                               ;; In this case we just have to read partial utf-8...
@@ -246,7 +248,10 @@
   (define peek-procedure
     (λ (mbytes-buffer skip progress)
       (define n-bytes-peeked
-        (peek-bytes! mbytes-buffer (+ skip byte-pos) (port-broker-port pb)))
+        (peek-bytes! mbytes-buffer
+                     (+ skip byte-pos
+                        (or incomplete-char-byte-pos 0))
+                     (port-broker-port pb)))
       n-bytes-peeked))
 
   (define commit-procedure
