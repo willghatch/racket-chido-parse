@@ -144,7 +144,13 @@
   ;; line column start-position end-position derivation-list
   (define job (current-chido-parse-job))
   (match job
-    [(s/kw parser-job #:parser parser #:start-position start-position)
+    [(s/kw parser-job
+           #:parser parser
+           #:scheduler scheduler
+           #:start-position start-position)
+     (define pb (scheduler-port-broker scheduler))
+     (define line (port-broker-line pb start-position))
+     (define column (port-broker-column pb start-position))
      (define end-use (or end
                          (and (not (null? derivation-list))
                               (apply max
@@ -156,7 +162,7 @@
      (define delayed? (procedure? result))
      (parse-derivation result (not delayed?)
                        parser
-                       #f #f start-position end-use
+                       line column start-position end-use
                        derivation-list)]
     [else (error 'make-parse-derivation
                  "Not called during the dynamic extent of chido-parse...")]))
@@ -334,6 +340,7 @@ The job->result-cache is a map from parser-job structs -> parser-stream OR parse
   (
    ;; parser is either a parser struct or an alt-parser struct
    parser
+   scheduler
    ;; chido-parse-parameters
    cp-params
    start-position
@@ -454,7 +461,7 @@ TODO - perhaps alists instead of hashes for things that likely have a small numb
   (define (make-fresh-parser-job usable)
     (define siblings-vec (make-gvector))
     (define job
-      (parser-job usable cp-params start-position
+      (parser-job usable s cp-params start-position
                   0 siblings-vec #f '() #f #f))
     (gvector-add! siblings-vec job)
     job)
@@ -497,13 +504,13 @@ TODO - perhaps alists instead of hashes for things that likely have a small numb
 
 (define (get-next-job! job)
   (match job
-    [(s/kw parser-job #:parser parser #:cp-params cp-params
+    [(s/kw parser-job #:parser parser #:scheduler scheduler #:cp-params cp-params
            #:start-position start-position #:result-index result-index
            #:siblings siblings)
      (define next-index (add1 result-index))
      (if (< next-index (gvector-count siblings))
          (gvector-ref siblings next-index)
-         (let ([new-job (parser-job parser cp-params start-position
+         (let ([new-job (parser-job parser scheduler cp-params start-position
                                     next-index siblings #f '() #f #f)])
            (gvector-add! siblings new-job)
            new-job))]))

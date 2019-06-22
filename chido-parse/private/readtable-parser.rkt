@@ -342,10 +342,13 @@
 
 
 ;; TODO - left and right must be strings
-(define (chido-readtable-add-list-parser rt left right
-                                         #:wrapper [wrapper #f]
-                                         ;#:inside-readtable
-                                         )
+(define (chido-readtable-add-list-parser
+         rt left right
+         #:wrapper [wrapper #f]
+         ;#:inside-readtable
+         ;; TODO - what is the right name here?
+         #:readtable-add-type [rt-add-type 'terminating]
+         )
   (define (inner-parser)
     (proc-parser #:name (format "list-inner-parser-~a-~a" left right)
                  ""
@@ -371,7 +374,8 @@
                      [(? symbol?) (->stx (cons (datum->syntax
                                                 #f wrapper
                                                 (list "TODO-need-port-name-here"
-                                                      line col pos (length left)))
+                                                      line col pos
+                                                      (string-length left)))
                                                pre-result))]
                      [#f (->stx pre-result)]))
                  #:derivations derivations))
@@ -387,11 +391,9 @@
                  #:promise-no-left-recursion? #t
                  #:use-port? #f))
 
-  (extend-chido-readtable (extend-chido-readtable rt 'terminating left-parser)
-                          'terminating right-parser))
+  (extend-chido-readtable (extend-chido-readtable rt rt-add-type left-parser)
+                          rt-add-type right-parser))
 
-#;(define (chido-readtable-add-raw-string-parser rt left right)
-  TODO)
 
 (define racket-style-string-parser
   (proc-parser #:name "racket-style-string-parser"
@@ -467,7 +469,7 @@
                                  line col pos (- end-pos pos))))
                         #:derivations derivations))))
 
-(define (make-raw-string-parser l-delim r-delim)
+(define (make-raw-string-parser l-delim r-delim #:wrapper [wrapper #f])
   (proc-parser
    #:name "raw-string"
    l-delim
@@ -519,10 +521,40 @@
 
      (make-parse-derivation
       (λ (line col pos end-pos derivations)
-        (datum->syntax #f the-string
-                       (list "TODO-need-port-name-here"
-                             line col pos (- end-pos pos))))
+        (define stx (datum->syntax #f the-string
+                                   (list "TODO-need-port-name-here"
+                                         line col pos (- end-pos pos))))
+        (cond [(procedure? wrapper) (wrapper stx)]
+              [(symbol? wrapper) (datum->syntax
+                                  #f (list (datum->syntax
+                                            #f wrapper
+                                            (list "TODO-need-port-name-here"
+                                                  line col pos (length l-delim)))
+                                           stx))]
+              [(not wrapper) stx]
+              [else (error 'raw-string-parser "bad wrapper value: ~a" wrapper)])
+        )
       #:end pos))))
+
+(define (chido-readtable-add-raw-string-parser
+         rt left right
+         #:wrapper [wrapper #f]
+         ;#:inside-readtable
+         ;; TODO - what is the right name here?
+         #:readtable-add-type [rt-add-type 'terminating]
+         )
+  (define right-parser
+    (proc-parser #:name (format "trailing-right-delimiter_~a" right)
+                 right
+                 (λ (port) (make-parse-failure
+                            (format "Trailing right delimiter: ~a"
+                                    right)))
+                 #:promise-no-left-recursion? #t
+                 #:use-port? #f))
+  (extend-chido-readtable
+   (extend-chido-readtable rt rt-add-type (make-raw-string-parser left right
+                                                                  #:wrapper wrapper))
+   rt-add-type right-parser))
 
 (define current-readtable-read1-parser
   (proc-parser
@@ -560,15 +592,19 @@
   (require racket/stream)
   (define my-rt
     (extend-chido-readtable*
-     (chido-readtable-add-list-parser
-      (chido-readtable-add-list-parser
-       (chido-readtable-add-list-parser empty-chido-readtable "(" ")")
-       "[" "]")
-      "$(" ")" #:wrapper '#%dollar-paren)
+     (chido-readtable-add-raw-string-parser
+      (chido-readtable-add-raw-string-parser
+       (chido-readtable-add-raw-string-parser
+        (chido-readtable-add-list-parser
+         (chido-readtable-add-list-parser
+          (chido-readtable-add-list-parser empty-chido-readtable "(" ")")
+          "[" "]")
+         "$(" ")" #:wrapper '#%dollar-paren)
+        "#|" "|#" #:readtable-add-type 'layout)
+       "<<" ">>")
+      "!!" "!!")
      'terminating "##"
      'terminating racket-style-string-parser
-     'terminating (make-raw-string-parser "<<" ">>")
-     'terminating (make-raw-string-parser "!!" "!!")
      'nonterminating hash-t-parser
      'nonterminating hash-f-parser
      'terminating (make-quote-parser "'" 'quote)
@@ -594,9 +630,10 @@
     (if (or (parse-failure? r)
             (exn? r))
         r
-        (map parse-derivation-result
-             (stream->list
-              r))))
+        (map (λ (x) (if (syntax? x) (syntax->datum x) x))
+             (map parse-derivation-result
+                  (stream->list
+                   r)))))
 
   (define r1 (chido-readtable->read1 my-rt))
 
@@ -671,10 +708,17 @@
   (define an-s-exp-readtable
     (extend-chido-readtable*
      (chido-readtable-add-list-parser
-      (chido-readtable-add-list-parser
-       (chido-readtable-add-list-parser empty-chido-readtable "(" ")")
-       "[" "]")
-      "{" "}")
+      (chido-readtable-add-raw-string-parser
+       (chido-readtable-add-raw-string-parser
+        (chido-readtable-add-list-parser
+         (chido-readtable-add-list-parser
+          (chido-readtable-add-list-parser empty-chido-readtable "(" ")")
+          "[" "]")
+         "{" "}")
+        "«" "»")
+       "#|" "|#" #:readtable-add-type 'layout)
+      "##{" "}##" #:readtable-add-type 'layout
+      )
      'nonterminating hash-t-parser
      'nonterminating hash-f-parser
      'terminating racket-style-string-parser
@@ -690,16 +734,17 @@
      'layout " "
      'layout "\n"
      'layout "\t"
-     'layout (make-quote-parser "#;" 'quote)
+     ;; creative use of string-append to get emacs to color properly...
+     'layout (make-quote-parser (string-append "#" ";")'comment-quote)
      'layout (make-line-comment-parser ";")
-     'layout (make-raw-string-parser "#|" "|#")
      ))
 
   (module+ read-syntax-proc
-    (require racket/stream)
+    (require racket/stream racket/port)
     (provide read-syntax-proc)
     (define read-syntax-proc
       (λ (src-name port)
+        (port-count-lines! port)
         (define result
           (stream-filter
            (λ (x) (not (null? (parse-derivation-result x))))
@@ -712,9 +757,11 @@
                (define out
                  (parse-derivation-result (stream-first result)))
                ;(eprintf "out: ~a\n" out)
-               (datum->syntax #f (cons '#%module-begin out)
+               (port->string port)
+               #;(datum->syntax #f (cons '#%module-begin out)
                               (list src-name #f #f #f #f))
-               #;out]
+               ;; consume the port -- not doing so seems to cause issues.
+               out]
               [else
                (eprintf "num parses: ~a\n" (length (stream->list result)))
                (eprintf "parses:\n ~s\n" (map parse-derivation-result

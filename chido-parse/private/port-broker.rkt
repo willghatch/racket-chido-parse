@@ -175,6 +175,9 @@
   (define byte-pos (if info
                        (vector-ref info 0)
                        (port-broker-peek-offset pb)))
+  ;; For when byte reads request fewer bytes than necessary to complete a utf-8 char...
+  (define incomplete-char-byte-pos #f)
+  (define incomplete-char-byte-len #f)
 
   #|
   Read procedure.
@@ -182,16 +185,58 @@
   |#
   (define read-procedure
     (λ (mbytes-buffer)
-      (define n-bytes-peeked
-        (peek-bytes! mbytes-buffer byte-pos (port-broker-port pb)))
-      (when (not (eof-object? n-bytes-peeked))
-        (define n-chars-committed
-          ;; TODO - err-char is #f here, which allows this to sometimes return #f
-          (bytes-utf-8-length mbytes-buffer #f 0 n-bytes-peeked))
-        (set! char-pos (+ n-chars-committed char-pos))
-        (set! byte-pos (+ n-bytes-peeked byte-pos))
-        (port-broker-extend-to pb char-pos))
-      n-bytes-peeked))
+      ;; Because ports are inherently byte-oriented, we have situations where we
+      ;; read part of a character and leave the rest.
+      (if incomplete-char-byte-pos
+          (let* ([n-wanted (min (- incomplete-char-byte-len incomplete-char-byte-pos)
+                                (bytes-length mbytes-buffer))]
+                 [start-pos (+ byte-pos incomplete-char-byte-pos)]
+                 [n-bytes (peek-bytes! mbytes-buffer
+                                       start-pos
+                                       (port-broker-port pb)
+                                       0
+                                       n-wanted)])
+            (if (eq? incomplete-char-byte-len (+ n-bytes incomplete-char-byte-pos))
+                (begin
+                  (set! char-pos (add1 char-pos))
+                  (set! byte-pos (+ byte-pos incomplete-char-byte-len))
+                  (set! incomplete-char-byte-pos #f)
+                  (set! incomplete-char-byte-len #f))
+                (begin (set! incomplete-char-byte-pos (+ incomplete-char-byte-pos
+                                                         n-bytes))))
+            n-wanted)
+          (let ([n-bytes-peeked
+                 (peek-bytes! mbytes-buffer byte-pos (port-broker-port pb))])
+            (if (eof-object? n-bytes-peeked)
+                n-bytes-peeked
+                (let ([n-chars-committed
+                       ;; err-char is #f here, which allows this to sometimes return #f
+                       (bytes-utf-8-length mbytes-buffer #f 0 n-bytes-peeked)])
+                  (if n-chars-committed
+                      (begin
+                        (set! char-pos (+ n-chars-committed char-pos))
+                        (set! byte-pos (+ n-bytes-peeked byte-pos))
+                        (port-broker-extend-to pb char-pos)
+                        n-bytes-peeked)
+                      ;; If n-chars-committed is #f, then the peek isn't valid utf-8...
+                      ;; So let's just read a char and make sure it's utf-8!
+                      (let* ([str (peek-string 1
+                                               byte-pos
+                                               (port-broker-port pb))]
+                             [buf-length (bytes-length mbytes-buffer)]
+                             [sbytes (string->bytes/utf-8 str)]
+                             [sbytes-length (bytes-length sbytes)])
+                        (if (< buf-length sbytes-length)
+                            (let ()
+                              ;; In this case we just have to read partial utf-8...
+                              (set! incomplete-char-byte-pos n-bytes-peeked)
+                              (set! incomplete-char-byte-len sbytes-length)
+                              n-bytes-peeked)
+                            (begin
+                              (bytes-copy! mbytes-buffer 0 sbytes)
+                              (set! char-pos (add1 char-pos))
+                              (set! byte-pos (+ byte-pos sbytes-length))
+                              sbytes-length))))))))))
 
   #|
   Peek procedure.
