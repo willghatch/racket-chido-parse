@@ -444,25 +444,34 @@ I need to re-think the derivation result interface for all these combinators.
 TODO - I need a parse stream object that is lazy and holds on to errors so that I can take a successful stream and filter it into an unsuccessful stream while keeping the failures.
 |#
 
-(define (follow-filter main-parser not-follow-parser)
+(define (parse-filter parser
+                      ;; filter-func is (-> port result bool-or-new-result)
+                      filter-func
+                      #:replace-result? [replace-result? #f])
   (proc-parser
-   (parser-prefix main-parser)
+   (parser-prefix parser)
    (λ (port)
-     (define results (parse* port main-parser))
      (define (rec results)
        (cond [(parse-failure? results) results]
-             ;; TODO - this is not great.
+             ;; TODO - I should keep track of failures and be able to return something sensible here.
              [(stream-empty? results) results]
              [else (define r1 (stream-first results))
-                   (define r-follow (parse* port not-follow-parser #:start r1))
-                   (if (parse-failure? r-follow)
-                       (parse-stream-cons r1
-                                          (rec (stream-rest results)))
+                   (define filter-result (filter-func port r1))
+                   (define use-result (if (and replace-result? filter-result)
+                                          filter-result
+                                          r1))
+                   (if filter-result (parse-stream-cons
+                                      use-result
+                                      (rec (stream-rest results)))
                        (rec (stream-rest results)))]))
-     (rec results))
-   #:preserve-prefix? #t
-   #:promise-no-left-recursion?
-   (not (parser-potentially-left-recursive? main-parser))))
+     (rec (parse* port parser)))
+   #:preserve-prefix? #t))
+
+(define (follow-filter main-parser not-follow-parser)
+  (parse-filter main-parser
+                (λ (port result)
+                  (define r-follow (parse* port not-follow-parser #:start result))
+                  (if (parse-failure? r-follow) #t #f))))
 
 
 (module+ test
