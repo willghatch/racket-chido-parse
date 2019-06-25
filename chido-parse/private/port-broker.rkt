@@ -272,7 +272,7 @@
                  [last-info (gvector-ref contents (sub1 (gvector-count contents)))])
             (values (vector-ref last-info info-line-offset)
                     (add1 (vector-ref last-info info-col-offset))
-                    (+ -1 (gvector-count contents) (port-broker-offset pb))))
+                    (+ (gvector-count contents) (port-broker-offset pb))))
           (values (vector-ref info info-line-offset)
                   (vector-ref info info-col-offset)
                   char-pos))))
