@@ -442,6 +442,14 @@ I need to re-think the derivation result interface for all these combinators.
 
 #|
 TODO - I need a parse stream object that is lazy and holds on to errors so that I can take a successful stream and filter it into an unsuccessful stream while keeping the failures.
+
+
+TODO - what kind of filters do I need?
+* simple predicate filters
+** I think simple predicates are enough for precidence and associativity filters...
+* filters that read more of the port
+** needed for follow filters
+* ? filters that compare multiple elements of a stream (eg. a filter that only gives the largest among multiple parses?)
 |#
 
 (define (parse-filter parser
