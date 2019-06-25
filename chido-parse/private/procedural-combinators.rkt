@@ -435,3 +435,46 @@ I need to re-think the derivation result interface for all these combinators.
 
 
   )
+
+
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;;; Filters
+
+
+#|
+TODO - I need a parse stream object that is lazy and holds on to errors so that I can take a successful stream and filter it into an unsuccessful stream while keeping the failures.
+|#
+
+(define (follow-filter main-parser not-follow-parser)
+  (proc-parser
+   (parser-prefix main-parser)
+   (λ (port)
+     (define results (parse* port main-parser))
+     (define (rec results)
+       (cond [(parse-failure? results) results]
+             ;; TODO - this is not great.
+             [(stream-empty? results) results]
+             [else (define r1 (stream-first results))
+                   (define r-follow (parse* port not-follow-parser #:start r1))
+                   (if (parse-failure? r-follow)
+                       (parse-stream-cons r1
+                                          (rec (stream-rest results)))
+                       (rec (stream-rest results)))]))
+     (rec results))
+   #:preserve-prefix? #t
+   #:promise-no-left-recursion?
+   (not (parser-potentially-left-recursive? main-parser))))
+
+
+(module+ test
+
+  (c check-equal?
+     (parse-derivation-result
+      (car
+       (stream->list
+        (parse* (open-input-string "aaab")
+                (repetition (follow-filter "a" "b") #:greedy? #t)))))
+     (list "a" "a"))
+
+  )
