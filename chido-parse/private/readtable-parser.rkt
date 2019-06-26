@@ -609,11 +609,11 @@
      'nonterminating hash-f-parser
      'terminating (make-quote-parser "'" 'quote)
      'terminating (make-quote-parser "`" 'quasiquote)
-     'terminating (make-quote-parser "," 'unquote)
+     'terminating (make-quote-parser (follow-filter "," "@") 'unquote)
      'terminating (make-quote-parser ",@" 'unquote-splicing)
      'terminating (make-quote-parser "#'" 'syntax)
      'terminating (make-quote-parser "#`" 'quasisyntax)
-     'terminating (make-quote-parser "#," 'unsyntax)
+     'terminating (make-quote-parser (follow-filter "#," "@") 'unsyntax)
      'terminating (make-quote-parser "#,@" 'unsyntax-splicing)
      'terminating (make-keyword-parser "#:")
      'nonterminating (make-readtable-infix-operator "<+>")
@@ -688,7 +688,7 @@
                  '((hello `(foo ,bar ,(#:testing #t #f)))))
 
    ;; TODO - I need to add a follow filter or something here...
-   #;(check-equal? (p* "`(hello ,@foo)" r1)
+   (check-equal? (p* "`(hello ,@foo)" r1)
                  '(`(hello ,@foo)))
 
    (check-equal? (p* "$(test foo (bar $(qwer)))" r1)
@@ -724,11 +724,11 @@
      'terminating racket-style-string-parser
      'terminating (make-quote-parser "'" 'quote)
      'terminating (make-quote-parser "`" 'quasiquote)
-     'terminating (make-quote-parser "," 'unquote)
+     'terminating (make-quote-parser (follow-filter "," "@") 'unquote)
      'terminating (make-quote-parser ",@" 'unquote-splicing)
      'terminating (make-quote-parser "#'" 'syntax)
      'terminating (make-quote-parser "#`" 'quasisyntax)
-     'terminating (make-quote-parser "#," 'unsyntax)
+     'terminating (make-quote-parser (follow-filter "#," "@") 'unsyntax)
      'terminating (make-quote-parser "#,@" 'unsyntax-splicing)
      'terminating (make-keyword-parser "#:")
      'layout " "

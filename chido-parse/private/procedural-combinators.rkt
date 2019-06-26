@@ -13,6 +13,10 @@
  wrap-derivation
 
  regexp->parser
+
+ ;; filters
+ parse-filter
+ follow-filter
  )
 
 (require
