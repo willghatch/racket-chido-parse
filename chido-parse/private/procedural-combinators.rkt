@@ -477,7 +477,9 @@ TODO - what kind of filters do I need?
                                       (rec (stream-rest results)))
                        (rec (stream-rest results)))]))
      (rec (parse* port parser)))
-   #:preserve-prefix? #t))
+   #:preserve-prefix? #t
+   #:promise-no-left-recursion? (and (not (parser-potentially-left-recursive? parser))
+                                     (not (parser-potentially-null? parser)))))
 
 (define (follow-filter main-parser not-follow-parser)
   (parse-filter main-parser

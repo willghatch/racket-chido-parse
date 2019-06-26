@@ -130,6 +130,7 @@
 (define-counters get-counts! (parse-enter
                               find-work
                               find-work-loop
+                              actionable-job-false
                               run-scheduler
                               no-hint
                               traverse-cache
@@ -707,6 +708,7 @@ But I still need to encapsulate the port and give a start position.
         (run-actionable-job s j)))
   (let* ([actionable-job-stack (find-work s hint-stack)]
          [actionable-job (and actionable-job-stack (car actionable-job-stack))])
+    (when (not actionable-job) (inc-actionable-job-false!))
     (and actionable-job-stack (set-scheduler-hint-stack-stack!
                                s (cons actionable-job-stack
                                        (cdr (scheduler-hint-stack-stack s)))))
