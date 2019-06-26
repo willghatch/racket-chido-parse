@@ -131,6 +131,7 @@
                               find-work
                               find-work-loop
                               actionable-job-false
+                              potential-left-recursion
                               run-scheduler
                               no-hint
                               traverse-cache
@@ -585,6 +586,7 @@ But I still need to encapsulate the port and give a start position.
             ;; we schedule its dependency, and then we abort back to the
             ;; scheduler loop.
             (let ([parent-job (current-chido-parse-job)])
+              (inc-potential-left-recursion!)
               (call-with-composable-continuation
                (λ (k)
                  (define sched-k (job->scheduled-continuation parent-job k job))
