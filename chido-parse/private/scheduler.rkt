@@ -411,46 +411,25 @@ A weak hash port-broker->ephemeron with scheduler.
 (define port-broker-scheduler
   (make-ephemeron-cache-lookup the-scheduler-cache make-scheduler))
 
-(define (hash-set+ h k1 k2 . args)
-  (if (null? args)
-      (hash-set h k1 k2)
-      (hash-set h k1 (apply hash-set+
-                            (hash-ref h k1 (λ () (hash)))
-                            k2
-                            args))))
-(define hash-ref+-flag (gensym))
-(define (hash-ref+ fail-thunk h k1 . args)
-  (if (null? args)
-      (hash-ref h k1 fail-thunk)
-      (let ([hr1 (hash-ref h k1 hash-ref+-flag)])
-        (if (eq? hr1 hash-ref+-flag)
-            (if (procedure? fail-thunk)
-                (fail-thunk)
-                fail-thunk)
-            (apply hash-ref+ fail-thunk hr1 args)))))
+;; Here are some alist wrappers that I tried.  They don't seem to be faster
+;; than using hashes anywhere I've tried, but I guess I don't want to delete
+;; them just yet.
+;(struct malist ([content #:mutable]))
+;(define (malist-ref malist key)
+;  (let ([pair (assq key (malist-content malist))])
+;    (and pair (cdr pair))))
+;(define (malist-set! malist key val)
+;  (set-malist-content! malist
+;                       (cons (cons key val)
+;                             (malist-content malist))))
+;(define (make-malist) (malist '()))
 
 #|
 The job cache is a multi-level dictionary with the following keys / implementations:
 * start-position / gvector
 * parser / mutable hasheq
-* result-number / gvector
 * cp-params / mutable hashequal?
-
-TODO - does it make sense to use hasheq for extra-args and cp-params?
-TODO - should start-position use a gvector?  Many start positions will not actually be used for parsing, probably.
-TODO - perhaps alists instead of hashes for things that likely have a small number of entries?
 |#
-
-(struct malist ([content #:mutable]))
-(define (malist-ref malist key)
-  (let ([pair (assq key (malist-content malist))])
-    (and pair (cdr pair))))
-(define (malist-set! malist key val)
-  (set-malist-content! malist
-                       (cons (cons key val)
-                             (malist-content malist))))
-(define (make-malist) (malist '()))
-
 (define (make-start-position-cache)
   (make-gvector #:capacity 1000))
 (define (make-parser-cache)
@@ -842,7 +821,6 @@ But I still need to encapsulate the port and give a start position.
               #:ready-jobs (list ready-job rjs ...)
               #:remaining-jobs remaining-jobs
               #:failures failures)
-        ;; TODO - remove ready-job from ready-jobs and remaining-jobs, if it's a success cache the result, set success flag, and add the next iteration of the job to the remaining jobs (this should check if it's also ready and add it to the ready list as appropriate), if failure add to failures.
         (set-alt-worker-remaining-jobs! k/worker (remove ready-job remaining-jobs))
         (set-alt-worker-ready-jobs! k/worker rjs)
         (define result (job->result ready-job))
