@@ -1028,6 +1028,8 @@ But I still need to encapsulate the port and give a start position.
 
 (define (cache-result-and-ready-dependents!/procedure-job
          scheduler job result)
+  ;; Clear the result-stream, if there is one, because it's not needed anymore.
+  (set-parser-job-result-stream! job #f)
   (match result
     [(s/kw parse-failure)
      (set-parser-job-result! job result)
