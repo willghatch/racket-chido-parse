@@ -119,7 +119,7 @@
 (define (info-for pb char-offset)
   (when (not (port-broker-eof-ed? pb))
     (port-broker-extend-to pb char-offset))
-  (if (< (port-broker-extent pb) char-offset)
+  (if (or (< (port-broker-extent pb) char-offset) (eq? (port-broker-extent pb) 0))
       #f
       (gvector-ref (port-broker-contents pb)
                    (- char-offset (port-broker-offset pb)))))
@@ -131,12 +131,14 @@
 (define (port-broker-line pb position)
   (define info (info-for pb position))
   (or (and info (vector-ref info info-line-offset))
+      (and (eq? 0 (gvector-count (port-broker-contents pb))) line-start)
       (vector-ref (gvector-ref (port-broker-contents pb)
                                (sub1 (gvector-count (port-broker-contents pb))))
                   info-line-offset)))
 (define (port-broker-column pb position)
   (define info (info-for pb position))
   (or (and info (vector-ref info info-line-offset))
+      (and (eq? 0 (gvector-count (port-broker-contents pb))) column-start)
       (add1
        (vector-ref (gvector-ref (port-broker-contents pb)
                                 (sub1 (gvector-count (port-broker-contents pb))))
@@ -267,15 +269,17 @@
   (define get-location
     (λ ()
       (define info (info-for pb char-pos))
-      (if (not info)
-          (let* ([contents (port-broker-contents pb)]
-                 [last-info (gvector-ref contents (sub1 (gvector-count contents)))])
-            (values (vector-ref last-info info-line-offset)
-                    (add1 (vector-ref last-info info-col-offset))
-                    (+ (gvector-count contents) (port-broker-offset pb))))
-          (values (vector-ref info info-line-offset)
-                  (vector-ref info info-col-offset)
-                  char-pos))))
+      (define contents (port-broker-contents pb))
+      (cond [(and (not info) (eq? 0 (gvector-count contents)))
+             (values line-start column-start char-start-index)]
+            [(not info)
+             (let* ([last-info (gvector-ref contents (sub1 (gvector-count contents)))])
+               (values (vector-ref last-info info-line-offset)
+                       (add1 (vector-ref last-info info-col-offset))
+                       (+ (gvector-count contents) (port-broker-offset pb))))]
+            [else (values (vector-ref info info-line-offset)
+                          (vector-ref info info-col-offset)
+                          char-pos)])))
 
   (make-input-port
    (object-name (port-broker-port pb))
@@ -420,6 +424,11 @@ A wrapped port should be able to give a handle to the broker it is wrapping.
   (check-true (port-broker-substring? pb1 3 "his"))
   (check-equal? (port-broker-substring pb1 3 3)
                 "his")
+
+  (define empty-pb (cache-port-broker (open-input-string "")))
+  (check-equal? (port-broker-line empty-pb 0) 1)
+  (check-equal? (port-broker-column empty-pb 0) 0)
+  (check-equal? (port-broker-char empty-pb 1) eof)
 
   #|
   TODO - port-broker-commit-bytes is broken.  The following test fails.
