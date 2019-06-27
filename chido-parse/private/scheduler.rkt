@@ -924,7 +924,7 @@ But I still need to encapsulate the port and give a start position.
                  [(s/kw alt-parser #:trie trie #:parsers parsers)
                   (define (mk-dep p)
                     (define j (get-job-0! scheduler p cp-params start-position))
-                    ;(when (string? p) (string-job-finalize! scheduler j #t))
+                    (when (string? p) (string-job-finalize! scheduler j #t))
                     j)
                   (define pb (scheduler-port-broker scheduler))
                   (define deps-with-matched-prefixes
