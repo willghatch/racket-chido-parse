@@ -515,20 +515,32 @@ TODO - what kind of filters do I need?
   (proc-parser
    (parser-prefix parser)
    (λ (port)
-     (define (rec results)
-       (cond [(parse-failure? results) results]
-             ;; TODO - I should keep track of failures and be able to return something sensible here.
-             [(stream-empty? results) results]
+     (define (rec results failures had-success?)
+       (cond [(and (parse-failure? results) (null? failures)) results]
+             [(and (parse-failure? results) had-success?)
+              (make-parse-failure "some results failed filter"
+                                  #:failures (cons results failures))]
+             [(or (parse-failure? results) (stream-empty? results))
+              (make-parse-failure "all results failed filter"
+                                  #:failures (if (parse-failure? results)
+                                                 (cons results failures)
+                                                 failures))]
              [else (define r1 (stream-first results))
                    (define filter-result (filter-func port r1))
                    (define use-result (if (and replace-result? filter-result)
                                           filter-result
                                           r1))
-                   (if filter-result (parse-stream-cons
-                                      use-result
-                                      (rec (stream-rest results)))
-                       (rec (stream-rest results)))]))
-     (rec (parse* port parser)))
+                   (if filter-result
+                       (parse-stream-cons use-result
+                                          (rec (stream-rest results) failures #t))
+                       (rec (stream-rest results)
+                            (cons (make-parse-failure
+                                   "did not pass filter"
+                                   #:position
+                                   (parse-derivation-start-position r1))
+                                  failures)
+                            had-success?))]))
+     (rec (parse* port parser) '() #f))
    #:preserve-prefix? #t
    #:promise-no-left-recursion? (and (not (parser-potentially-left-recursive? parser))
                                      (not (parser-potentially-null? parser)))))
