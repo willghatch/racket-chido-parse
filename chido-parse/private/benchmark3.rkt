@@ -3,6 +3,7 @@
 (module+ main
   (require
    "scheduler.rkt"
+   "procedural-combinators.rkt"
    "readtable-parser.rkt"
    (submod "readtable-parser.rkt" an-s-exp-readtable)
    "parameters.rkt"
@@ -13,7 +14,7 @@
    rackunit
    )
 
-  (define my-parser (chido-readtable->read1 an-s-exp-readtable))
+  (define my-parser (chido-readtable->read* an-s-exp-readtable))
 
   (define f (command-line #:args (filename) filename))
 
@@ -23,13 +24,14 @@
   (define my-parse
     (time (parse-derivation-result
            (stream-first
-            (parse* (open-input-string s) my-parser)))))
+            (whole-parse* (open-input-string s) my-parser)))))
   (get-counts!)
   (collect-garbage 'major)
   (eprintf "Time for racket's read function:\n")
   (define r-parse
-    (time (read-syntax "TODO-need-port-name-here" (open-input-string s))))
+    (time (port->list (λ (p) (read-syntax "TODO-need-port-name-here" p))
+                      (open-input-string s))))
 
-  (check-equal? (syntax->datum my-parse) (syntax->datum r-parse))
+  (check-equal? (map syntax->datum my-parse) (map syntax->datum r-parse))
 
   )

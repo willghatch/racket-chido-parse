@@ -6,6 +6,8 @@
  kleene-star
  kleene-plus
  epsilon-parser
+ eof-parser
+ not-parser
 
  ;; TODO - These are not great, should probably be replaced
  ;between*
@@ -17,6 +19,8 @@
  ;; filters
  parse-filter
  follow-filter
+
+ whole-parse*
  )
 
 (require
@@ -192,10 +196,38 @@ I need to re-think the derivation result interface for all these combinators.
                         #:result [result #f])
   (proc-parser #:name name
                ""
-               (λ (p) (make-parse-derivation result
-                                             #:end (port-broker-start-position p)))
+               (λ (p)
+                 (make-parse-derivation result
+                                        #:end (port-broker-start-position p)))
                #:promise-no-left-recursion? #t
                #:use-port? #f))
+
+(define eof-parser
+  (proc-parser #:name "eof"
+               ""
+               (λ (pb)
+                 (define pos (port-broker-start-position pb))
+                 (define c (port-broker-char pb pos))
+                 ;(define c (peek-char p))
+                 ;(define-values (line col pos) (port-next-location p))
+                 (if (eof-object? c)
+                     (make-parse-derivation c #:end pos)
+                     (make-parse-failure "not eof" #:position pos)))
+               #:promise-no-left-recursion? #t
+               #:use-port? #f))
+
+(define (not-parser parser
+                    #:name [name (format "not_~a" (parser-name parser))]
+                    #:result [result #f])
+  (proc-parser #:name name
+               ""
+               (λ (p)
+                 (define inner-result (parse* p parser))
+                 (define-values (line col pos) (port-next-location p))
+                 (if (parse-failure? inner-result)
+                     (make-parse-derivation result #:end pos)
+                     (make-parse-failure "succeeded parsing in not parser"
+                                         #:position pos)))))
 
 
 (define (between* main-parser between-parser
@@ -328,6 +360,26 @@ I need to re-think the derivation result interface for all these combinators.
                    (between* "q" " " #:result (λ (elems) (string-join elems ""))))))
      (list "" "q" "qq" "qqq"))
 
+  (c check-equal?
+     (map parse-derivation-result
+          (stream->list
+           (parse* (open-input-string "a")
+                   (sequence (epsilon-parser) "a" #:result (λ (a b) b)))))
+     (list "a"))
+
+  (c check-equal?
+     (map parse-derivation-result
+          (stream->list
+           (parse* (open-input-string "")
+                   eof-parser)))
+     (list eof))
+
+  (c check-equal?
+     (map parse-derivation-result
+          (stream->list
+           (parse* (open-input-string "abc")
+                   (not-parser eof-parser #:result 'foo))))
+     (list 'foo))
 
 
   ;;;;;;;;;;;;;;;;;;;
@@ -498,4 +550,27 @@ TODO - what kind of filters do I need?
                 (repetition (follow-filter "a" "b") #:greedy? #t)))))
      (list "a" "a"))
 
+  )
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;;; Parsing API.
+;; This doesn't really belong here, perhaps.  Meh.
+
+(define (whole-parse* port/pbw parser
+                      #:start [start #f])
+  (parse* port/pbw (follow-filter parser (not-parser eof-parser))))
+
+(module+ test
+  (c check-equal?
+     (map parse-derivation-result
+          (stream->list
+           (whole-parse* (open-input-string "abcd")
+                         "abcd")))
+     (list "abcd"))
+  (c check-equal?
+     (map parse-derivation-result
+          (stream->list
+           (whole-parse* (open-input-string "abcdefg")
+                         "abcd")))
+     (list))
   )

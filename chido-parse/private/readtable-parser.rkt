@@ -748,7 +748,7 @@
         (define result
           (stream-filter
            (λ (x) (not (null? (parse-derivation-result x))))
-           (parse* port (chido-readtable->read* an-s-exp-readtable))))
+           (whole-parse* port (chido-readtable->read* an-s-exp-readtable))))
         #;(eprintf "results: ~a\n" (car (map parse-derivation-result (stream->list result))))
         (cond [(stream-empty? result)
                (error 'my-read "parse error: ~s\n" result)]
