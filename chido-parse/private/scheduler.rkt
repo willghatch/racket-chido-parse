@@ -460,6 +460,15 @@ The job cache is a multi-level dictionary with the following keys / implementati
                                     (make-parser-cache)))
                     (gvector-ref c/start-pos start-position)]
             [else #f]))
+    ;; This seems to make a difference for some benchmarks, but it's not huge.
+    #;(define value/skip-cp-params
+      (and c/parser
+           (let ([r (hash-ref c/parser parser #f)])
+             (cond [r r]
+                   [update (let ([c (make-fresh-parser-job usable)])
+                             (hash-set! c/parser parser c)
+                             c)]
+                   [else #f]))))
     (define c/cp-params
       (and c/parser
            (let ([r (hash-ref c/parser parser #f)])
@@ -478,6 +487,7 @@ The job cache is a multi-level dictionary with the following keys / implementati
                     new]
                    [else #f]))))
     value
+    ;value/skip-cp-params
     )
 
   (define usable (parser->usable parser))
