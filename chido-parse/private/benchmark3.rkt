@@ -32,6 +32,6 @@
     (time (port->list (λ (p) (read-syntax "TODO-need-port-name-here" p))
                       (open-input-string s))))
 
-  ;(check-equal? (map syntax->datum my-parse) (map syntax->datum r-parse))
+  (check-equal? (map syntax->datum my-parse) (map syntax->datum r-parse))
 
   )
