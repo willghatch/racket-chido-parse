@@ -35,6 +35,7 @@
  get-counts!
 
  parse*
+ parse/direct-recursive
  #;(contract-out
   [parse* (->* (input-port? parser?)
                (#:args (listof any/c)
@@ -63,6 +64,7 @@
  "stream-flatten.rkt"
  "parameters.rkt"
  "trie.rkt"
+ "parse-stream.rkt"
  racket/stream
  racket/match
  racket/struct
@@ -80,7 +82,6 @@
 (module+ test
   (require
    rackunit
-   "parse-stream.rkt"
    ))
 
 ;; TODO - explanation from notes about the big picture of how this parsing library works
@@ -582,7 +583,7 @@ But I still need to encapsulate the port and give a start position.
                  (set-parser-job-continuation/worker! parent-job sched-k)
                  (push-parser-job-dependent! job sched-k)
                  ;(push-hint! scheduler sched-k)
-                 (abort-current-continuation chido-parse-prompt))
+                 (abort-current-continuation chido-parse-prompt #f))
                chido-parse-prompt))
             ;; This is the original entry into the parser machinery.
             ;; Or a recursive call that isn't a left-recursion.
@@ -901,10 +902,7 @@ But I still need to encapsulate the port and give a start position.
                                  (parameterize ([current-chido-parse-parameters
                                                  cp-params])
                                    (let ([result (procedure proc-input)])
-                                     (if (and (stream? result)
-                                              (not (flattened-stream? result)))
-                                         (stream-flatten result)
-                                         result))))
+                                     result)))
                                job
                                #f #f)
                       (begin (prefix-fail! scheduler job)
@@ -960,32 +958,40 @@ But I still need to encapsulate the port and give a start position.
                  (set-parser-job-continuation/worker! job #f)
                  (run-scheduler scheduler))])])]))
 
-(define (do-run! scheduler thunk job continuation-run? k-arg)
+(define (do-run! scheduler thunk/k job continuation-run? k-arg)
   (when (not job)
     (error 'chido-parse "Internal error - trying to recur with no job"))
   #|
   When continuation-run? is true, we are running a continuation (instead of a fresh thunk) and we want to supply k-arg.
   This keeps us from growing the continuation at all when recurring.
   |#
+  (define (result-loop new-thunk)
+    (if new-thunk
+        (call-with-continuation-prompt new-thunk chido-parse-prompt result-loop)
+        recursive-enter-flag))
   (define result
     (if continuation-run?
-        (call-with-continuation-prompt
-         thunk
-         chido-parse-prompt
-         (λ () recursive-enter-flag)
-         k-arg)
-        (call-with-continuation-prompt
-         (λ ()
-           (with-handlers ([(λ (e) #t) (λ (e) (exn->failure e job))])
-             (parameterize ([current-chido-parse-job job])
-               (thunk))))
-         chido-parse-prompt
-         (λ () recursive-enter-flag))))
-  (if (eq? result recursive-enter-flag)
-      (run-scheduler scheduler)
-      (begin
-        (cache-result-and-ready-dependents! scheduler job result)
-        (run-scheduler scheduler))))
+        (call-with-continuation-prompt thunk/k
+                                       chido-parse-prompt
+                                       result-loop
+                                       k-arg)
+        (result-loop (λ ()
+                       (with-handlers ([(λ (e) #t) (λ (e) (exn->failure e job))])
+                         (parameterize ([current-chido-parse-job job])
+                           (thunk/k)))))))
+  (let flatten-loop ([result result])
+    (if (eq? result recursive-enter-flag)
+        (run-scheduler scheduler)
+        (if (and (stream? result)
+                 (not (flattened-stream? result)))
+            (flatten-loop
+             (call-with-continuation-prompt
+              (λ () (parameterize ([current-chido-parse-job job])
+                      (stream-flatten result)))
+              chido-parse-prompt
+              result-loop))
+            (begin (cache-result-and-ready-dependents! scheduler job result)
+                   (run-scheduler scheduler))))))
 
 (define (ready-dependents! job)
   (for ([dep (parser-job-dependents job)])
@@ -1071,15 +1077,14 @@ But I still need to encapsulate the port and give a start position.
 (define (raw-result->parse-derivation job result)
   (if (parse-derivation? result)
       result
-      (error 'TODO "auto-transformation to proper parse result not yet implemented.  In job: ~a, got ~a\n" (job->display job) result)))
+      (error 'TODO "auto-transformation to proper parse result not yet implemented.  In job: ~a, got ~s\n" (job->display job) result)))
 
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;;; Parsing outer API
 
-(define (parse* port/pbw parser
-                #:start [start #f])
+(define (parse-inner core-proc port/pbw parser start)
   (define pb (if (port-broker-wrap? port/pbw)
                  (port-broker-wrap-broker port/pbw)
                  (or (port->port-broker port/pbw)
@@ -1092,7 +1097,25 @@ But I still need to encapsulate the port and give a start position.
                       [#f (if (port-broker-wrap? port/pbw)
                               (port-broker-wrap-position port/pbw)
                               (port->pos port/pbw))]))
-  (enter-the-parser pb parser start-pos))
+  (core-proc pb parser start-pos))
+
+(define (parse* port/pbw parser
+                #:start [start #f])
+  (parse-inner enter-the-parser port/pbw parser start))
+
+(define (parse/direct-recursive port/pbw parser
+                                #:start [start #f])
+  ;; This one lets the user get a single result back, but the return is actually a stream.
+  (define (direct-recursive-parse-core port parser start)
+    (call-with-composable-continuation
+     (λ (k)
+       (abort-current-continuation
+        chido-parse-prompt
+        ;; TODO - better failure handling and propagation
+        (λ () (for/parse ([d (parse* port/pbw parser #:start start)])
+                         (k d)))))
+     chido-parse-prompt))
+  (parse-inner direct-recursive-parse-core port/pbw parser start))
 
 #|
 TODO
@@ -1141,6 +1164,24 @@ TODO
   (check-equal? (map parse-derivation-result! (stream->list results1))
                 (list "a" "aa" "aaa" "aaaa" "aaaaa"))
 
+
+  (define (Aa-parser-proc/direct port)
+    (define d/A (parse/direct-recursive port (get-A-parser/direct)))
+    (define d/a (parse/direct-recursive port a1-parser-obj #:start d/A))
+    (make-parse-derivation (λ args (string-append (parse-derivation-result! d/A)
+                                                  (parse-derivation-result! d/a)))
+                           #:derivations (list d/A d/a)))
+  (define Aa-parser-obj/direct
+    (make-proc-parser #:name "Aa" "" Aa-parser-proc/direct))
+  (define A-parser/direct (make-alt-parser "A"
+                                           (list
+                                            Aa-parser-obj/direct
+                                            a1-parser-obj)))
+  (define (get-A-parser/direct) A-parser/direct)
+
+  (define results2 (parse* p1 A-parser/direct))
+  (check-equal? (map parse-derivation-result! (stream->list results2))
+                (list "a" "aa" "aaa" "aaaa" "aaaaa"))
 
   )
 

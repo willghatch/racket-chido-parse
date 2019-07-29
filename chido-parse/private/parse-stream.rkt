@@ -24,9 +24,10 @@ later elements in the streams will get different parameterizations.
 (define-syntax (parse-stream-cons stx)
   (syntax-parse stx
     [(_ head:expr tail:expr)
-     #'(let ([cp-params (current-chido-parse-parameters)])
-         (stream-cons (parameterize ([current-chido-parse-parameters cp-params])
-                        head)
+     #'(let* ([cp-params (current-chido-parse-parameters)]
+              [h (parameterize ([current-chido-parse-parameters cp-params])
+                   head)])
+         (stream-cons h
                       (parameterize ([current-chido-parse-parameters cp-params])
                         tail)))]))
 
