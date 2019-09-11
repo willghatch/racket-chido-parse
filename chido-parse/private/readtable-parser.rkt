@@ -46,13 +46,32 @@
    nonterminating-parsers
    layout-parsers
 
-   ;; Options
+   ;;; Options
+
+   ;; If symbol support is off, then terminating, soft-terminating, and nonterminating parsers are indistinguishable.  The difference is only how it affects the built-in symbol parser.
+   ;; For readtable-style extension, symbols need to be built-in so adding parsers affects the symbol parser implicitly.
+   symbol-support?
    symbol-result-transformer
    literal-left-delimiter
    literal-right-delimiter
    symbol-escape ;; IE backslash
    number-support?
    complex-number-support?
+
+   ;;; operator info
+
+   ;; TODO - the current design makes all precidence relationships transitive.  Maybe both transitive and intransitive relationships should be allowed?
+   ;; hash from parser to set of parsers that are immediately above the key parser in the precidence lattice
+   precidence-immediate-greater-relations
+   ;; hash from parser to set of parsers that are immediately below the key parser in the precidence lattice
+   precidence-immediate-lesser-relations
+
+   ;; lists of parsers that are marked as these things
+   prefix-operators
+   postfix-operators
+   ;; dict of binary operator to its associativity
+   infix-operator->associativity
+
 
    ;; Basically these are cached results
    [flush-state? #:mutable]
@@ -67,6 +86,9 @@
    [read1-parser #:mutable]
    [layout*+read1-parser #:mutable]
    [read*-parser #:mutable]
+
+   ;; To cache precidence lattice traversal and cycle detection
+   [precidence-transitive-greater-relations #:mutable]
    )
  ; #:prop prop:custom-parser
  ; (λ (self)
@@ -79,7 +101,12 @@
   (chido-readtable
    ;; core parsers
    '() '() '() '()
-   ;; options
+
+   ;;; options
+
+   ;; symbol-support?
+   #t
+   ;; symbol-result-transformer
    #f
    ;; TODO - also, when literal delimiters are NOT equal, should they be nestable?  I think yes.  Maybe there should be an option?
    ;; literal delimiters
@@ -90,7 +117,23 @@
    #f
    ;; complex number support
    #f
+
+   ;;; operator stuff
+
+   ;; precidence-immediate-greater-relations
+   (hash)
+   ;; precidence-immediate-lesser-relations
+   (hash)
+   ;; prefix-operators
+   '()
+   ;; postfix-operators
+   '()
+   ;; infix-operator->associativity
+   (hash)
+
    ;;; cached stuff
+
+   ;; flush-state?
    #t
    ;; tries
    empty-trie
@@ -103,10 +146,23 @@
    #f
    #f
    #f
+   ;; precidence-transitive-greater-relations
+   (hash)
    ))
 
-(define (extend-chido-readtable rt extension-type parser)
+(define (extend-chido-readtable rt extension-type parser
+                                #:operator [operator #f]
+                                #:precidence-> [precidence-> '()]
+                                #:precidence-< [precidence-< '()]
+                                #:associativity [associativity #f]
+                                )
   ;; extension-type is 'terminating, 'soft-terminating, 'nonterminating, or 'layout
+  ;; operator is #f, 'infix, 'prefix, or 'postfix
+  ;; associativity is #f, 'left, or 'right
+  ;; precidence lists are for names of other operators that are immediately greater or lesser in the precidence lattice.
+
+  #| TODO - handle operator args!  Also, disallow layout operators. |#
+  #| TODO - make extension-type a keyword argument, make the default nonterminating? |#
   (match extension-type
     ['terminating (struct-copy
                    chido-readtable
@@ -149,15 +205,30 @@
 
 (define (chido-readtable-populate-cache! rt)
   (when (chido-readtable-flush-state? rt)
+    (define (operator-wrap parser)
+      (cond [(infix-operator? rt parser)
+             (parse-filter parser (filter-infix-operator-derivation rt))]
+            [(prefix-operator? rt parser)
+             (parse-filter parser (filter-prefix-operator-derivation rt))]
+            [(postfix-operator? rt parser)
+             (parse-filter parser (filter-postfix-operator-derivation rt))]
+            [else parser]))
+    (define terminating/wrap
+      (map operator-wrap (chido-readtable-terminating-parsers rt)))
+    (define soft-terminating/wrap
+      (map operator-wrap (chido-readtable-soft-terminating-parsers rt)))
+    (define nonterminating/wrap
+      (map operator-wrap (chido-readtable-nonterminating-parsers rt)))
+
     (set-chido-readtable-terminating-trie!
      rt
-     (parser-list->trie (chido-readtable-terminating-parsers rt)))
+     (parser-list->trie terminating/wrap))
     (set-chido-readtable-soft-terminating-trie!
      rt
-     (parser-list->trie (chido-readtable-soft-terminating-parsers rt)))
+     (parser-list->trie soft-terminating/wrap))
     (set-chido-readtable-nonterminating-trie!
      rt
-     (parser-list->trie (chido-readtable-nonterminating-parsers rt)))
+     (parser-list->trie nonterminating/wrap))
     (set-chido-readtable-symbol-parser! rt (symbol/number-parser rt))
     (set-chido-readtable-layout-trie!
      rt
@@ -175,9 +246,9 @@
       #:name "chido-readtable-read1"
       ""
       (let* ([parsers (append
-                       (chido-readtable-nonterminating-parsers rt)
-                       (chido-readtable-soft-terminating-parsers rt)
-                       (chido-readtable-terminating-parsers rt))]
+                       nonterminating/wrap
+                       soft-terminating/wrap
+                       terminating/wrap)]
              [alt (make-alt-parser "chido-readtable-read1/alt"
                                    parsers)])
         (λ (port)
@@ -190,9 +261,9 @@
       #:use-port? #f
       #:promise-no-left-recursion?
       (not (ormap parser-potentially-left-recursive?
-                  (append (chido-readtable-nonterminating-parsers rt)
-                          (chido-readtable-soft-terminating-parsers rt)
-                          (chido-readtable-terminating-parsers rt)
+                  (append nonterminating/wrap
+                          soft-terminating/wrap
+                          terminating/wrap
                           (chido-readtable-layout-parsers rt))))))
     (set-chido-readtable-layout*+read1-parser!
      rt
@@ -219,7 +290,10 @@
        ;; TODO - better name!
        (make-alt-parser "chido-readtable-read*"
                         (list with-content-parser no-content-parser))))
-    (set-chido-readtable-flush-state?! rt #f)))
+    (set-chido-readtable-flush-state?! rt #f)
+
+    TODO-populate-transitive-operator-precidence-cache
+    ))
 
 
 (define ((parse-symbol/number-func rt) pb)
@@ -332,6 +406,104 @@
 (define (chido-readtable->layout* rt)
   (chido-readtable-populate-cache! rt)
   (chido-readtable-layout*-parser rt))
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;;; Operator Stuff
+
+(define (infix-operator? readtable parser)
+  (dict-ref (chido-readtable-infix-operator->associativity readtable) parser #f))
+(define (prefix-operator? readtable parser)
+  (member parser (chido-readtable-prefix-operator-list readtable)))
+(define (postfix-operator? readtable parser)
+  (member parser (chido-readtable-postfix-operator-list readtable)))
+
+(define (operator-priority-< readtable lessparser moreparser)
+  (chido-readtable-populate-cache! readtable)
+  (member moreparser
+          (dict-ref
+           (chido-readtable-precidence-transitive-greater-relations readtable)
+           lessparser
+           '())))
+
+(define ((filter-infix-operator-derivation readtab) derivation)
+  #|
+  TODO - associativity groups
+  TODO - indirect access (IE path to LHS/RHS through derivations, instead of being a direct child)
+  |#
+  (define dparser (parse-derivation-parser derivation))
+  (define lderiv (parse-derivation-left-most-subderivation derivation))
+  (define rderiv (parse-derivation-right-most-subderivation derivation))
+  (define filter-out?
+    (or
+     ;; associativity violation
+     (match (dict-ref (chido-readtable-infix-operator->associativity readtab)
+                      dparser)
+       ['left (parse-derivation-parser? rderiv dparser)]
+       ['right (parse-derivation-parser? lderiv dparser)]
+       [#f (or (parse-derivation-parser? lderiv dparser)
+               (parse-derivation-parser? rderiv dparser))])
+     ;; direct precidence violation
+     ;; IE low-priority binary operator on either side
+     (or (and (infix-operator? readtab (parse-derivation-parser lderiv))
+              (operator-priority-< readtab (parse-derivation-parser lderiv) dparser))
+         (and (infix-operator? readtab (parse-derivation-parser rderiv))
+              (operator-priority-< readtab (parse-derivation-parser rderiv) dparser)))
+     ;; deep precidence violation
+     ;; IE
+     ;; * low-priority prefix operator on right of left side, recursively
+     ;; * low-priority postfix operator on left of right side, recursively
+     (let ([get-neighbor (λ (start next-accessor)
+                           (let loop ([next start])
+                             (if (infix-operator? readtab
+                                                  (parse-derivation-parser next))
+                                 (loop (next-accessor next))
+                                 next)))]
+           [right-of-left (get-neigbor lderiv
+                                       parse-derivation-right-most-subderivation)]
+           [left-of-right (get-neigbor rderiv
+                                       parse-derivation-left-most-subderivation)])
+       (or
+        (let ([right-of-left (get-neigbor lderiv
+                                          parse-derivation-right-most-subderivation)])
+          (and (prefix-operator? readtab right-of-left)
+               (operator-priority-< readtab
+                                    (parse-derivation-parser right-of-left)
+                                    dparser)))
+        (let ([left-of-right (get-neigbor rderiv
+                                          parse-derivation-left-most-subderivation)])
+          (and (postfix-operator? readtab left-of-right)
+               (operator-priority-< readtab
+                                    (parse-derivation-parser left-of-right)
+                                    dparser)))))))
+  (not filter-out?))
+
+
+(define ((filter-prefix-operator-derivation readtab) derivation)
+  #|
+  TODO - indirect access (IE path to LHS/RHS through derivations, instead of being a direct child)
+  |#
+  (define dparser (parse-derivation-parser derivation))
+  (define rderiv (parse-derivation-right-most-subderivation derivation))
+  (define filter-out?
+    ;; direct precidence violation
+    ;; IE low-priority binary operator on either side
+    (and (infix-operator? readtab (parse-derivation-parser rderiv))
+         (operator-priority-< readtab (parse-derivation-parser rderiv) dparser)))
+  (not filter-out?))
+
+(define ((filter-postfix-operator-derivation readtab) derivation)
+  #|
+  TODO - indirect access (IE path to LHS/RHS through derivations, instead of being a direct child)
+  |#
+  (define dparser (parse-derivation-parser derivation))
+  (define lderiv (parse-derivation-left-most-subderivation derivation))
+  (define filter-out?
+    ;; direct precidence violation
+    ;; IE low-priority binary operator on either side
+    (and (infix-operator? readtab (parse-derivation-parser lderiv))
+         (operator-priority-< readtab (parse-derivation-parser lderiv) dparser)))
+  (not filter-out?))
+
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -567,7 +739,7 @@
    (λ (port) (parse* port (chido-readtable->layout*
                            (current-chido-readtable))))))
 
-(define (make-readtable-infix-operator op-string)
+(define (make-bad-readtable-infix-operator op-string)
   (sequence
    current-readtable-read1-parser
    current-readtable-layout*-parser
@@ -616,7 +788,7 @@
      'terminating (make-quote-parser (follow-filter "#," "@") 'unsyntax)
      'terminating (make-quote-parser "#,@" 'unsyntax-splicing)
      'terminating (make-keyword-parser "#:")
-     'nonterminating (make-readtable-infix-operator "<+>")
+     'nonterminating (make-bad-readtable-infix-operator "<+>")
      'layout " "
      'layout "\n"
      'layout "\t"

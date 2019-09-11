@@ -11,6 +11,11 @@
  parse-derivation-end-position
  parse-derivation-derivation-list
 
+ parse-derivation-parser?
+ parse-derivation-parser-name?
+ parse-derivation-left-most-subderivation
+ parse-derivation-right-most-subderivation
+
  ;; this is not for the public interface...
  current-chido-parse-derivation-implicit-end
 
@@ -114,6 +119,18 @@
         (set-parse-derivation-result! pd r)
         (set-parse-derivation-result-forced?! pd #t)
         r)))
+
+(define (parse-derivation-parser? derivation parser)
+  (equal? (parse-derivation-parser derivation) parser))
+(define (parse-derivation-parser-name? derivation name)
+  (equal? (parser-name (parse-derivation-parser derivation))
+          name))
+
+(define (parse-derivation-left-most-subderivation derivation)
+  (car (parse-derivation-derivation-list derivation)))
+(define (parse-derivation-right-most-subderivation derivation)
+  (car (reverse (parse-derivation-derivation-list derivation))))
+
 
 (define-syntax (define-counters stx)
   (syntax-parse stx
