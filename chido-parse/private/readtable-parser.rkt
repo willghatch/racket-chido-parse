@@ -152,8 +152,8 @@
 
 (define (extend-chido-readtable rt extension-type parser
                                 #:operator [operator #f]
-                                #:precidence-> [precidence-> '()]
-                                #:precidence-< [precidence-< '()]
+                                #:precidence-less-than [precidence-less-than '()]
+                                #:precidence-greater-than [precidence-greater-than '()]
                                 #:associativity [associativity #f]
                                 )
   ;; extension-type is 'terminating, 'soft-terminating, 'nonterminating, or 'layout
@@ -161,33 +161,61 @@
   ;; associativity is #f, 'left, or 'right
   ;; precidence lists are for names of other operators that are immediately greater or lesser in the precidence lattice.
 
-  #| TODO - handle operator args!  Also, disallow layout operators. |#
   #| TODO - make extension-type a keyword argument, make the default nonterminating? |#
-  (match extension-type
-    ['terminating (struct-copy
-                   chido-readtable
-                   rt
-                   [terminating-parsers
-                    (cons parser (chido-readtable-terminating-parsers rt))]
-                   [flush-state? #t])]
-    ['soft-terminating (struct-copy
+  (when (and (eq? 'layout extension-type)
+             operator)
+    (error 'extend-chido-readtable
+           "can't add operator parsers to layout parsers"))
+
+  (define pre-op
+    (match extension-type
+      ['terminating (struct-copy
+                     chido-readtable
+                     rt
+                     [terminating-parsers
+                      (cons parser (chido-readtable-terminating-parsers rt))]
+                     [flush-state? #t])]
+      ['soft-terminating (struct-copy
+                          chido-readtable
+                          rt
+                          [soft-terminating-parsers
+                           (cons parser (chido-readtable-soft-terminating-parsers rt))]
+                          [flush-state? #t])]
+      ['nonterminating (struct-copy
                         chido-readtable
                         rt
-                        [soft-terminating-parsers
-                         (cons parser (chido-readtable-soft-terminating-parsers rt))]
+                        [nonterminating-parsers
+                         (cons parser (chido-readtable-nonterminating-parsers rt))]
                         [flush-state? #t])]
-    ['nonterminating (struct-copy
-                      chido-readtable
-                      rt
-                      [nonterminating-parsers
-                       (cons parser (chido-readtable-nonterminating-parsers rt))]
-                      [flush-state? #t])]
-    ['layout (struct-copy
-              chido-readtable
-              rt
-              [layout-parsers
-               (cons parser (chido-readtable-layout-parsers rt))]
-              [flush-state? #t])]))
+      ['layout (struct-copy
+                chido-readtable
+                rt
+                [layout-parsers
+                 (cons parser (chido-readtable-layout-parsers rt))]
+                [flush-state? #t])]))
+  (if operator
+      (struct-copy
+       chido-readtable
+       (match operator
+         ['infix (struct-copy chido-readtable
+                              pre-op
+                              [infix-operator->associativity
+                               (dict-set (chido-readtable-infix-operator->associativity rt)
+                                         parser
+                                         associativity)])]
+         ['prefix (struct-copy chido-readtable
+                               pre-op
+                               [prefix-operators
+                                (cons parser
+                                      (chido-readtable-prefix-operators rt))])]
+         ['postfix (struct-copy chido-readtable
+                                pre-op
+                                [postfix-operators
+                                 (cons parser
+                                       (chido-readtable-postfix-operators rt))])])
+       [precidence-immediate-greater-relations precidence-greater-than]
+       [precidence-immediate-lesser-relations precidence-less-than])
+      pre-op))
 
 (define (extend-chido-readtable* rt . args)
   (match args
