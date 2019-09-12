@@ -937,6 +937,21 @@
    #;(check-equal? (p* "[(testing 123) <+> (foo (bar))]" r1)
                  '[(#%readtable-infix <+> (testing 123) (foo (bar)))])
 
+
+   #|
+   TODO - test operators
+   * test that the operator names can't be read as a symbol
+   ** maybe I should have an operator adding macro that does this conveniently -- eg. add mixfix, that allows holes for current-readtable and strings for the operator part names.  The whole parser name will be op_part_with_holes, leaving out pre and post underscores.  But each part of the mixfix operator will be added to the symbol blacklist.
+
+   * What about space requirements around operators, and whether they should be terminating, nonterminating, or soft-terminating?  Or whether the characters themselves should be disallowed in symbols?
+   ** I think they should generally be nonterminating and have no requirements about the characters not being IN symbols.  In such restrictive languages maybe you just make a symbol parser and rely on this readtable implementation just for its operator handling, and turn off its automatic symbol parsing.
+
+   * test infix operators
+   * test prefix operators
+   * test postfix operators
+   * test deep precidence cases
+   |#
+
    )
 
   )
