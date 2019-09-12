@@ -318,10 +318,48 @@
        ;; TODO - better name!
        (make-alt-parser "chido-readtable-read*"
                         (list with-content-parser no-content-parser))))
-    (set-chido-readtable-flush-state?! rt #f)
 
-    TODO-populate-transitive-operator-precidence-cache
-    ))
+    ;;; Set transitive operator precidence hash
+
+    (define all-direct-greaters
+      ;; Because precidence can be declared by a greater than or less than relation,
+      ;; I need to reverse one side to get all one relation.
+      (for/fold ([ghash (chido-readtable-precidence-immediate-greater-relations rt)])
+                ([op (append (chido-readtable-prefix-operators rt)
+                             (chido-readtable-postfix-operators rt)
+                             (dict-keys
+                              (chido-readtable-infix-operator->associativity rt)))])
+        (for/fold ([ghash ghash])
+                  ([lesser-op
+                    (dict-ref
+                     (chido-readtable-precidence-immediate-lesser-relations rt)
+                     op)])
+          (dict-set ghash lesser-op (cons op (dict-ref ghash lesser-op '()))))))
+    (define (compute-transitive-greaters orig-op work-set done-set greater-set)
+      (if (set-empty? work-set)
+          (if (set-contains? greater-set orig-op)
+              (error 'chido-readtable
+                     "Circular operator precidence detected for: ~a"
+                     (parser-name orig-op))
+              greater-set)
+          (let* ([new-greaters
+                  (dict-ref all-direct-greaters (set-first work-set) '())]
+                 [new-done-set (set-add done-set (set-first work-set))]
+                 [new-work-set (set-rest work-set)]
+                 [new-work-set (set-union new-work-set
+                                          (set-subtract new-greaters new-done-set))]
+                 [new-greater-set (set-union new-greaters greater-set)])
+            (comput-transitive-greaters orig-op
+                                        new-work-set
+                                        new-done-set
+                                        new-greater-set))))
+    (set-chido-readtable-precidence-transitive-greater-relations!
+     rt
+     (for/hash ([op (dict-keys all-direct-greaters)])
+       (values op (compute-transitive-greaters op (list op) '() '()))))
+
+    ;;; The readtable is now ready to use...
+    (set-chido-readtable-flush-state?! rt #f)))
 
 
 (define ((parse-symbol/number-func rt) pb)
@@ -439,7 +477,7 @@
 ;;;;; Operator Stuff
 
 (define (infix-operator? readtable parser)
-  (dict-ref (chido-readtable-infix-operator->associativity readtable) parser #f))
+  (dict-has-key? (chido-readtable-infix-operator->associativity readtable) parser))
 (define (prefix-operator? readtable parser)
   (member parser (chido-readtable-prefix-operator-list readtable)))
 (define (postfix-operator? readtable parser)
