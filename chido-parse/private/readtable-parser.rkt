@@ -35,6 +35,8 @@
  "parameters.rkt"
  racket/match
  racket/list
+ racket/dict
+ racket/set
  )
 
 
@@ -57,6 +59,9 @@
    symbol-escape ;; IE backslash
    number-support?
    complex-number-support?
+
+   ;; symbol blacklist, mostly so operators can not be symbols.
+   symbol-blacklist
 
    ;;; operator info
 
@@ -117,6 +122,8 @@
    #f
    ;; complex number support
    #f
+   ;; symbol blacklist
+   '()
 
    ;;; operator stuff
 
@@ -155,11 +162,14 @@
                                 #:precidence-less-than [precidence-less-than '()]
                                 #:precidence-greater-than [precidence-greater-than '()]
                                 #:associativity [associativity #f]
+                                #:symbol-blacklist [symbol-blacklist #f]
                                 )
   ;; extension-type is 'terminating, 'soft-terminating, 'nonterminating, or 'layout
   ;; operator is #f, 'infix, 'prefix, or 'postfix
   ;; associativity is #f, 'left, or 'right
   ;; precidence lists are for names of other operators that are immediately greater or lesser in the precidence lattice.
+  ;; symbol-blacklist can be #f to do nothing, #t to add the parser name to the symbol blacklist (for the common case that the operator name is the parser name), or a list of symbols or strings to blacklist.
+  ;; TODO - maybe symbol-blacklist doesn't belong here, but its primary motivation is to blacklist operator names...
 
   #| TODO - make extension-type a keyword argument, make the default nonterminating? |#
   (when (and (eq? 'layout extension-type)
@@ -167,32 +177,52 @@
     (error 'extend-chido-readtable
            "can't add operator parsers to layout parsers"))
 
-  (define pre-op
+  (define pre-blacklist
     (match extension-type
-      ['terminating (struct-copy
-                     chido-readtable
-                     rt
-                     [terminating-parsers
-                      (cons parser (chido-readtable-terminating-parsers rt))]
-                     [flush-state? #t])]
-      ['soft-terminating (struct-copy
-                          chido-readtable
-                          rt
-                          [soft-terminating-parsers
-                           (cons parser (chido-readtable-soft-terminating-parsers rt))]
-                          [flush-state? #t])]
-      ['nonterminating (struct-copy
-                        chido-readtable
-                        rt
-                        [nonterminating-parsers
-                         (cons parser (chido-readtable-nonterminating-parsers rt))]
-                        [flush-state? #t])]
-      ['layout (struct-copy
-                chido-readtable
-                rt
-                [layout-parsers
-                 (cons parser (chido-readtable-layout-parsers rt))]
-                [flush-state? #t])]))
+      ['terminating
+       (struct-copy
+        chido-readtable
+        rt
+        [terminating-parsers
+         (cons parser (chido-readtable-terminating-parsers rt))]
+        [flush-state? #t])]
+      ['soft-terminating
+       (struct-copy
+        chido-readtable
+        rt
+        [soft-terminating-parsers
+         (cons parser (chido-readtable-soft-terminating-parsers rt))]
+        [flush-state? #t])]
+      ['nonterminating
+       (struct-copy
+        chido-readtable
+        rt
+        [nonterminating-parsers
+         (cons parser (chido-readtable-nonterminating-parsers rt))]
+        [flush-state? #t])]
+      ['layout
+       (struct-copy
+        chido-readtable
+        rt
+        [layout-parsers
+         (cons parser (chido-readtable-layout-parsers rt))]
+        [flush-state? #t])]))
+  (define (->symbol symstr)
+    (match symstr
+      [(? string?) (string->symbol symstr)]
+      [(? symbol?) symstr]))
+  (define pre-op
+    (match symbol-blacklist
+      [#f pre-blacklist]
+      [#t (struct-copy chido-readtable pre-blacklist
+                       [symbol-blacklist (cons (->symbol (parser-name parser))
+                                               (chido-readtable-symbol-blacklist
+                                                pre-blacklist))])]
+      [(list strsym ...)
+       (struct-copy chido-readtable pre-blacklist
+                    [symbol-blacklist (append (map ->symbol strsym)
+                                              (chido-readtable-symbol-blacklist
+                                               pre-blacklist))])]))
   (if operator
       (struct-copy
        chido-readtable
@@ -337,7 +367,7 @@
           (dict-set ghash lesser-op (cons op (dict-ref ghash lesser-op '()))))))
     (define (compute-transitive-greaters orig-op work-set done-set greater-set)
       (if (set-empty? work-set)
-          (if (set-contains? greater-set orig-op)
+          (if (set-member? greater-set orig-op)
               (error 'chido-readtable
                      "Circular operator precidence detected for: ~a"
                      (parser-name orig-op))
@@ -349,10 +379,10 @@
                  [new-work-set (set-union new-work-set
                                           (set-subtract new-greaters new-done-set))]
                  [new-greater-set (set-union new-greaters greater-set)])
-            (comput-transitive-greaters orig-op
-                                        new-work-set
-                                        new-done-set
-                                        new-greater-set))))
+            (compute-transitive-greaters orig-op
+                                         new-work-set
+                                         new-done-set
+                                         new-greater-set))))
     (set-chido-readtable-precidence-transitive-greater-relations!
      rt
      (for/hash ([op (dict-keys all-direct-greaters)])
@@ -429,27 +459,31 @@
 
   (chido-readtable-populate-cache! rt)
   (define sym/num-length (rec/main 0 '() '()))
-  (if (equal? 0 sym/num-length)
-      (make-parse-failure "Can't parse symbol because delimiter succeeded parsing."
-                          #:position start-pos)
-      (let ()
-        (define span sym/num-length)
-        (define str (port-broker-substring pb start-pos sym/num-length))
-        (define result-func
-          (λ (line column start-position end-position derivations)
+  (define str (port-broker-substring pb start-pos sym/num-length))
+  (cond
+    [(equal? 0 sym/num-length)
+     (make-parse-failure "Can't parse symbol because delimiter succeeded parsing."
+                         #:position start-pos)]
+    [(memq (string->symbol str) (chido-readtable-symbol-blacklist rt))
+     (make-parse-failure (format "Symbol blacklisted: ~s" str))]
+    [else
+     (let ()
+       (define span sym/num-length)
+       (define result-func
+         (λ (line column start-position end-position derivations)
 
-            ;; TODO - check options for whether complex numbers, rational numbers, and numbers of any kind are supported in this readtable...
-            (define number (string->number str))
-            (define datum (or number (string->symbol str)))
-            (define stx
-              (datum->syntax #f datum (list "TODO-need-port-name-here"
-                                            line column start-position
-                                            (- end-position start-position))))
-            ;; TODO - use result transformer
-            ;datum
-            stx
-            ))
-        (make-parse-derivation result-func #:end (+ start-pos span)))))
+           ;; TODO - check options for whether complex numbers, rational numbers, and numbers of any kind are supported in this readtable...
+           (define number (string->number str))
+           (define datum (or number (string->symbol str)))
+           (define stx
+             (datum->syntax #f datum (list "TODO-need-port-name-here"
+                                           line column start-position
+                                           (- end-position start-position))))
+           ;; TODO - use result transformer
+           ;datum
+           stx
+           ))
+       (make-parse-derivation result-func #:end (+ start-pos span)))]))
 
 (define (symbol/number-parser rt)
   (proc-parser #:name "symbol/number-parser" "" (parse-symbol/number-func rt)
@@ -479,9 +513,9 @@
 (define (infix-operator? readtable parser)
   (dict-has-key? (chido-readtable-infix-operator->associativity readtable) parser))
 (define (prefix-operator? readtable parser)
-  (member parser (chido-readtable-prefix-operator-list readtable)))
+  (member parser (chido-readtable-prefix-operators readtable)))
 (define (postfix-operator? readtable parser)
-  (member parser (chido-readtable-postfix-operator-list readtable)))
+  (member parser (chido-readtable-postfix-operators readtable)))
 
 (define (operator-priority-< readtable lessparser moreparser)
   (chido-readtable-populate-cache! readtable)
@@ -518,25 +552,25 @@
      ;; IE
      ;; * low-priority prefix operator on right of left side, recursively
      ;; * low-priority postfix operator on left of right side, recursively
-     (let ([get-neighbor (λ (start next-accessor)
-                           (let loop ([next start])
-                             (if (infix-operator? readtab
-                                                  (parse-derivation-parser next))
-                                 (loop (next-accessor next))
-                                 next)))]
-           [right-of-left (get-neigbor lderiv
-                                       parse-derivation-right-most-subderivation)]
-           [left-of-right (get-neigbor rderiv
-                                       parse-derivation-left-most-subderivation)])
+     (let* ([get-neighbor (λ (start next-accessor)
+                            (let loop ([next start])
+                              (if (infix-operator? readtab
+                                                   (parse-derivation-parser next))
+                                  (loop (next-accessor next))
+                                  next)))]
+            [right-of-left (get-neighbor lderiv
+                                         parse-derivation-right-most-subderivation)]
+            [left-of-right (get-neighbor rderiv
+                                         parse-derivation-left-most-subderivation)])
        (or
-        (let ([right-of-left (get-neigbor lderiv
-                                          parse-derivation-right-most-subderivation)])
+        (let ([right-of-left (get-neighbor lderiv
+                                           parse-derivation-right-most-subderivation)])
           (and (prefix-operator? readtab right-of-left)
                (operator-priority-< readtab
                                     (parse-derivation-parser right-of-left)
                                     dparser)))
-        (let ([left-of-right (get-neigbor rderiv
-                                          parse-derivation-left-most-subderivation)])
+        (let ([left-of-right (get-neighbor rderiv
+                                           parse-derivation-left-most-subderivation)])
           (and (postfix-operator? readtab left-of-right)
                (operator-priority-< readtab
                                     (parse-derivation-parser left-of-right)
@@ -807,6 +841,7 @@
 
 (define (make-bad-readtable-infix-operator op-string)
   (sequence
+   #:name op-string
    current-readtable-read1-parser
    current-readtable-layout*-parser
    op-string
@@ -822,6 +857,35 @@
                                       ,(parse-derivation-result (fifth derivations)))))
                #:derivations derivations))))
 
+(define (make-bad-readtable-prefix-operator op-string)
+  (sequence
+   #:name op-string
+   op-string
+   current-readtable-layout*-parser
+   current-readtable-read1-parser
+   #:derive (λ derivations
+              (make-parse-derivation
+               (λ (line col pos end-pos derivations)
+                 (datum->syntax
+                  #f
+                  `(#%readtable-prefix ,(string->symbol op-string)
+                                       ,(parse-derivation-result (third derivations)))))
+               #:derivations derivations))))
+(define (make-bad-readtable-postfix-operator op-string)
+  (sequence
+   #:name op-string
+   current-readtable-read1-parser
+   current-readtable-layout*-parser
+   op-string
+   #:derive (λ derivations
+              (make-parse-derivation
+               (λ (line col pos end-pos derivations)
+                 (datum->syntax
+                  #f
+                  `(#%readtable-postfix ,(string->symbol op-string)
+                                        ,(parse-derivation-result (first derivations)))))
+               #:derivations derivations))))
+
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;;; Testing
@@ -829,38 +893,73 @@
   (require rackunit)
   (require racket/stream)
   (define my-rt
-    (extend-chido-readtable*
-     (chido-readtable-add-raw-string-parser
-      (chido-readtable-add-raw-string-parser
-       (chido-readtable-add-raw-string-parser
-        (chido-readtable-add-list-parser
-         (chido-readtable-add-list-parser
-          (chido-readtable-add-list-parser empty-chido-readtable "(" ")")
-          "[" "]")
-         "$(" ")" #:wrapper '#%dollar-paren)
-        "#|" "|#" #:readtable-add-type 'layout)
-       "<<" ">>")
-      "!!" "!!")
-     'terminating "##"
-     'terminating racket-style-string-parser
-     'nonterminating hash-t-parser
-     'nonterminating hash-f-parser
-     'terminating (make-quote-parser "'" 'quote)
-     'terminating (make-quote-parser "`" 'quasiquote)
-     'terminating (make-quote-parser (follow-filter "," "@") 'unquote)
-     'terminating (make-quote-parser ",@" 'unquote-splicing)
-     'terminating (make-quote-parser "#'" 'syntax)
-     'terminating (make-quote-parser "#`" 'quasisyntax)
-     'terminating (make-quote-parser (follow-filter "#," "@") 'unsyntax)
-     'terminating (make-quote-parser "#,@" 'unsyntax-splicing)
-     'terminating (make-keyword-parser "#:")
-     'nonterminating (make-bad-readtable-infix-operator "<+>")
-     'layout " "
-     'layout "\n"
-     'layout "\t"
-     'layout (make-quote-parser "#;" 'quote)
-     'layout (make-line-comment-parser ";")
-     ))
+    (extend-chido-readtable
+     (extend-chido-readtable
+      (extend-chido-readtable
+       (extend-chido-readtable
+        (extend-chido-readtable
+         (extend-chido-readtable*
+          (chido-readtable-add-raw-string-parser
+           (chido-readtable-add-raw-string-parser
+            (chido-readtable-add-raw-string-parser
+             (chido-readtable-add-list-parser
+              (chido-readtable-add-list-parser
+               (chido-readtable-add-list-parser empty-chido-readtable "(" ")")
+               "[" "]")
+              "$(" ")" #:wrapper '#%dollar-paren)
+             "#|" "|#" #:readtable-add-type 'layout)
+            "<<" ">>")
+           "!!" "!!")
+          'terminating "##"
+          'terminating racket-style-string-parser
+          'nonterminating hash-t-parser
+          'nonterminating hash-f-parser
+          'terminating (make-quote-parser "'" 'quote)
+          'terminating (make-quote-parser "`" 'quasiquote)
+          'terminating (make-quote-parser (follow-filter "," "@") 'unquote)
+          'terminating (make-quote-parser ",@" 'unquote-splicing)
+          'terminating (make-quote-parser "#'" 'syntax)
+          'terminating (make-quote-parser "#`" 'quasisyntax)
+          'terminating (make-quote-parser (follow-filter "#," "@") 'unsyntax)
+          'terminating (make-quote-parser "#,@" 'unsyntax-splicing)
+          'terminating (make-keyword-parser "#:")
+          ;'nonterminating (make-bad-readtable-infix-operator "<+>")
+          'layout " "
+          'layout "\n"
+          'layout "\t"
+          'layout (make-quote-parser "#;" 'quote)
+          'layout (make-line-comment-parser ";")
+          )
+         'nonterminating (make-bad-readtable-infix-operator "<+>")
+         #;(extend-chido-readtable rt extension-type parser
+                                   #:operator [operator #f]
+                                   #:precidence-less-than [precidence-less-than '()]
+                                   #:precidence-greater-than [precidence-greater-than '()]
+                                   #:associativity [associativity #f]
+                                   #:symbol-blacklist [symbol-blacklist #f]
+                                   )
+         #:operator 'infix
+         #:associativity 'left
+         #:symbol-blacklist #t)
+        'nonterminating (make-bad-readtable-infix-operator "<^>")
+        #:operator 'infix
+        #:associativity 'right
+        #:symbol-blacklist #t)
+       'nonterminating (make-bad-readtable-infix-operator "<*>")
+       #:operator 'infix
+       #:associativity 'left
+       #:precidence-greater-than '("<+>")
+       #:precidence-less-than '("<^>")
+       #:symbol-blacklist #t)
+      'nonterminating (make-bad-readtable-prefix-operator "<low-prefix>")
+      #:operator 'prefix
+      #:precidence-less-than '("<+>")
+      #:symbol-blacklist #t)
+     'nonterminating (make-bad-readtable-postfix-operator "<low-postfix>")
+     #:operator 'postfix
+     #:precidence-less-than '("<+>")
+     #:symbol-blacklist #t)
+    )
 
   (define (p* string parser)
     (define r (with-handlers ([(λ(e)#t)(λ(e)e)])
@@ -932,10 +1031,26 @@
    (check-equal? (p* "$(test foo (bar $(qwer)))" r1)
                  '((#%dollar-paren test foo (bar (#%dollar-paren qwer)))))
 
-   ;; TODO - I need to add some kind of filter here too...  Probably if I want to support this sort of thing I need to simultaneously add the infix operator AND add a failure parser for that specific symbol, such that it fails as a symbol.
-   ;; TODO - This kind of infix operator is a bad idea for multiple reasons, I think, beyond it adding ambiguity to read1
-   #;(check-equal? (p* "[(testing 123) <+> (foo (bar))]" r1)
+   ;;; operators
+   (check-equal? (p* "[(testing 123) <+> (foo (bar))]" r1)
                  '[(#%readtable-infix <+> (testing 123) (foo (bar)))])
+   (check-equal? (p* "[1 <+> 2 <+> 3 <+> 4]" r1)
+                 '[(#%readtable-infix
+                    <+> 1
+                    (#%readtable-infix <+> 2 (#%readtable-infix <+> 3 4)))])
+   (check-equal? (p* "[1 <+> 2 <*> 3]" r1)
+                 '[(#%readtable-infix <+> 1 (#%readtable-infix <*> 2 3))])
+   (check-equal? (p* "[1 <*> 2 <+> 3]" r1)
+                 '[(#%readtable-infix <+> (#%readtable-infix <*> 1 2) 3)])
+   ;; deep precidence issue
+   (check-equal? (p* "[1 <+> <low-prefix> 2 <+> 3]")
+                 '[(#%readtable-infix
+                    <+> (#%readtable-prefix
+                         <low-prefix> (#%readtable-infix <+> 2 3)))])
+   (check-equal? (p* "[1 <+> 2 <low-postfix> <+> 3]")
+                 '[(#%readtable-infix
+                    <+> (#%readtable-postfix
+                         <low-postfix> (#%readtable-prefix <+> 1 2)) 3)])
 
 
    #|
