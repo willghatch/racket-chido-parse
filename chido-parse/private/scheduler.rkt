@@ -297,13 +297,14 @@
      (parse-failure (parser-name parser) start-position (or pos start-position)
                     message failures)]))
 
-(define (make-cycle-failure job)
+(define (make-cycle-failure job job-cycle-list)
   (match job
     [(s/kw parser-job #:parser parser #:start-position start-position)
      (parse-failure (parser-name parser)
                     start-position
                     start-position
-                    "Cycle failure"
+                    (format "Cycle failure: ~a" (map job->display
+                                                     (reverse job-cycle-list)))
                     '())]))
 
 (define (exn->failure e job)
@@ -383,12 +384,12 @@ The job->result-cache is a map from parser-job structs -> parser-stream OR parse
    job
    (cons new-dependent (parser-job-dependents job))))
 
-(struct cycle-breaker-job (failure-job) #:transparent)
+(struct cycle-breaker-job (failure-job cycle-jobs) #:transparent)
 
 (define (job->result job)
   (match job
-    [(cycle-breaker-job failure-job)
-     (make-cycle-failure failure-job)]
+    [(cycle-breaker-job failure-job cycle-jobs)
+     (make-cycle-failure failure-job cycle-jobs)]
     [(s/kw parser-job #:result r) r]))
 
 (struct alt-worker
@@ -647,7 +648,7 @@ But I still need to encapsulate the port and give a start position.
   #|
   TODO - fail-chain-dependent!, do-alt-fail!, and anything about finding the last alt was an attempt at optimizing that wasn't very useful, so it's all commented out or unused.  Maybe I should delete it.  At any rate I want the code checked into my repo history.  Maybe later I'll realize that the code is useful but I did something that ruined it.  Or maybe I'll delete it later.  I don't know.
   |#
-  (define (fail-chain-dependent! job stack)
+  #;(define (fail-chain-dependent! job stack)
     (define dep
       (match (parser-job-continuation/worker job)
         [(s/kw scheduled-continuation #:dependency dep) dep]
@@ -663,7 +664,7 @@ But I still need to encapsulate the port and give a start position.
           [(and aw (s/kw alt-worker))
            (set-alt-worker-remaining-jobs! aw '())])
         (fail-chain-dependent! dep (cons dep stack))))
-  (define (do-alt-fail! alt-stack)
+  #;(define (do-alt-fail! alt-stack)
     (define last-alt (car alt-stack))
     (match (parser-job-continuation/worker last-alt)
       [(s/kw alt-worker #:remaining-jobs remaining-jobs)
@@ -799,7 +800,7 @@ But I still need to encapsulate the port and give a start position.
            (begin
              (set-scheduled-continuation-dependency!
               goal
-              (cycle-breaker-job dependency))
+              (cycle-breaker-job dependency jobs))
              (set-scheduled-continuation-ready?! goal #t))
            (rec (parser-job-continuation/worker dependency)
                 (cons job jobs)))]))
