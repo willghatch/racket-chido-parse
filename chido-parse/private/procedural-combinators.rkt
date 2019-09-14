@@ -489,6 +489,24 @@ I need to re-think the derivation result interface for all these combinators.
                 (repetition "a" #:greedy? #t)))))
      (list "a" "a" "a" "a"))
 
+
+  ;; check that sequences handle internal ambiguity properly
+  (define (make-a-parser)
+    (proc-parser "" (λ (port)
+                      (define s (read-string 1 port))
+                      (if (equal? s "a")
+                          (make-parse-derivation s #:end (port->pos port))
+                          (make-parse-failure "didn't match «a»")))))
+  (define two-a-parser
+    (make-alt-parser "two-a" (list (make-a-parser) (make-a-parser))))
+  (c check-equal?
+     (map parse-derivation-result
+          (stream->list
+           (parse* (open-input-string "ab")
+                   (sequence two-a-parser "b"
+                             #:result (λ (r1 r2) (string-append r1 r2))))))
+     '("ab" "ab"))
+
   #|
   S-expression tests:
   (()()()()()) -- this should work -- no spaces are needed between expressions in lists or in the top-level, except to denote boundaries between symbols and numbers.
@@ -522,6 +540,7 @@ TODO - what kind of filters do I need?
                       filter-func
                       #:replace-result? [replace-result? #f])
   (proc-parser
+   #:name (format "~a/filtered" (parser-name parser))
    (parser-prefix parser)
    (λ (port)
      (define (rec results failures had-success?)

@@ -926,6 +926,23 @@
 (module+ test
   (require rackunit)
   (require racket/stream)
+  (define (make-<two>-parser)
+    (proc-parser "" (λ (port)
+                      (define s (read-string 5 port))
+                      (define-values (line col pos) (port-next-location port))
+                      (if (equal? s "<two>")
+                          (make-parse-derivation s #:end pos)
+                          (make-parse-failure "didn't match «<two>»")))))
+  (define (make-<two/alt>-parser)
+    (proc-parser "" (λ (port)
+                      (define s (read-string 9 port))
+                      (define-values (line col pos) (port-next-location port))
+                      (if (equal? s "<two/alt>")
+                          (stream-cons (make-parse-derivation s #:end pos)
+                                       (stream-cons (make-parse-derivation s #:end pos)
+                                                    empty-stream))
+                          (make-parse-failure "didn't match «<two>»")))))
+
   (define my-rt
     (extend-chido-readtable
      (extend-chido-readtable
@@ -957,6 +974,10 @@
           'terminating (make-quote-parser (follow-filter "#," "@") 'unsyntax)
           'terminating (make-quote-parser "#,@" 'unsyntax-splicing)
           'terminating (make-keyword-parser "#:")
+          ;; two of these, to test that I'm getting sequences back properly
+          'nonterminating (make-<two>-parser)
+          'nonterminating (make-<two>-parser)
+          'nonterminating (make-<two/alt>-parser)
           ;'nonterminating (make-bad-readtable-infix-operator "<+>")
           'layout " "
           'layout "\n"
@@ -1013,10 +1034,8 @@
                  '(()))
    (check-equal? (p* "( )" r1)
                  '(()))
-   (eprintf "here1\n")
    (check-equal? (p* "( ( ))" r1)
                  '((())))
-   (eprintf "here2\n")
    (check-equal? (p* "( ( ) )" r1)
                  '((())))
    (check-equal? (p* "( ( ) )" r1)
@@ -1063,9 +1082,14 @@
    (check-equal? (p* "[a b]" r1)
                  '[(a b)])
 
+   (check-equal? (p* "(a <two> b)" r1)
+                 '[(a "<two>" b) (a "<two>" b)])
+   (check-equal? (p* "(a <two/alt> b)" r1)
+                 '[(a "<two/alt>" b) (a "<two/alt>" b)])
+
    ;;; operators
    (eprintf "\n\n--------------------------------------- before relevant test ----------\n")
-   (check-equal? (p* "[() <+> () 1 2 3]" r1)
+   (check-equal? (p* "[a <+> b 1 2 3]" r1)
                  '[(#%readtable-infix <+> a b) 1 2 3])
    (check-equal? (p* "[<low-prefix> a 1 2 3]" r1)
                  '[(#%readtable-prefix <low-prefix> a) 1 2 3])
