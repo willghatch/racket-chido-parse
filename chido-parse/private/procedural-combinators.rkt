@@ -323,6 +323,8 @@ I need to re-think the derivation result interface for all these combinators.
                                                 Bp bp))))
   (define aBcp (sequence #:name "aBc" #:result string-append
                          ap Bp cp))
+  (define BaBcp (sequence #:name "aBc" #:result string-append
+                          Bp ap Bp cp))
 
 
   (define str1 "abbbbbbc")
@@ -331,6 +333,13 @@ I need to re-think the derivation result interface for all these combinators.
   (c check-equal?
      (parse-derivation-result (car (stream->list r1)))
      str1)
+
+  (define str2 "bbbabbbbbbbbbbbc")
+  (c check-equal?
+     (parse-derivation-result
+      (car (stream->list
+            (parse* (open-input-string str2) BaBcp))))
+     str2)
 
 
   (c check-equal?
