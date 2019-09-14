@@ -831,7 +831,7 @@ But I still need to encapsulate the port and give a start position.
      (cache-result-and-ready-dependents! scheduler job result)]))
 
 (define (run-actionable-job scheduler job)
-  ;(eprintf "running actionable job: ~a\n" (job->display job))
+  (eprintf "running actionable job: ~a\n" (job->display job))
   (when (job->result job)
     (error 'chido-parse
            "internal error - run-actionable-job got a job that was already done: ~a"

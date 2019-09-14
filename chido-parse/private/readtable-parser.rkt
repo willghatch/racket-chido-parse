@@ -321,6 +321,7 @@
           (chido-parse-parameterize
            ([current-chido-readtable rt])
            (define parsers-result (parse* port alt))
+           ;; TODO - I need to put the symbol parser in the alt, but figure out a way to deal with ambiguity when the symbol parser AND a nonterminating parser both succeed.
            (if (parse-failure? parsers-result)
                (let ([symbol-result
                       (parse* port (chido-readtable-symbol-parser rt))])
@@ -843,11 +844,16 @@
 
 (define current-readtable-read1-parser
   (proc-parser
+   #:name "current-readtable-read1-parser"
    ""
-   (λ (port) (parse* port (chido-readtable->read1
-                           (current-chido-readtable))))))
+   (λ (port)
+     (define res
+       (parse* port (chido-readtable->read1
+                     (current-chido-readtable))))
+     res)))
 (define current-readtable-layout*-parser
   (proc-parser
+   #:name "current-readtable-layout*-parser"
    ""
    (λ (port) (parse* port (chido-readtable->layout*
                            (current-chido-readtable))))))
@@ -1089,10 +1095,16 @@
 
    ;;; operators
    (eprintf "\n\n--------------------------------------- before relevant test ----------\n")
+   (check-equal? (p* "[<two> <+> <two>]" r1)
+                 ;; just to look at the output
+                 '[((#%readtable-infix <+> () ()))])
+   (check-equal? (p* "[() <+> ()]" r1)
+                 '[((#%readtable-infix <+> () ()))])
+   ;; TODO - this will fail until I fix the issue with symbols only parsing AFTER all other parsers have failed
    (check-equal? (p* "[a <+> b 1 2 3]" r1)
-                 '[(#%readtable-infix <+> a b) 1 2 3])
+                 '[((#%readtable-infix <+> a b)) 1 2 3])
    (check-equal? (p* "[<low-prefix> a 1 2 3]" r1)
-                 '[(#%readtable-prefix <low-prefix> a) 1 2 3])
+                 '[((#%readtable-prefix <low-prefix> a)) 1 2 3])
    ;(check-equal? (p* "[a <low-postfix>]" r1)
    ;              '[(#%readtable-postfix <low-postfix> a)])
    ;(check-equal? (p* "[(testing 123) <+> (foo (bar))]" r1)
