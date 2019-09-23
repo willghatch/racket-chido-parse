@@ -28,6 +28,8 @@
  proc-parser?
  ;prop:custom-parser
 
+ non-cached-parser-thunk
+
  parser-name
  parser-prefix
  parser-potentially-left-recursive?
@@ -263,20 +265,25 @@
         [else (error 'parser-potentially-null?
                      "Not yet implemented for: ~s" p)]))
 
+(struct non-cached-parser-thunk (proc)
+  #:property prop:procedure (struct-field-index proc))
+
 (define parser-cache (make-weak-hasheq))
 (define (parser->usable p)
-  (define (rec p)
-    (cond [(parser-struct? p) p]
-          [(custom-parser? p) (rec ((custom-parser-ref p) p))]
-          [(string? p) p]
-          ;[(string? p) (string->parser p)]
-          [(procedure? p) (rec (p))]
-          [else (error 'chido-parse "not a parser: ~s" p)]))
-  (define cached (hash-ref parser-cache p #f))
-  (or cached
-      (let ([result (rec p)])
-        (hash-set! parser-cache p result)
-        result)))
+  (cond [(parser-struct? p) p]
+        [(custom-parser? p)
+         (parser->usable ((custom-parser-ref p) p))]
+        [(string? p) p]
+        ;; Usually I want to cache thunk results, but some, including chido-parse-parameters, specifically need NOT to be cached (at least not merely on procedure object identity), because they depend on chido-parse-parameterization.
+        [(non-cached-parser-thunk? p) (parser->usable (p))]
+        [(chido-parse-parameter? p) (parser->usable (p))]
+        [(procedure? p)
+         (define cached (hash-ref parser-cache p #f))
+         (or cached
+             (let ([result (parser->usable (p))])
+               (hash-set! parser-cache p result)
+               result))]
+        [else (error 'chido-parse "not a parser: ~s" p)]))
 
 (struct parse-stream
   (result next-job scheduler)
