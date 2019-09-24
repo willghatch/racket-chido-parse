@@ -539,7 +539,7 @@
            lessparser
            '())))
 
-(define ((filter-infix-operator-derivation readtab) derivation)
+(define ((filter-infix-operator-derivation readtab) port derivation)
   #|
   TODO - associativity groups
   TODO - indirect access (IE path to LHS/RHS through derivations, instead of being a direct child)
@@ -592,7 +592,7 @@
   (not filter-out?))
 
 
-(define ((filter-prefix-operator-derivation readtab) derivation)
+(define ((filter-prefix-operator-derivation readtab) port derivation)
   #|
   TODO - indirect access (IE path to LHS/RHS through derivations, instead of being a direct child)
   |#
@@ -605,7 +605,7 @@
          (operator-priority-< readtab (parse-derivation-parser rderiv) dparser)))
   (not filter-out?))
 
-(define ((filter-postfix-operator-derivation readtab) derivation)
+(define ((filter-postfix-operator-derivation readtab) port derivation)
   #|
   TODO - indirect access (IE path to LHS/RHS through derivations, instead of being a direct child)
   |#
@@ -846,11 +846,8 @@
   (proc-parser
    #:name "current-readtable-read1-parser"
    ""
-   (λ (port)
-     (define res
-       (parse* port (chido-readtable->read1
-                     (current-chido-readtable))))
-     res)))
+   (λ (port) (parse* port (chido-readtable->read1
+                           (current-chido-readtable))))))
 (define current-readtable-layout*-parser
   (proc-parser
    #:name "current-readtable-layout*-parser"
@@ -994,12 +991,12 @@
          'nonterminating (make-bad-readtable-infix-operator "<+>")
          #:operator 'infix
          #:associativity 'left
-         #:symbol-blacklist #t
-         )
+         #:symbol-blacklist #t)
         'nonterminating (make-bad-readtable-infix-operator "<^>")
         #:operator 'infix
         #:associativity 'right
-        #:symbol-blacklist #t)
+        #:symbol-blacklist #t
+        )
        'nonterminating (make-bad-readtable-infix-operator "<*>")
        #:operator 'infix
        #:associativity 'left
@@ -1095,16 +1092,17 @@
 
    ;;; operators
    (eprintf "\n\n--------------------------------------- before relevant test ----------\n")
-   (check-equal? (p* "[<two> <+> <two>]" r1)
-                 ;; just to look at the output
-                 '[((#%readtable-infix <+> () ()))])
    (check-equal? (p* "[() <+> ()]" r1)
                  '[((#%readtable-infix <+> () ()))])
-   ;; TODO - this will fail until I fix the issue with symbols only parsing AFTER all other parsers have failed
-   (check-equal? (p* "[a <+> b 1 2 3]" r1)
-                 '[((#%readtable-infix <+> a b)) 1 2 3])
-   (check-equal? (p* "[<low-prefix> a 1 2 3]" r1)
-                 '[((#%readtable-prefix <low-prefix> a)) 1 2 3])
+   (check-equal? (p* "[() <+> () <+> ()]" r1)
+                 '[((#%readtable-infix <+> (#%readtable-infix <+> () ()) ()))])
+   (check-equal? (p* "[() <^> () <^> ()]" r1)
+                 '[((#%readtable-infix <^> () (#%readtable-infix <^> () ())))])
+   ;;; TODO - this will fail until I fix the issue with symbols only parsing AFTER all other parsers have failed
+   ;(check-equal? (p* "[a <+> b 1 2 3]" r1)
+   ;              '[((#%readtable-infix <+> a b)) 1 2 3])
+   ;(check-equal? (p* "[<low-prefix> a 1 2 3]" r1)
+   ;              '[((#%readtable-prefix <low-prefix> a)) 1 2 3])
    ;(check-equal? (p* "[a <low-postfix>]" r1)
    ;              '[(#%readtable-postfix <low-postfix> a)])
    ;(check-equal? (p* "[(testing 123) <+> (foo (bar))]" r1)

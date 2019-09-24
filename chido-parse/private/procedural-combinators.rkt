@@ -590,6 +590,19 @@ TODO - what kind of filters do I need?
                 (repetition (follow-filter "a" "b") #:greedy? #t)))))
      (list "a" "a"))
 
+  (c check-equal?
+     (parse-derivation-result
+      (car
+       (stream->list
+        (parse* (open-input-string "testing")
+                (parse-filter "testing" (λ (port result) #t))))))
+     "testing")
+  (c check-equal?
+     (stream->list
+      (parse* (open-input-string "testing")
+              (parse-filter "testing" (λ (port result) #f))))
+     '())
+
   )
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
