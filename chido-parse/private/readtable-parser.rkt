@@ -602,23 +602,21 @@
                                                    (parse-derivation-parser next))
                                   (loop (next-accessor next))
                                   next)))]
-            [right-of-left (get-neighbor lderiv
-                                         parse-derivation-right-most-subderivation)]
-            [left-of-right (get-neighbor rderiv
-                                         parse-derivation-left-most-subderivation)])
+            [right-of-left (parse-derivation-parser
+                            (get-neighbor lderiv
+                                          parse-derivation-right-most-subderivation))]
+            [left-of-right (parse-derivation-parser
+                            (get-neighbor rderiv
+                                          parse-derivation-left-most-subderivation))])
        (or
-        (let ([right-of-left (get-neighbor lderiv
-                                           parse-derivation-right-most-subderivation)])
-          (and (prefix-operator? readtab right-of-left)
-               (operator-priority-< readtab
-                                    (parse-derivation-parser right-of-left)
-                                    dparser)))
-        (let ([left-of-right (get-neighbor rderiv
-                                           parse-derivation-left-most-subderivation)])
-          (and (postfix-operator? readtab left-of-right)
-               (operator-priority-< readtab
-                                    (parse-derivation-parser left-of-right)
-                                    dparser)))))))
+        (and (prefix-operator? readtab right-of-left)
+             (operator-priority-< readtab
+                                  right-of-left
+                                  dparser))
+        (and (postfix-operator? readtab left-of-right)
+             (operator-priority-< readtab
+                                  left-of-right
+                                  dparser))))))
 
   (not filter-out?))
 
@@ -1136,20 +1134,19 @@
    ;(check-equal? (p* "[1 <*> 2 <+> 3]" r1)
    ;              '[(#%readtable-infix <+> (#%readtable-infix <*> 1 2) 3)])
 
-   (eprintf "\n\n----before relevant tests----\n\n")
    ;;; operator deep precidence issue
-   ;(check-equal? (p* "[#t <+> <low-prefix> #f <+> #t]" r1)
-   ;              '[(#%readtable-infix
-   ;                 <+>
-   ;                 #t
-   ;                 (#%readtable-prefix
-   ;                  <low-prefix> (#%readtable-infix <+> #f #t)))])
+   (check-equal? (p* "[#t <+> <low-prefix> #f <+> #t]" r1)
+                 '[((#%readtable-infix
+                     <+>
+                     #t
+                     (#%readtable-prefix
+                      <low-prefix> (#%readtable-infix <+> #f #t))))])
    (check-equal? (p* "[#f <+> #t <low-postfix> <+> #f]" r1)
-                 '[(#%readtable-infix
-                    <+>
-                    (#%readtable-postfix
-                     <low-postfix> (#%readtable-prefix <+> #f #t))
-                    #f)])
+                 '[((#%readtable-infix
+                     <+>
+                     (#%readtable-postfix
+                      <low-postfix> (#%readtable-infix <+> #f #t))
+                     #f))])
 
    ;; check symbol blacklist that operators were added to
    (check-pred parse-failure?
