@@ -1121,8 +1121,8 @@
                  '[((#%readtable-infix <+> (testing 123) (foo (bar))))])
 
    ;;; TODO - these will fail until I fix the issue with symbols only parsing AFTER all other parsers have failed
-   ;(check-equal? (p* "[a <+> b 1 2 3]" r1)
-   ;              '[((#%readtable-infix <+> a b)) 1 2 3])
+   (check-equal? (p* "[a <+> b 1 2 3]" r1)
+                 '[((#%readtable-infix <+> a b)) 1 2 3])
    ;(check-equal? (p* "[a <low-postfix>]" r1)
    ;              '[(#%readtable-postfix <low-postfix> a)])
    ;(check-equal? (p* "[1 <+> 2 <+> 3 <+> 4]" r1)
