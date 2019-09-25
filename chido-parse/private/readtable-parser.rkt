@@ -946,53 +946,6 @@
    (λ (port) (parse* port (chido-readtable->layout+
                            (current-chido-readtable))))))
 
-(define (make-bad-readtable-infix-operator op-string)
-  (sequence
-   #:name op-string
-   current-readtable-read1-parser
-   current-readtable-layout*-parser
-   op-string
-   current-readtable-layout*-parser
-   current-readtable-read1-parser
-   #:derive (λ derivations
-              (make-parse-derivation
-               (λ (line col pos end-pos derivations)
-                 (datum->syntax
-                  #f
-                  `(#%readtable-infix ,(string->symbol op-string)
-                                      ,(parse-derivation-result (first derivations))
-                                      ,(parse-derivation-result (fifth derivations)))))
-               #:derivations derivations))))
-
-(define (make-bad-readtable-prefix-operator op-string)
-  (sequence
-   #:name op-string
-   op-string
-   current-readtable-layout*-parser
-   current-readtable-read1-parser
-   #:derive (λ derivations
-              (make-parse-derivation
-               (λ (line col pos end-pos derivations)
-                 (datum->syntax
-                  #f
-                  `(#%readtable-prefix ,(string->symbol op-string)
-                                       ,(parse-derivation-result (third derivations)))))
-               #:derivations derivations))))
-(define (make-bad-readtable-postfix-operator op-string)
-  (sequence
-   #:name op-string
-   current-readtable-read1-parser
-   current-readtable-layout*-parser
-   op-string
-   #:derive (λ derivations
-              (make-parse-derivation
-               (λ (line col pos end-pos derivations)
-                 (datum->syntax
-                  #f
-                  `(#%readtable-postfix ,(string->symbol op-string)
-                                        ,(parse-derivation-result (first derivations)))))
-               #:derivations derivations))))
-
 
 (define (chido-readtable-add-mixfix-operator
          rt name-strsym
