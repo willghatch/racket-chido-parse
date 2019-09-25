@@ -328,6 +328,7 @@
       #:name "chido-readtable-read1"
       ""
       (let* ([parsers (append
+                       (list (chido-readtable-symbol-parser rt))
                        nonterminating/wrap
                        soft-terminating/wrap
                        terminating/wrap)]
@@ -337,15 +338,7 @@
           (chido-parse-parameterize
            ([current-chido-readtable rt])
            (define parsers-result (parse* port alt))
-           ;; TODO - I need to put the symbol parser in the alt, but figure out a way to deal with ambiguity when the symbol parser AND a nonterminating parser both succeed.
-           (if (parse-failure? parsers-result)
-               (let ([symbol-result
-                      (parse* port (chido-readtable-symbol-parser rt))])
-                 (if (parse-failure? symbol-result)
-                     ;; TODO - I want a failure that encapsulates the symbol AND parsers results
-                     parsers-result
-                     symbol-result))
-               parsers-result))))
+           (parse* port alt))))
       #:use-port? #f
       #:promise-no-left-recursion?
       (not (ormap parser-potentially-left-recursive?
@@ -1120,19 +1113,21 @@
    (check-equal? (p* "[(testing 123) <+> (foo (bar))]" r1)
                  '[((#%readtable-infix <+> (testing 123) (foo (bar))))])
 
-   ;;; TODO - these will fail until I fix the issue with symbols only parsing AFTER all other parsers have failed
    (check-equal? (p* "[a <+> b 1 2 3]" r1)
-                 '[((#%readtable-infix <+> a b)) 1 2 3])
-   ;(check-equal? (p* "[a <low-postfix>]" r1)
-   ;              '[(#%readtable-postfix <low-postfix> a)])
-   ;(check-equal? (p* "[1 <+> 2 <+> 3 <+> 4]" r1)
-   ;              '[(#%readtable-infix
-   ;                 <+> 1
-   ;                 (#%readtable-infix <+> 2 (#%readtable-infix <+> 3 4)))])
-   ;(check-equal? (p* "[1 <+> 2 <*> 3]" r1)
-   ;              '[(#%readtable-infix <+> 1 (#%readtable-infix <*> 2 3))])
-   ;(check-equal? (p* "[1 <*> 2 <+> 3]" r1)
-   ;              '[(#%readtable-infix <+> (#%readtable-infix <*> 1 2) 3)])
+                 '[((#%readtable-infix <+> a b) 1 2 3)])
+   (check-equal? (p* "[a <low-postfix>]" r1)
+                 '[((#%readtable-postfix <low-postfix> a))])
+   (check-equal? (p* "[1 <+> 2 <+> 3 <+> 4]" r1)
+                 '[((#%readtable-infix
+                     <+>
+                     (#%readtable-infix <+>
+                                        (#%readtable-infix <+> 1 2)
+                                        3)
+                     4))])
+   (check-equal? (p* "[1 <+> 2 <*> 3]" r1)
+                 '[((#%readtable-infix <+> 1 (#%readtable-infix <*> 2 3)))])
+   (check-equal? (p* "[1 <*> 2 <+> 3]" r1)
+                 '[((#%readtable-infix <+> (#%readtable-infix <*> 1 2) 3))])
 
    ;;; operator deep precidence issue
    (check-equal? (p* "[#t <+> <low-prefix> #f <+> #t]" r1)
