@@ -8,7 +8,8 @@
   [empty-chido-readtable chido-readtable?]
   [extend-chido-readtable (-> chido-readtable?
                               (or/c 'terminating 'soft-terminating
-                                    'nonterminating 'layout)
+                                    'nonterminating 'layout
+                                    'left-recursive-nonterminating)
                               any/c
                               chido-readtable?)]
   [chido-readtable-add-list-parser (-> chido-readtable?
@@ -33,6 +34,7 @@
  "procedural-combinators.rkt"
  "trie.rkt"
  "parameters.rkt"
+ "parse-stream.rkt"
  racket/match
  racket/list
  racket/dict
@@ -46,6 +48,7 @@
    terminating-parsers
    soft-terminating-parsers
    nonterminating-parsers
+   left-recursive-nonterminating-parsers
    layout-parsers
 
    ;;; Options
@@ -107,7 +110,7 @@
 (define empty-chido-readtable
   (chido-readtable
    ;; core parsers
-   '() '() '() '()
+   '() '() '() '() '()
 
    ;;; options
 
@@ -168,7 +171,7 @@
                                 #:associativity [associativity #f]
                                 #:symbol-blacklist [symbol-blacklist #f]
                                 )
-  ;; extension-type is 'terminating, 'soft-terminating, 'nonterminating, or 'layout
+  ;; extension-type is 'terminating, 'soft-terminating, 'nonterminating, 'left-recursive-nonterminating,  or 'layout
   ;; operator is #f, 'infix, 'prefix, or 'postfix
   ;; associativity is #f, 'left, or 'right
   ;; precidence lists are for names of other operators that are immediately greater or lesser in the precidence lattice.
@@ -180,6 +183,10 @@
              operator)
     (error 'extend-chido-readtable
            "can't add operator parsers to layout parsers"))
+  (when (and (member operator '(infix postfix))
+             (not (eq? extension-type 'left-recursive-nonterminating)))
+    (error 'extend-chido-readtable
+           "infix and postfix operators must be added as left-recursive-nonterminating parsers"))
 
   (define pre-blacklist
     (match extension-type
@@ -204,6 +211,12 @@
         [nonterminating-parsers
          (cons parser (chido-readtable-nonterminating-parsers rt))]
         [flush-state? #t])]
+      ['left-recursive-nonterminating
+       (struct-copy
+        chido-readtable
+        rt
+        [left-recursive-nonterminating-parsers
+         (cons parser (chido-readtable-left-recursive-nonterminating-parsers rt))])]
       ['layout
        (struct-copy
         chido-readtable
@@ -301,6 +314,9 @@
       (map operator-wrap (chido-readtable-soft-terminating-parsers rt)))
     (define nonterminating/wrap
       (map operator-wrap (chido-readtable-nonterminating-parsers rt)))
+    (define left-recursive-nonterminating/wrap
+      (map operator-wrap
+           (chido-readtable-left-recursive-nonterminating-parsers rt)))
 
     (set-chido-readtable-terminating-trie!
      rt
@@ -328,17 +344,31 @@
       #:name "chido-readtable-read1"
       ""
       (let* ([parsers (append
-                       (list (chido-readtable-symbol-parser rt))
                        nonterminating/wrap
                        soft-terminating/wrap
                        terminating/wrap)]
              [alt (make-alt-parser "chido-readtable-read1/alt"
-                                   parsers)])
+                                   parsers)]
+             [left-recursive-nonterminating-alt
+              (make-alt-parser "chido-readtable-read1/lrn-alt"
+                               left-recursive-nonterminating/wrap)])
         (λ (port)
           (chido-parse-parameterize
            ([current-chido-readtable rt])
            (define parsers-result (parse* port alt))
-           (parse* port alt))))
+           (define symbol-result
+             (if (parse-failure? parsers-result)
+                 (let ([symbol-result
+                        (parse* port (chido-readtable-symbol-parser rt))])
+                   (if (parse-failure? symbol-result)
+                       ;; TODO - I want a failure that encapsulates the symbol AND parsers results
+                       parsers-result
+                       symbol-result))
+                 parsers-result))
+           ;; TODO - use a stream-append that preserves failures!!
+           (parse-stream-cons
+            symbol-result
+            (parse* port left-recursive-nonterminating-alt)))))
       #:use-port? #f
       #:promise-no-left-recursion?
       (not (ormap parser-potentially-left-recursive?
@@ -989,26 +1019,26 @@
           'layout (make-quote-parser "#;" 'quote)
           'layout (make-line-comment-parser ";")
           )
-         'nonterminating (make-bad-readtable-infix-operator "<+>")
+         'left-recursive-nonterminating (make-bad-readtable-infix-operator "<+>")
          #:operator 'infix
          #:associativity 'left
          #:symbol-blacklist #t)
-        'nonterminating (make-bad-readtable-infix-operator "<^>")
+        'left-recursive-nonterminating (make-bad-readtable-infix-operator "<^>")
         #:operator 'infix
         #:associativity 'right
         #:symbol-blacklist #t
         )
-       'nonterminating (make-bad-readtable-infix-operator "<*>")
+       'left-recursive-nonterminating (make-bad-readtable-infix-operator "<*>")
        #:operator 'infix
        #:associativity 'left
        #:precidence-greater-than '("<+>")
        #:precidence-less-than '("<^>")
        #:symbol-blacklist #t)
-      'nonterminating (make-bad-readtable-prefix-operator "<low-prefix>")
+      'left-recursive-nonterminating (make-bad-readtable-prefix-operator "<low-prefix>")
       #:operator 'prefix
       #:precidence-less-than '("<+>")
       #:symbol-blacklist #t)
-     'nonterminating (make-bad-readtable-postfix-operator "<low-postfix>")
+     'left-recursive-nonterminating (make-bad-readtable-postfix-operator "<low-postfix>")
      #:operator 'postfix
      #:precidence-less-than '("<+>")
      #:symbol-blacklist #t)
