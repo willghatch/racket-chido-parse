@@ -42,10 +42,14 @@
  "parameters.rkt"
  "parse-stream.rkt"
  racket/match
+ racket/string
  racket/list
  racket/dict
  racket/set
- )
+ (for-syntax
+  racket/base
+  syntax/parse
+  ))
 
 
 (struct chido-readtable
@@ -252,7 +256,9 @@
   (define (op-resolve op-or-name)
     (define err (λ () (error 'extend-chido-readtable
                              "bad operator name: ~v\n" op-or-name)))
-    (cond [(string? op-or-name) (dict-ref op-name->op op-or-name err)]
+    (cond [(symbol? op-or-name) (dict-ref op-name->op (symbol->string op-or-name)
+                                          err)]
+          [(string? op-or-name) (dict-ref op-name->op op-or-name err)]
           [(parser? op-or-name) op-or-name]
           [else (err)]))
 
@@ -925,6 +931,12 @@
    ""
    (λ (port) (parse* port (chido-readtable->layout*
                            (current-chido-readtable))))))
+(define current-readtable-layout+-parser
+  (proc-parser
+   #:name "current-readtable-layout+-parser"
+   ""
+   (λ (port) (parse* port (chido-readtable->layout+
+                           (current-chido-readtable))))))
 
 (define (make-bad-readtable-infix-operator op-string)
   (sequence
@@ -974,6 +986,137 @@
                #:derivations derivations))))
 
 
+(define (chido-readtable-add-mixfix-operator
+         rt name-strsym
+         #:layout [layout 'required]
+         #:precidence-greater-than [precidence-greater-than '()]
+         #:precidence-less-than [precidence-less-than '()]
+         #:associativity [associativity #f])
+  (define name-str (cond [(string? name-strsym) name-strsym]
+                         [(symbol? name-strsym) (symbol->string name-strsym)]
+                         [else (error 'TODO-better-message)]))
+  (define name-split (string-split name-str "_" #:trim? #f))
+  (when (string-contains? name-str "__")
+    (error 'chido-readtable-add-mixfix-operator
+           "don't use double underscore in the operator name/spec: ~v"
+           name-str))
+  (when (not (string-contains? name-str "_"))
+    (error 'chido-readtable-add-mixfix-operator
+           "didn't include any underscores in operator name/spec: ~v"
+           name-str))
+  (when (<= (length name-split) 1)
+    (error 'chido-readtable-add-mixfix-operator
+           "name/spec was too short: ~v"
+           name-str))
+
+  (define parsers/no-layout (map (λ (s) (if (equal? "" s)
+                                            current-readtable-read1-parser
+                                            s))
+                                 name-split))
+  (define parsers
+    (match layout
+      ['required (flatten
+                  (cons (car parsers/no-layout)
+                        (map (λ (p) (list current-readtable-layout+-parser p))
+                             (cdr parsers/no-layout))))]
+      ['optional (flatten
+                  (cons (car parsers/no-layout)
+                        (map (λ (p) (list current-readtable-layout*-parser p))
+                             (cdr parsers/no-layout))))]
+      ['none parsers/no-layout]))
+
+  (define result-indices/no-layout
+    (filter (λ(x)x)
+            (for/list ([part name-split]
+                       [i (in-naturals)])
+              (and (equal? part "") i))))
+  (define result-indices
+    (match layout
+      ['none result-indices/no-layout]
+      [else (map (λ (x) (if (equal? 0 x)
+                            0
+                            (* x 2)))
+                 result-indices/no-layout)]))
+
+  (define postfix? (string-prefix? name-str "_"))
+  (define prefix? (string-suffix? name-str "_"))
+  (define operator-style
+    (cond [(and prefix? postfix?) 'infix]
+          [prefix? 'prefix]
+          [postfix? 'postfix]
+          [else #f]))
+
+  (define operator-name-use
+    (match operator-style
+      [#f name-str]
+      ['postfix (substring name-str 1)]
+      ['prefix (substring name-str 0 (sub1 (string-length name-str)))]
+      ['infix (substring name-str 1 (sub1 (string-length name-str)))]))
+
+  (define symbols-to-blacklist (filter-map (λ (x) (and (not (equal? "" x))
+                                                       (string->symbol x)))
+                                           name-split))
+
+  (define sequence-parser
+    (apply
+     sequence
+     #:name operator-name-use
+     #:derive (λ derivations
+                (make-parse-derivation
+                 (λ (line col pos end-pos derivations)
+                   (datum->syntax
+                    #f
+                    `(,(match operator-style
+                         ['infix '#%chido-readtable-infix-operator]
+                         ['prefix '#%chido-readtable-prefix-operator]
+                         ['postfix '#%chido-readtable-postfix-operator]
+                         [#f '#%chido-readtable-notfix-operator])
+                      ,(string->symbol operator-name-use)
+                      ,@(map (λ (i) (parse-derivation-result
+                                     (list-ref derivations i)))
+                             result-indices))))
+                 #:derivations derivations))
+     parsers))
+
+  (extend-chido-readtable rt 'left-recursive-nonterminating
+                          #:precidence-greater-than precidence-greater-than
+                          #:precidence-less-than precidence-less-than
+                          #:associativity associativity
+                          #:symbol-blacklist symbols-to-blacklist
+                          #:operator operator-style
+                          sequence-parser))
+
+(define-syntax (chido-readtable-add-mixfix-operators stx)
+  (syntax-parse stx
+    [(_ start-readtable:expr
+        [name:id (~or (~optional (~seq #:layout layout-arg:id))
+                      (~optional (~seq #:precidence-greater-than [pgt:id ...]))
+                      (~optional (~seq #:precidence-less-than [plt:id ...]))
+                      (~optional (~seq #:associativity (~or assoc-arg:id #f))))
+                 ...]
+        ...)
+     #'(let loop ([rt start-readtable]
+                  [op-specs (list
+                             (list 'name
+                                   '(~? layout-arg required)
+                                   (~? '(pgt ...) '())
+                                   (~? '(plt ...) '())
+                                   '(~? assoc-arg #f))
+                             ...)])
+         (match op-specs
+           ['() rt]
+           [(list-rest (list op-name layout gts lts assoc) more)
+            (loop (chido-readtable-add-mixfix-operator
+                   rt
+                   op-name
+                   #:layout layout
+                   #:associativity assoc
+                   #:precidence-greater-than gts
+                   #:precidence-less-than lts)
+                  more)]))]))
+
+
+
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;;; Testing
 (module+ test
@@ -997,70 +1140,50 @@
                           (make-parse-failure "didn't match «<two>»")))))
 
   (define my-rt
-    (extend-chido-readtable
-     (extend-chido-readtable
-      (extend-chido-readtable
-       (extend-chido-readtable
-        (extend-chido-readtable
-         (extend-chido-readtable*
-          (chido-readtable-add-raw-string-parser
-           (chido-readtable-add-raw-string-parser
-            (chido-readtable-add-raw-string-parser
-             (chido-readtable-add-list-parser
-              (chido-readtable-add-list-parser
-               (chido-readtable-add-list-parser empty-chido-readtable "(" ")")
-               "[" "]")
-              "$(" ")" #:wrapper '#%dollar-paren)
-             "#|" "|#" #:readtable-add-type 'layout)
-            "<<" ">>")
-           "!!" "!!")
-          'terminating "##"
-          'terminating racket-style-string-parser
-          'nonterminating hash-t-parser
-          'nonterminating hash-f-parser
-          'terminating (make-quote-parser "'" 'quote)
-          'terminating (make-quote-parser "`" 'quasiquote)
-          'terminating (make-quote-parser (follow-filter "," "@") 'unquote)
-          'terminating (make-quote-parser ",@" 'unquote-splicing)
-          'terminating (make-quote-parser "#'" 'syntax)
-          'terminating (make-quote-parser "#`" 'quasisyntax)
-          'terminating (make-quote-parser (follow-filter "#," "@") 'unsyntax)
-          'terminating (make-quote-parser "#,@" 'unsyntax-splicing)
-          'terminating (make-keyword-parser "#:")
-          ;; two of these, to test that I'm getting sequences back properly
-          'nonterminating (make-<two>-parser)
-          'nonterminating (make-<two>-parser)
-          'nonterminating (make-<two/alt>-parser)
-          ;'nonterminating (make-bad-readtable-infix-operator "<+>")
-          'layout " "
-          'layout "\n"
-          'layout "\t"
-          'layout (make-quote-parser "#;" 'quote)
-          'layout (make-line-comment-parser ";")
-          )
-         'left-recursive-nonterminating (make-bad-readtable-infix-operator "<+>")
-         #:operator 'infix
-         #:associativity 'left
-         #:symbol-blacklist #t)
-        'left-recursive-nonterminating (make-bad-readtable-infix-operator "<^>")
-        #:operator 'infix
-        #:associativity 'right
-        #:symbol-blacklist #t
-        )
-       'left-recursive-nonterminating (make-bad-readtable-infix-operator "<*>")
-       #:operator 'infix
-       #:associativity 'left
-       #:precidence-greater-than '("<+>")
-       #:precidence-less-than '("<^>")
-       #:symbol-blacklist #t)
-      'left-recursive-nonterminating (make-bad-readtable-prefix-operator "<low-prefix>")
-      #:operator 'prefix
-      #:precidence-less-than '("<+>")
-      #:symbol-blacklist #t)
-     'left-recursive-nonterminating (make-bad-readtable-postfix-operator "<low-postfix>")
-     #:operator 'postfix
-     #:precidence-less-than '("<+>")
-     #:symbol-blacklist #t)
+    (extend-chido-readtable*
+     (chido-readtable-add-mixfix-operators
+      (chido-readtable-add-mixfix-operator
+       (chido-readtable-add-raw-string-parser
+        (chido-readtable-add-raw-string-parser
+         (chido-readtable-add-raw-string-parser
+          (chido-readtable-add-list-parser
+           (chido-readtable-add-list-parser
+            (chido-readtable-add-list-parser empty-chido-readtable "(" ")")
+            "[" "]")
+           "$(" ")" #:wrapper '#%dollar-paren)
+          "#|" "|#" #:readtable-add-type 'layout)
+         "<<" ">>")
+        "!!" "!!")
+       "_<+>_" #:associativity 'left)
+      [_<^>_ #:associativity right]
+      [_<*>_ #:associativity left
+             #:precidence-greater-than [<+>]
+             #:precidence-less-than [<^>]]
+      [<low-prefix>_ #:precidence-less-than [<+>]]
+      [_<low-postfix> #:precidence-less-than [<+>]])
+     'terminating "##"
+     'terminating racket-style-string-parser
+     'nonterminating hash-t-parser
+     'nonterminating hash-f-parser
+     'terminating (make-quote-parser "'" 'quote)
+     'terminating (make-quote-parser "`" 'quasiquote)
+     'terminating (make-quote-parser (follow-filter "," "@") 'unquote)
+     'terminating (make-quote-parser ",@" 'unquote-splicing)
+     'terminating (make-quote-parser "#'" 'syntax)
+     'terminating (make-quote-parser "#`" 'quasisyntax)
+     'terminating (make-quote-parser (follow-filter "#," "@") 'unsyntax)
+     'terminating (make-quote-parser "#,@" 'unsyntax-splicing)
+     'terminating (make-keyword-parser "#:")
+     ;; two of these, to test that I'm getting sequences back properly
+     'nonterminating (make-<two>-parser)
+     'nonterminating (make-<two>-parser)
+     'nonterminating (make-<two/alt>-parser)
+     'layout " "
+     'layout "\n"
+     'layout "\t"
+     'layout (make-quote-parser "#;" 'quote)
+     'layout (make-line-comment-parser ";")
+     )
     )
 
   (define (p* string parser)
@@ -1144,54 +1267,56 @@
 
    ;;; operators
    (check-equal? (p* "[() <+> ()]" r1)
-                 '[((#%readtable-infix <+> () ()))])
+                 '[((#%chido-readtable-infix-operator <+> () ()))])
    (check-equal? (p* "[() <+> () <+> ()]" r1)
-                 '[((#%readtable-infix <+> (#%readtable-infix <+> () ()) ()))])
+                 '[((#%chido-readtable-infix-operator
+                     <+> (#%chido-readtable-infix-operator <+> () ())
+                     ()))])
    (check-equal? (p* "[() <^> () <^> ()]" r1)
-                 '[((#%readtable-infix <^> () (#%readtable-infix <^> () ())))])
+                 '[((#%chido-readtable-infix-operator <^> () (#%chido-readtable-infix-operator <^> () ())))])
    (check-equal? (p* "[() <+> () <*> ()]" r1)
-                 '[((#%readtable-infix <+> () (#%readtable-infix <*> () ())))])
+                 '[((#%chido-readtable-infix-operator <+> () (#%chido-readtable-infix-operator <*> () ())))])
    (check-equal? (p* "[() <*> () <+> ()]" r1)
-                 '[((#%readtable-infix <+> (#%readtable-infix <*> () ()) ()))])
+                 '[((#%chido-readtable-infix-operator <+> (#%chido-readtable-infix-operator <*> () ()) ()))])
    (check-equal? (p* "[() <+> () <^> ()]" r1)
-                 '[((#%readtable-infix <+> () (#%readtable-infix <^> () ())))])
+                 '[((#%chido-readtable-infix-operator <+> () (#%chido-readtable-infix-operator <^> () ())))])
    (check-equal? (p* "[() <^> () <+> ()]" r1)
-                 '[((#%readtable-infix <+> (#%readtable-infix <^> () ()) ()))])
+                 '[((#%chido-readtable-infix-operator <+> (#%chido-readtable-infix-operator <^> () ()) ()))])
 
 
    (check-equal? (p* "[<low-prefix> a 1 2 3]" r1)
-                 '[((#%readtable-prefix <low-prefix> a) 1 2 3)])
+                 '[((#%chido-readtable-prefix-operator <low-prefix> a) 1 2 3)])
    (check-equal? (p* "[(testing 123) <+> (foo (bar))]" r1)
-                 '[((#%readtable-infix <+> (testing 123) (foo (bar))))])
+                 '[((#%chido-readtable-infix-operator <+> (testing 123) (foo (bar))))])
 
    (check-equal? (p* "[a <+> b 1 2 3]" r1)
-                 '[((#%readtable-infix <+> a b) 1 2 3)])
+                 '[((#%chido-readtable-infix-operator <+> a b) 1 2 3)])
    (check-equal? (p* "[a <low-postfix>]" r1)
-                 '[((#%readtable-postfix <low-postfix> a))])
+                 '[((#%chido-readtable-postfix-operator <low-postfix> a))])
    (check-equal? (p* "[1 <+> 2 <+> 3 <+> 4]" r1)
-                 '[((#%readtable-infix
+                 '[((#%chido-readtable-infix-operator
                      <+>
-                     (#%readtable-infix <+>
-                                        (#%readtable-infix <+> 1 2)
-                                        3)
+                     (#%chido-readtable-infix-operator <+>
+                                                       (#%chido-readtable-infix-operator <+> 1 2)
+                                                       3)
                      4))])
    (check-equal? (p* "[1 <+> 2 <*> 3]" r1)
-                 '[((#%readtable-infix <+> 1 (#%readtable-infix <*> 2 3)))])
+                 '[((#%chido-readtable-infix-operator <+> 1 (#%chido-readtable-infix-operator <*> 2 3)))])
    (check-equal? (p* "[1 <*> 2 <+> 3]" r1)
-                 '[((#%readtable-infix <+> (#%readtable-infix <*> 1 2) 3))])
+                 '[((#%chido-readtable-infix-operator <+> (#%chido-readtable-infix-operator <*> 1 2) 3))])
 
    ;;; operator deep precidence issue
    (check-equal? (p* "[#t <+> <low-prefix> #f <+> #t]" r1)
-                 '[((#%readtable-infix
+                 '[((#%chido-readtable-infix-operator
                      <+>
                      #t
-                     (#%readtable-prefix
-                      <low-prefix> (#%readtable-infix <+> #f #t))))])
+                     (#%chido-readtable-prefix-operator
+                      <low-prefix> (#%chido-readtable-infix-operator <+> #f #t))))])
    (check-equal? (p* "[#f <+> #t <low-postfix> <+> #f]" r1)
-                 '[((#%readtable-infix
+                 '[((#%chido-readtable-infix-operator
                      <+>
-                     (#%readtable-postfix
-                      <low-postfix> (#%readtable-infix <+> #f #t))
+                     (#%chido-readtable-postfix-operator
+                      <low-postfix> (#%chido-readtable-infix-operator <+> #f #t))
                      #f))])
 
    ;; check symbol blacklist that operators were added to
