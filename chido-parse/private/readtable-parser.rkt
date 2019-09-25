@@ -24,8 +24,16 @@
   [chido-readtable->layout+ (-> chido-readtable? any/c)]
   [set-chido-readtable-symbol-support (-> chido-readtable? any/c chido-readtable?)]
   [chido-readtable-symbol-support? (-> chido-readtable? boolean?)]
+  [chido-readtable-add-mixfix-operator
+   (->* (chido-readtable? (or/c symbol? string?))
+        (#:layout (or/c 'required 'optional 'none)
+         #:precidence-greater-than (listof any/c)
+         #:precidence-less-than (listof any/c)
+         #:associativity (or/c 'left 'right #f))
+        any/c)]
   )
  extend-chido-readtable*
+ chido-readtable-add-mixfix-operators
  current-chido-readtable
 
  ;; TODO - maybe not these?
