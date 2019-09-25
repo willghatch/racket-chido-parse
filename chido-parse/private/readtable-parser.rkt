@@ -18,6 +18,8 @@
   [chido-readtable->read1 (-> chido-readtable? any/c)]
   [chido-readtable->read1/layout (-> chido-readtable? any/c)]
   [chido-readtable->read* (-> chido-readtable? any/c)]
+  [set-chido-readtable-symbol-support (-> chido-readtable? any/c chido-readtable?)]
+  [chido-readtable-symbol-support? (-> chido-readtable? boolean?)]
   )
  extend-chido-readtable*
  current-chido-readtable
@@ -68,6 +70,7 @@
 
    ;;; operator info
 
+   ;; TODO - add numeric precidence in addition to relative precidence.  Then users can choose one way or the other.  If both are used, make them separate -- IE compare precidence based on lattice and based on number, don't make the number operator transitive with the lattice operator.  Maybe also error if there is a relationship both ways?  Or maybe error when a readtable has both numeric and relative precidence?
    ;; TODO - the current design makes all precidence relationships transitive.  Maybe both transitive and intransitive relationships should be allowed?
    ;; hash from parser to set of parsers that are immediately above the key parser in the precidence lattice
    precidence-immediate-greater-relations
@@ -293,6 +296,11 @@
     [(list) rt]
     [else (error 'extend-chido-readtable* "bad number of arguments")]))
 
+(define (set-chido-readtable-symbol-support rt bool)
+  (struct-copy chido-readtable rt
+               [symbol-support? (not (not bool))]
+               [flush-state? #t]))
+
 (define (parser-list->trie parsers)
   (for/fold ([t empty-trie])
             ([p parsers])
@@ -357,14 +365,16 @@
            ([current-chido-readtable rt])
            (define parsers-result (parse* port alt))
            (define symbol-result
-             (if (parse-failure? parsers-result)
-                 (let ([symbol-result
-                        (parse* port (chido-readtable-symbol-parser rt))])
-                   (if (parse-failure? symbol-result)
-                       ;; TODO - I want a failure that encapsulates the symbol AND parsers results
-                       parsers-result
-                       symbol-result))
-                 parsers-result))
+             (cond
+               [(not (chido-readtable-symbol-support? rt)) parsers-result]
+               [(parse-failure? parsers-result)
+                (let ([symbol-result
+                       (parse* port (chido-readtable-symbol-parser rt))])
+                  (if (parse-failure? symbol-result)
+                      ;; TODO - I want a failure that encapsulates the symbol AND parsers results
+                      parsers-result
+                      symbol-result))]
+               [else parsers-result]))
            ;; TODO - use a stream-append that preserves failures!!
            (parse-stream-cons
             symbol-result
@@ -1056,6 +1066,8 @@
                    r)))))
 
   (define r1 (chido-readtable->read1 my-rt))
+  (define r1/no-symbol
+    (chido-readtable->read1 (set-chido-readtable-symbol-support my-rt #f)))
 
   (chido-parse-parameterize
    ([current-chido-readtable my-rt])
@@ -1085,7 +1097,7 @@
                  '((testing)))
    (check-equal? (p* "( testing )" r1)
                  '((testing)))
-   (define s1 "(hello ( goodbye () ( ( ) ) ) aoeu aoeu ( aardvark   ))")
+   (define s1 "(hello ( goodbye () ( ( ) ) ) bandicoot kangaroo ( aardvark   ))")
    (check-equal? (p* s1 r1)
                  (list (read (open-input-string s1))))
    (check-equal? (p* "\"testing 123\"" r1)
@@ -1176,6 +1188,11 @@
    ;; check symbol blacklist that operators were added to
    (check-pred parse-failure?
                (p* "<+>" r1))
+
+   (check-equal? (p* "some-symbol" r1)
+                 '[some-symbol])
+   (check-pred parse-failure?
+               (p* "some-symbol" r1/no-symbol))
 
 
    #|
