@@ -22,6 +22,7 @@ but I need to capture them and re-parameterize them with result streams too, or
 later elements in the streams will get different parameterizations.
 |#
 (define-syntax (parse-stream-cons stx)
+  ;; TODO - I want stream-cons to track failures!
   (syntax-parse stx
     [(_ head:expr tail:expr)
      #'(let* ([cp-params (current-chido-parse-parameters)]
