@@ -1113,8 +1113,8 @@
    ;; If the left and right delimiters are the same, a raw string is not nestable.
    (check-equal? (p* "(this (is !!a test !!of raw!! string!!) reading)" r1)
                  '((this (is "a test " of raw " string") reading)))
-   ;; TODO - this one has an interesting error that I want to get to later...
-   ;(p* "   \n   " (chido-readtable-layout*-parser my-rt))
+   ;; this one had a weird error at one point.  I'm not sure what it was, but I'm leaving this here.
+   (check-not-exn (λ () (p* "   \n   " (chido-readtable-layout*-parser my-rt))))
 
    (check-equal? (p* "(hello `(foo ,bar ,(#:testing #t #f #;(quoted #t))))" r1)
                  '((hello `(foo ,bar ,(#:testing #t #f)))))
