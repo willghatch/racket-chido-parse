@@ -76,6 +76,8 @@
    postfix-operators
    ;; dict of binary operator to its associativity
    infix-operator->associativity
+   ;; dict of operator names to the parser objects
+   operator-name->operator
 
 
    ;; Basically these are cached results
@@ -136,6 +138,8 @@
    ;; postfix-operators
    '()
    ;; infix-operator->associativity
+   (hash)
+   ;; operator-name->operator
    (hash)
 
    ;;; cached stuff
@@ -223,6 +227,16 @@
                     [symbol-blacklist (append (map ->symbol strsym)
                                               (chido-readtable-symbol-blacklist
                                                pre-blacklist))])]))
+
+  (define op-name->op
+    (chido-readtable-operator-name->operator pre-op))
+  (define (op-resolve op-or-name)
+    (define err (λ () (error 'extend-chido-readtable
+                             "bad operator name: ~v\n" op-or-name)))
+    (cond [(string? op-or-name) (dict-ref op-name->op op-or-name err)]
+          [(parser? op-or-name) op-or-name]
+          [else (err)]))
+
   (if operator
       (struct-copy
        chido-readtable
@@ -247,12 +261,14 @@
         (dict-set
          (chido-readtable-precidence-immediate-greater-relations rt)
          parser
-         precidence-greater-than)]
+         (map op-resolve precidence-less-than))]
        [precidence-immediate-lesser-relations
         (dict-set
          (chido-readtable-precidence-immediate-lesser-relations rt)
          parser
-         precidence-less-than)])
+         (map op-resolve precidence-greater-than))]
+       [operator-name->operator
+        (dict-set op-name->op (parser-name parser) parser)])
       pre-op))
 
 (define (extend-chido-readtable* rt . args)
@@ -547,6 +563,8 @@
   (define dparser (parse-derivation-parser derivation))
   (define lderiv (parse-derivation-left-most-subderivation derivation))
   (define rderiv (parse-derivation-right-most-subderivation derivation))
+  (define ldparser (parse-derivation-parser lderiv))
+  (define rdparser (parse-derivation-parser rderiv))
   (define filter-out?
     (or
      ;; associativity violation
@@ -556,12 +574,24 @@
        ['right (parse-derivation-parser? lderiv dparser)]
        [#f (or (parse-derivation-parser? lderiv dparser)
                (parse-derivation-parser? rderiv dparser))])
+
      ;; direct precidence violation
      ;; IE low-priority binary operator on either side
-     (or (and (infix-operator? readtab (parse-derivation-parser lderiv))
-              (operator-priority-< readtab (parse-derivation-parser lderiv) dparser))
-         (and (infix-operator? readtab (parse-derivation-parser rderiv))
-              (operator-priority-< readtab (parse-derivation-parser rderiv) dparser)))
+     (or (and (infix-operator? readtab ldparser)
+              (operator-priority-< readtab ldparser dparser))
+         (and (infix-operator? readtab rdparser)
+              (operator-priority-< readtab rdparser dparser)))
+
+     ;; direct precidence violation by non-relation
+     ;; IE operators don't have a relationship.
+     ;; TODO - this code is wrong, because it includes equal precidence...
+     #;(or (and (infix-operator? readtab ldparser)
+              (not (operator-priority-< readtab ldparser dparser))
+              (not (operator-priority-< readtab dparser ldparser)))
+         (and (infix-operator? readtab rdparser)
+              (not (operator-priority-< readtab rdparser dparser))
+              (not (operator-priority-< readtab dparser rdparser))))
+
      ;; deep precidence violation
      ;; IE
      ;; * low-priority prefix operator on right of left side, recursively
@@ -589,6 +619,7 @@
                (operator-priority-< readtab
                                     (parse-derivation-parser left-of-right)
                                     dparser)))))))
+
   (not filter-out?))
 
 
@@ -860,13 +891,6 @@
    #:name op-string
    current-readtable-read1-parser
    current-readtable-layout*-parser
-   #;(proc-parser "" (λ (port)
-                     (eprintf "in op-string parser for infix: ~s\n" op-string)
-                     (eprintf "at string: ~s\n" (peek-string 3 0 port))
-                     (define result
-                       (parse* port op-string))
-                     (eprintf "parse-result: ~s\n" result)
-                     result))
    op-string
    current-readtable-layout*-parser
    current-readtable-read1-parser
@@ -884,13 +908,6 @@
   (sequence
    #:name op-string
    op-string
-   #;(proc-parser "" (λ (port)
-                     (eprintf "in op-string parser for prefix: ~s\n" op-string)
-                     (eprintf "at string: ~s\n" (peek-string 3 0 port))
-                     (define result
-                       (parse* port op-string))
-                     (eprintf "parse-result: ~s\n" result)
-                     result))
    current-readtable-layout*-parser
    current-readtable-read1-parser
    #:derive (λ derivations
@@ -907,13 +924,6 @@
    current-readtable-read1-parser
    current-readtable-layout*-parser
    op-string
-   #;(proc-parser "" (λ (port)
-                     (eprintf "in op-string parser for postfix: ~s\n" op-string)
-                     (eprintf "at string: ~s\n" (peek-string 3 0 port))
-                     (define result
-                       (parse* port op-string))
-                     (eprintf "parse-result: ~s\n" result)
-                     result))
    #:derive (λ derivations
               (make-parse-derivation
                (λ (line col pos end-pos derivations)
@@ -1091,22 +1101,32 @@
                  '[(a "<two/alt>" b) (a "<two/alt>" b)])
 
    ;;; operators
-   (eprintf "\n\n--------------------------------------- before relevant test ----------\n")
    (check-equal? (p* "[() <+> ()]" r1)
                  '[((#%readtable-infix <+> () ()))])
    (check-equal? (p* "[() <+> () <+> ()]" r1)
                  '[((#%readtable-infix <+> (#%readtable-infix <+> () ()) ()))])
    (check-equal? (p* "[() <^> () <^> ()]" r1)
                  '[((#%readtable-infix <^> () (#%readtable-infix <^> () ())))])
-   ;;; TODO - this will fail until I fix the issue with symbols only parsing AFTER all other parsers have failed
+   (check-equal? (p* "[() <+> () <*> ()]" r1)
+                 '[((#%readtable-infix <+> () (#%readtable-infix <*> () ())))])
+   (check-equal? (p* "[() <*> () <+> ()]" r1)
+                 '[((#%readtable-infix <+> (#%readtable-infix <*> () ()) ()))])
+   (check-equal? (p* "[() <+> () <^> ()]" r1)
+                 '[((#%readtable-infix <+> () (#%readtable-infix <^> () ())))])
+   (check-equal? (p* "[() <^> () <+> ()]" r1)
+                 '[((#%readtable-infix <+> (#%readtable-infix <^> () ()) ()))])
+
+
+   (check-equal? (p* "[<low-prefix> a 1 2 3]" r1)
+                 '[((#%readtable-prefix <low-prefix> a) 1 2 3)])
+   (check-equal? (p* "[(testing 123) <+> (foo (bar))]" r1)
+                 '[((#%readtable-infix <+> (testing 123) (foo (bar))))])
+
+   ;;; TODO - these will fail until I fix the issue with symbols only parsing AFTER all other parsers have failed
    ;(check-equal? (p* "[a <+> b 1 2 3]" r1)
    ;              '[((#%readtable-infix <+> a b)) 1 2 3])
-   ;(check-equal? (p* "[<low-prefix> a 1 2 3]" r1)
-   ;              '[((#%readtable-prefix <low-prefix> a)) 1 2 3])
    ;(check-equal? (p* "[a <low-postfix>]" r1)
    ;              '[(#%readtable-postfix <low-postfix> a)])
-   ;(check-equal? (p* "[(testing 123) <+> (foo (bar))]" r1)
-   ;              '[(#%readtable-infix <+> (testing 123) (foo (bar)))])
    ;(check-equal? (p* "[1 <+> 2 <+> 3 <+> 4]" r1)
    ;              '[(#%readtable-infix
    ;                 <+> 1
@@ -1115,15 +1135,21 @@
    ;              '[(#%readtable-infix <+> 1 (#%readtable-infix <*> 2 3))])
    ;(check-equal? (p* "[1 <*> 2 <+> 3]" r1)
    ;              '[(#%readtable-infix <+> (#%readtable-infix <*> 1 2) 3)])
+
+   (eprintf "\n\n----before relevant tests----\n\n")
    ;;; operator deep precidence issue
-   ;(check-equal? (p* "[1 <+> <low-prefix> 2 <+> 3]" r1)
+   ;(check-equal? (p* "[#t <+> <low-prefix> #f <+> #t]" r1)
    ;              '[(#%readtable-infix
-   ;                 <+> (#%readtable-prefix
-   ;                      <low-prefix> (#%readtable-infix <+> 2 3)))])
-   ;(check-equal? (p* "[1 <+> 2 <low-postfix> <+> 3]" r1)
-   ;              '[(#%readtable-infix
-   ;                 <+> (#%readtable-postfix
-   ;                      <low-postfix> (#%readtable-prefix <+> 1 2)) 3)])
+   ;                 <+>
+   ;                 #t
+   ;                 (#%readtable-prefix
+   ;                  <low-prefix> (#%readtable-infix <+> #f #t)))])
+   (check-equal? (p* "[#f <+> #t <low-postfix> <+> #f]" r1)
+                 '[(#%readtable-infix
+                    <+>
+                    (#%readtable-postfix
+                     <low-postfix> (#%readtable-prefix <+> #f #t))
+                    #f)])
 
    ;; check symbol blacklist that operators were added to
    (check-pred parse-failure?
