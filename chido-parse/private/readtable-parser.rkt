@@ -18,6 +18,10 @@
   [chido-readtable->read1 (-> chido-readtable? any/c)]
   [chido-readtable->read1/layout (-> chido-readtable? any/c)]
   [chido-readtable->read* (-> chido-readtable? any/c)]
+  [chido-readtable->read+ (-> chido-readtable? any/c)]
+  [chido-readtable->layout1 (-> chido-readtable? any/c)]
+  [chido-readtable->layout* (-> chido-readtable? any/c)]
+  [chido-readtable->layout+ (-> chido-readtable? any/c)]
   [set-chido-readtable-symbol-support (-> chido-readtable? any/c chido-readtable?)]
   [chido-readtable-symbol-support? (-> chido-readtable? boolean?)]
   )
@@ -95,10 +99,13 @@
 
    ;; These exist to ensure parsers created with chido-readtable are always eq?
    [symbol-parser #:mutable]
+   [layout1-parser #:mutable]
    [layout*-parser #:mutable]
+   [layout+-parser #:mutable]
    [read1-parser #:mutable]
    [layout*+read1-parser #:mutable]
    [read*-parser #:mutable]
+   [read+-parser #:mutable]
 
    ;; To cache precidence lattice traversal and cycle detection
    [precidence-transitive-greater-relations #:mutable]
@@ -158,11 +165,7 @@
    empty-trie
    empty-trie
    ;; parsers
-   #f
-   #f
-   #f
-   #f
-   #f
+   #f #f #f #f #f #f #f #f
    ;; precidence-transitive-greater-relations
    (hash)
    ))
@@ -339,9 +342,16 @@
     (set-chido-readtable-layout-trie!
      rt
      (parser-list->trie (chido-readtable-layout-parsers rt)))
+    (set-chido-readtable-layout1-parser!
+     rt (make-alt-parser "chido-readtable-layout1"
+                         (chido-readtable-layout-parsers rt)))
     (set-chido-readtable-layout*-parser!
-     rt (kleene-star (make-alt-parser "chido-readtable-layout"
-                                      (chido-readtable-layout-parsers rt))
+     rt (kleene-star (chido-readtable-layout1-parser rt)
+                     #:derive (λ (elems) (make-parse-derivation
+                                          '() #:derivations elems))
+                     #:greedy? #t))
+    (set-chido-readtable-layout+-parser!
+     rt (kleene-plus (chido-readtable-layout1-parser rt)
                      #:derive (λ (elems) (make-parse-derivation
                                           '() #:derivations elems))
                      #:greedy? #t))
@@ -396,19 +406,21 @@
                   (λ (line col pos end-pos derivations)
                     (parse-derivation-result (second derivations)))
                   #:derivations derivations))))
-    (set-chido-readtable-read*-parser!
-     rt
-     (let ([with-content-parser
-             (sequence
-              (kleene-plus (chido-readtable-layout*+read1-parser rt) #:greedy? #t)
-              (chido-readtable-layout*-parser rt)
-              #:derive (λ derivations
-                         (make-parse-derivation
-                          (λ (line col pos end-pos derivations)
-                            (parse-derivation-result (first derivations)))
-                          #:derivations derivations)))]
-           [no-content-parser (chido-readtable-layout*-parser rt)])
-       ;; TODO - better name!
+
+    (let ([with-content-parser
+            (sequence
+             #:name "chido-readtable-read+"
+             (kleene-plus (chido-readtable-layout*+read1-parser rt) #:greedy? #t)
+             (chido-readtable-layout*-parser rt)
+             #:derive (λ derivations
+                        (make-parse-derivation
+                         (λ (line col pos end-pos derivations)
+                           (parse-derivation-result (first derivations)))
+                         #:derivations derivations)))]
+          [no-content-parser (chido-readtable-layout*-parser rt)])
+      (set-chido-readtable-read+-parser! rt with-content-parser)
+      (set-chido-readtable-read*-parser!
+       rt
        (make-alt-parser "chido-readtable-read*"
                         (list with-content-parser no-content-parser))))
 
@@ -554,21 +566,18 @@
                #:use-port? #f))
 
 
-(define (chido-readtable->read1 rt)
+(define ((cached-access accessor) rt)
   (chido-readtable-populate-cache! rt)
-  (chido-readtable-read1-parser rt))
-(define (chido-readtable->read* rt)
-  (chido-readtable-populate-cache! rt)
-  (chido-readtable-read*-parser rt))
-(define (chido-readtable->read1/layout rt)
-  (chido-readtable-populate-cache! rt)
-  (chido-readtable-layout*+read1-parser rt))
-(define (chido-readtable->symbol rt)
-  (chido-readtable-populate-cache! rt)
-  (chido-readtable-symbol-parser rt))
-(define (chido-readtable->layout* rt)
-  (chido-readtable-populate-cache! rt)
-  (chido-readtable-layout*-parser rt))
+  (accessor rt))
+(define chido-readtable->symbol (cached-access chido-readtable-symbol-parser))
+(define chido-readtable->layout1 (cached-access chido-readtable-layout1-parser))
+(define chido-readtable->layout* (cached-access chido-readtable-layout*-parser))
+(define chido-readtable->layout+ (cached-access chido-readtable-layout+-parser))
+(define chido-readtable->read1 (cached-access chido-readtable-read1-parser))
+(define chido-readtable->read* (cached-access chido-readtable-read*-parser))
+(define chido-readtable->read+ (cached-access chido-readtable-read+-parser))
+(define chido-readtable->read1/layout
+  (cached-access chido-readtable-layout*+read1-parser))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;;; Operator Stuff
@@ -1196,9 +1205,10 @@
 
 
    #|
-   TODO - test operators
-   * test that the operator names can't be read as a symbol
+   TODO - operators
+   * decide a better interface for adding operators
    ** maybe I should have an operator adding macro that does this conveniently -- eg. add mixfix, that allows holes for current-readtable and strings for the operator part names.  The whole parser name will be op_part_with_holes, leaving out pre and post underscores.  But each part of the mixfix operator will be added to the symbol blacklist.
+   * Make some sort of whitespace-inserting sequence combinator.  Maybe there should be a more generic current-layout-parser that the readtable should use.  Or maybe it should be a readtable-specific combinator?
 
    * What about space requirements around operators, and whether they should be terminating, nonterminating, or soft-terminating?  Or whether the characters themselves should be disallowed in symbols?
    ** I think they should generally be nonterminating and have no requirements about the characters not being IN symbols.  In such restrictive languages maybe you just make a symbol parser and rely on this readtable implementation just for its operator handling, and turn off its automatic symbol parsing.
