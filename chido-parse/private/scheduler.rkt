@@ -42,7 +42,7 @@
  get-counts!
 
  parse*
- parse/direct-recursive
+ parse-direct
  #;(contract-out
   [parse* (->* (input-port? parser?)
                (#:args (listof any/c)
@@ -1129,7 +1129,7 @@ But I still need to encapsulate the port and give a start position.
                 #:start [start #f])
   (parse-inner enter-the-parser port/pbw parser start))
 
-(define (parse/direct-recursive port parser
+(define (parse-direct port parser
                                 #:start [start #f])
   ;; This one lets the user get a single result back, but the return is actually a stream.
   (define (direct-recursive-parse-core port/pbw parser start)
@@ -1196,8 +1196,8 @@ TODO
 
 
   (define (Aa-parser-proc/direct port)
-    (define d/A (parse/direct-recursive port (get-A-parser/direct)))
-    (define d/a (parse/direct-recursive port a1-parser-obj #:start d/A))
+    (define d/A (parse-direct port (get-A-parser/direct)))
+    (define d/a (parse-direct port a1-parser-obj #:start d/A))
     (make-parse-derivation (λ args (string-append (parse-derivation-result! d/A)
                                                   (parse-derivation-result! d/a)))
                            #:derivations (list d/A d/a)))
