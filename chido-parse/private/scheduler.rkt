@@ -196,7 +196,8 @@
   (prefix procedure preserve-prefix? promise-no-left-recursion? use-port?)
   #:transparent)
 (define (make-proc-parser
-         prefix proc
+         proc
+         #:prefix [prefix ""]
          #:name [name (format "~a" (object-name proc))]
          #:preserve-prefix? [preserve-prefix? #f]
          #:promise-no-left-recursion? [promise-no-left-recursion? #f]
@@ -1169,7 +1170,7 @@ TODO
                                #:end (add1 pos)
                                #:derivations '())
         (make-parse-failure "Didn't match.")))
-  (define a1-parser-obj (make-proc-parser #:name "a" "" a1-parser-proc))
+  (define a1-parser-obj (make-proc-parser #:name "a" #:prefix "" a1-parser-proc))
 
   (define (Aa-parser-proc port)
     (for/parse
@@ -1181,7 +1182,7 @@ TODO
                                                     (parse-derivation-result! d/a)))
                              #:derivations (list d/A d/a)))))
 
-  (define Aa-parser-obj (make-proc-parser #:name "Aa" "" Aa-parser-proc))
+  (define Aa-parser-obj (make-proc-parser #:name "Aa" #:prefix "" Aa-parser-proc))
 
 
   (define A-parser (make-alt-parser "A"
@@ -1202,7 +1203,7 @@ TODO
                                                   (parse-derivation-result! d/a)))
                            #:derivations (list d/A d/a)))
   (define Aa-parser-obj/direct
-    (make-proc-parser #:name "Aa" "" Aa-parser-proc/direct))
+    (make-proc-parser #:name "Aa" #:prefix "" Aa-parser-proc/direct))
   (define A-parser/direct (make-alt-parser "A"
                                            (list
                                             Aa-parser-obj/direct

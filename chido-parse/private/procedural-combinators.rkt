@@ -97,7 +97,7 @@ I need to re-think the derivation result interface for all these combinators.
                                                           (car derivations)))])
                              (rec (cdr parsers) (cons result derivations)))]))
     (rec parsers '()))
-  (proc-parser #:name use-name prefix proc
+  (proc-parser #:name use-name #:prefix prefix proc
                #:promise-no-left-recursion? (not l-r)
                #:preserve-prefix? #t
                #:use-port? #f))
@@ -151,7 +151,7 @@ I need to re-think the derivation result interface for all these combinators.
                                          empty-stream
                                          (get-more-streams derivations)))]))
     (rec '()))
-  (proc-parser #:name use-name "" proc
+  (proc-parser #:name use-name proc
                #:promise-no-left-recursion?
                (not (parser-potentially-left-recursive? parser))
                #:use-port? #f))
@@ -195,7 +195,6 @@ I need to re-think the derivation result interface for all these combinators.
 (define (epsilon-parser #:name [name "epsilon"]
                         #:result [result #f])
   (proc-parser #:name name
-               ""
                (λ (p)
                  (make-parse-derivation result
                                         #:end (port-broker-start-position p)))
@@ -204,7 +203,6 @@ I need to re-think the derivation result interface for all these combinators.
 
 (define eof-parser
   (proc-parser #:name "eof"
-               ""
                (λ (pb)
                  (define pos (port-broker-start-position pb))
                  (define c (port-broker-char pb pos))
@@ -220,7 +218,6 @@ I need to re-think the derivation result interface for all these combinators.
                     #:name [name (format "not_~a" (parser-name parser))]
                     #:result [result #f])
   (proc-parser #:name name
-               ""
                (λ (p)
                  (define inner-result (parse* p parser))
                  (define-values (line col pos) (port-next-location p))
@@ -262,11 +259,11 @@ I need to re-think the derivation result interface for all these combinators.
                                          #:start d)])
                             (combiner
                              (cons d (parse-derivation-derivation-list d2))))))))
-  (proc-parser #:name use-name "" proc))
+  (proc-parser #:name use-name proc))
 
 (define (wrap-derivation parser wrap-func #:name [name #f])
   (proc-parser #:name (or name (parser-name parser))
-               (parser-prefix parser)
+               #:prefix (parser-prefix parser)
                (λ (port)
                  (define s (parse* port parser))
                  (if (parse-failure? s)
@@ -302,7 +299,6 @@ I need to re-think the derivation result interface for all these combinators.
         (make-parse-failure failure-message #:position pos)))
   (define failure-message (format "Didn't match regexp: ~a" (or name rx)))
   (proc-parser #:name (or name (format "~a" rx))
-               ""
                (λ (p) (parse-regexp p rx failure-message))
                #:promise-no-left-recursion? #t))
 
@@ -403,7 +399,7 @@ I need to re-think the derivation result interface for all these combinators.
                  (make-parse-derivation c #:end (port->pos port))))
           (make-parse-failure "not whitespace"))))
   (define whitespace-char-parser
-    (proc-parser #:name "whitespace-char" "" whitespace-char-func))
+    (proc-parser #:name "whitespace-char" whitespace-char-func))
 
   (define symbol-char-func
     (λ (port)
@@ -415,7 +411,7 @@ I need to re-think the derivation result interface for all these combinators.
           (make-parse-failure "not symbol char"))))
 
   (define symbol-char-parser (proc-parser #:name "symbol-char"
-                                          "" symbol-char-func))
+                                          symbol-char-func))
   (define symbol-parser (kleene-plus symbol-char-parser
                                      #:name "symbol"
                                      #:result (λ (chars)
@@ -492,11 +488,11 @@ I need to re-think the derivation result interface for all these combinators.
 
   ;; check that sequences handle internal ambiguity properly
   (define (make-a-parser)
-    (proc-parser "" (λ (port)
-                      (define s (read-string 1 port))
-                      (if (equal? s "a")
-                          (make-parse-derivation s #:end (port->pos port))
-                          (make-parse-failure "didn't match «a»")))))
+    (proc-parser (λ (port)
+                   (define s (read-string 1 port))
+                   (if (equal? s "a")
+                       (make-parse-derivation s #:end (port->pos port))
+                       (make-parse-failure "didn't match «a»")))))
   (define two-a-parser
     (make-alt-parser "two-a" (list (make-a-parser) (make-a-parser))))
   (c check-equal?
@@ -541,7 +537,7 @@ TODO - what kind of filters do I need?
                       #:replace-result? [replace-result? #f])
   (proc-parser
    #:name (format "~a/filtered" (parser-name parser))
-   (parser-prefix parser)
+   #:prefix (parser-prefix parser)
    (λ (port)
      (define (rec results failures had-success?)
        (cond [(and (parse-failure? results) (null? failures)) results]

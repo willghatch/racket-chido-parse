@@ -374,7 +374,6 @@
      ;; TODO - better name!
      (proc-parser
       #:name "chido-readtable-read1"
-      ""
       (let* ([parsers (append
                        nonterminating/wrap
                        soft-terminating/wrap
@@ -575,7 +574,7 @@
        (make-parse-derivation result-func #:end (+ start-pos span)))]))
 
 (define (symbol/number-parser rt)
-  (proc-parser #:name "symbol/number-parser" "" (parse-symbol/number-func rt)
+  (proc-parser #:name "symbol/number-parser" (parse-symbol/number-func rt)
                #:promise-no-left-recursion? #t
                #:use-port? #f))
 
@@ -722,7 +721,6 @@
          )
   (define (inner-parser)
     (proc-parser #:name (format "list-inner-parser-~a-~a" left right)
-                 ""
                  (λ (port)
                    (define inner-rt (current-chido-readtable))
                    (parse* port (chido-readtable->read* inner-rt)))
@@ -755,7 +753,7 @@
 
   (define right-parser
     (proc-parser #:name (format "trailing-right-delimiter_~a" right)
-                 right
+                 #:prefix right
                  (λ (port) (make-parse-failure
                             (format "Trailing right delimiter: ~a"
                                     right)))
@@ -768,7 +766,7 @@
 
 (define racket-style-string-parser
   (proc-parser #:name "racket-style-string-parser"
-               "\""
+               #:prefix "\""
                (λ (port)
                  (define r (read-syntax (object-name port) port))
                  (define-values (line col pos) (port-next-location port))
@@ -789,7 +787,6 @@
 
 (define post-quote-read-1
   (proc-parser
-   ""
    (λ (port)
      (parse* port (chido-readtable->read1/layout (current-chido-readtable))))))
 
@@ -810,7 +807,7 @@
 
 (define (make-line-comment-parser prefix)
   (proc-parser
-   prefix
+   #:prefix prefix
    (λ (port)
      (let loop ()
        (define c (peek-char port))
@@ -824,7 +821,6 @@
   (sequence #:name "keyword"
             prefix
             (proc-parser
-             ""
              (λ (port) (parse* port (chido-readtable->symbol
                                      (current-chido-readtable)))))
             #:derive (λ derivations
@@ -843,7 +839,7 @@
 (define (make-raw-string-parser l-delim r-delim #:wrapper [wrapper #f])
   (proc-parser
    #:name "raw-string"
-   l-delim
+   #:prefix l-delim
    (λ (port)
      (define the-string
        (let loop ([current-depth 1]
@@ -916,7 +912,7 @@
          )
   (define right-parser
     (proc-parser #:name (format "trailing-right-delimiter_~a" right)
-                 right
+                 #:prefix right
                  (λ (port) (make-parse-failure
                             (format "Trailing right delimiter: ~a"
                                     right)))
@@ -930,19 +926,16 @@
 (define current-readtable-read1-parser
   (proc-parser
    #:name "current-readtable-read1-parser"
-   ""
    (λ (port) (parse* port (chido-readtable->read1
                            (current-chido-readtable))))))
 (define current-readtable-layout*-parser
   (proc-parser
    #:name "current-readtable-layout*-parser"
-   ""
    (λ (port) (parse* port (chido-readtable->layout*
                            (current-chido-readtable))))))
 (define current-readtable-layout+-parser
   (proc-parser
    #:name "current-readtable-layout+-parser"
-   ""
    (λ (port) (parse* port (chido-readtable->layout+
                            (current-chido-readtable))))))
 
@@ -1084,21 +1077,21 @@
   (require rackunit)
   (require racket/stream)
   (define (make-<two>-parser)
-    (proc-parser "" (λ (port)
-                      (define s (read-string 5 port))
-                      (define-values (line col pos) (port-next-location port))
-                      (if (equal? s "<two>")
-                          (make-parse-derivation s #:end pos)
-                          (make-parse-failure "didn't match «<two>»")))))
+    (proc-parser (λ (port)
+                   (define s (read-string 5 port))
+                   (define-values (line col pos) (port-next-location port))
+                   (if (equal? s "<two>")
+                       (make-parse-derivation s #:end pos)
+                       (make-parse-failure "didn't match «<two>»")))))
   (define (make-<two/alt>-parser)
-    (proc-parser "" (λ (port)
-                      (define s (read-string 9 port))
-                      (define-values (line col pos) (port-next-location port))
-                      (if (equal? s "<two/alt>")
-                          (stream-cons (make-parse-derivation s #:end pos)
-                                       (stream-cons (make-parse-derivation s #:end pos)
-                                                    empty-stream))
-                          (make-parse-failure "didn't match «<two>»")))))
+    (proc-parser (λ (port)
+                   (define s (read-string 9 port))
+                   (define-values (line col pos) (port-next-location port))
+                   (if (equal? s "<two/alt>")
+                       (stream-cons (make-parse-derivation s #:end pos)
+                                    (stream-cons (make-parse-derivation s #:end pos)
+                                                 empty-stream))
+                       (make-parse-failure "didn't match «<two>»")))))
 
   (define my-rt
     (extend-chido-readtable*
