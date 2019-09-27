@@ -278,12 +278,12 @@
         ;; Usually I want to cache thunk results, but some, including chido-parse-parameters, specifically need NOT to be cached (at least not merely on procedure object identity), because they depend on chido-parse-parameterization.
         [(non-cached-parser-thunk? p) (parser->usable (p))]
         [(chido-parse-parameter? p) (parser->usable (p))]
-        [(procedure? p)
+        [(and (procedure? p) (procedure-arity-includes? p 0))
          (define cached (hash-ref parser-cache p #f))
-         (or cached
-             (let ([result (parser->usable (p))])
+         (or (and cached (parser->usable cached))
+             (let ([result (p)])
                (hash-set! parser-cache p result)
-               result))]
+               (parser->usable result)))]
         [else (error 'chido-parse "not a parser: ~s" p)]))
 
 (struct parse-stream

@@ -102,6 +102,40 @@ I need to re-think the derivation result interface for all these combinators.
                #:preserve-prefix? #t
                #:use-port? #f))
 
+(begin-for-syntax
+  (define-syntax-class binding-sequence-part
+    (pattern [#:bind name:id parser:expr])
+    (pattern parser:expr #:attr name #f)))
+(define-syntax (binding-sequence-helper stx)
+  (syntax-parse stx
+    [(_ port derive [done-int-names ...]
+        [internal-name:id part:binding-sequence-part]
+        rest ...)
+     #'(begin (define internal-name (parse-direct port part.parser))
+              (~? (define part.name internal-name) (void))
+              (binding-sequence-helper port
+                                       derive
+                                       [done-int-names ... internal-name]
+                                       rest ...))]
+    [(_ port derive [done-int-names ...])
+     #'(apply derive (list done-int-names ...))]))
+(define-syntax (binding-sequence stx)
+  (syntax-parse stx
+    [(_ part:binding-sequence-part ...
+        (~or (~optional (~seq #:derive derive-arg:expr)))
+        ...)
+     (with-syntax ([(internal-name ...) (generate-temporaries #'(part ...))])
+       #'(proc-parser #:name "TODO-binding-seq-name"
+                      ;; TODO - other optional args
+                      (λ (port)
+                        (binding-sequence-helper
+                         port (~? derive-arg (λ args (make-parse-derivation
+                                                      (λ (line col start end ds)
+                                                        (map parse-derivation-result
+                                                             ds))
+                                                      #:derivations args))) []
+                         [internal-name part] ...))))]))
+
 (define (repetition #:name [name #f]
                     #:derive [derive #f]
                     #:result [make-result #f]
@@ -503,6 +537,32 @@ I need to re-think the derivation result interface for all these combinators.
                              #:result (λ (r1 r2) (string-append r1 r2))))))
      '("ab" "ab"))
 
+
+  (check-equal? (map parse-derivation-result
+                     (stream->list (parse* (open-input-string "ab")
+                                           (binding-sequence "a" "b"))))
+                '(("a" "b")))
+
+  (check-equal? (map parse-derivation-result
+                     (stream->list (parse* (open-input-string "ab")
+                                           (binding-sequence [#:bind a1 "a"] "b"))))
+                '(("a" "b")))
+
+  (define bseq-a-not-a-parser
+    (binding-sequence [#:bind a1 "a"]
+                      (parse-filter (proc-parser (λ (port)
+                                                   (make-parse-derivation
+                                                    (read-string 1 port)
+                                                    #:end (port->pos port))))
+                                    (λ (port derivation)
+                                      (not (equal?
+                                            (parse-derivation-result a1)
+                                            (parse-derivation-result derivation)))))))
+  (check-equal? (map parse-derivation-result
+                     (stream->list (parse* (open-input-string "ab")
+                                           bseq-a-not-a-parser)))
+                '(("a" "b")))
+
   #|
   S-expression tests:
   (()()()()()) -- this should work -- no spaces are needed between expressions in lists or in the top-level, except to denote boundaries between symbols and numbers.
@@ -532,7 +592,7 @@ TODO - what kind of filters do I need?
 |#
 
 (define (parse-filter parser
-                      ;; filter-func is (-> port result bool-or-new-result)
+                      ;; filter-func is (-> port derivation bool-or-new-result)
                       filter-func
                       #:replace-result? [replace-result? #f])
   (proc-parser
