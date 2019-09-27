@@ -15,6 +15,8 @@
  port-broker-column
  port-broker-substring?
  port-broker-substring
+
+ port-broker-port-reset-position
  )
 
 (require
@@ -161,6 +163,17 @@
        (error 'port-broker-substring "substring goes beyond end of port"))
      (vector-ref info info-char-offset))))
 
+(define (port-broker-port-reset-position port new-pos)
+  (when (< new-pos 1)
+    (error 'port-broker-port-reset-position
+           "port reset to number less than 1: ~v" new-pos))
+  (define reset-proc (hash-ref port->reset-hash port #f))
+  (if reset-proc
+      (reset-proc new-pos)
+      (error 'port-broker-port-reset-position
+             "not given a valid port broker port: ~v"
+             port)))
+
 
 (define (port-broker->wrapped-port pb char-offset)
   #|
@@ -180,6 +193,18 @@
   ;; For when byte reads request fewer bytes than necessary to complete a utf-8 char...
   (define incomplete-char-byte-pos #f)
   (define incomplete-char-byte-len #f)
+
+  (define reset-position-procedure
+    (λ (new-pos)
+      (define info (info-for pb new-pos))
+      (set! char-pos (if info
+                         new-pos
+                         (port-broker-extent pb)))
+      (set! byte-pos (if info
+                         (vector-ref info 0)
+                         (port-broker-peek-offset pb)))
+      (set! incomplete-char-byte-pos #f)
+      (set! incomplete-char-byte-len #f)))
 
   #|
   Read procedure.
@@ -281,23 +306,28 @@
                           (vector-ref info info-col-offset)
                           char-pos)])))
 
-  (make-input-port
-   (object-name (port-broker-port pb))
-   read-procedure
-   peek-procedure
-   ;; close procedure
-   (λ () (void))
-   ;; get-progress-evt
-   (λ () always-evt)
-   commit-procedure
-   get-location
-   ;; count-lines!
-   (λ () (void))
-   ;; init-position
-   char-offset
-   ;; buffer-mode
-   #f
-   ))
+  (define port-object
+    (make-input-port
+     (object-name (port-broker-port pb))
+     read-procedure
+     peek-procedure
+     ;; close procedure
+     (λ () (void))
+     ;; get-progress-evt
+     (λ () always-evt)
+     commit-procedure
+     get-location
+     ;; count-lines!
+     (λ () (void))
+     ;; init-position
+     char-offset
+     ;; buffer-mode
+     #f
+     ))
+
+  (hash-set! port->reset-hash port-object reset-position-procedure)
+
+  port-object)
 
 
 
@@ -321,6 +351,9 @@ A wrapped port should be able to give a handle to the broker it is wrapping.
 
 ;; wrapper port -> port broker
 (define wrapper-cache
+  (make-weak-hasheq))
+
+(define port->reset-hash
   (make-weak-hasheq))
 
 (define (port-broker->wrapped-port/cached pb offset)
@@ -429,6 +462,15 @@ A wrapped port should be able to give a handle to the broker it is wrapping.
   (check-equal? (port-broker-line empty-pb 0) 1)
   (check-equal? (port-broker-column empty-pb 0) 0)
   (check-equal? (port-broker-char empty-pb 1) eof)
+
+  ;; Check that I con reset the position
+  (port-broker-port-reset-position wp1 1)
+  (check-true (se? (wp1-read) r1))
+  (define-values (after-1-line after-1-col after-1-pos) (port-next-location wp1))
+  (check-true (se? (wp1-read) r2))
+  (check-true (se? (wp1-read) r3))
+  (port-broker-port-reset-position wp1 after-1-pos)
+  (check-true (se? (wp1-read) r2))
 
   #|
   TODO - port-broker-commit-bytes is broken.  The following test fails.

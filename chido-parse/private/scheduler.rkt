@@ -1109,14 +1109,14 @@ But I still need to encapsulate the port and give a start position.
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;;; Parsing outer API
+(define (port->pos p)
+  (let-values ([(line col pos) (port-next-location p)]) pos))
 
 (define (parse-inner core-proc port/pbw parser start)
   (define pb (if (port-broker-wrap? port/pbw)
                  (port-broker-wrap-broker port/pbw)
                  (or (port->port-broker port/pbw)
                      (port-broker port/pbw))))
-  (define (port->pos p)
-    (let-values ([(line col pos) (port-next-location p)]) pos))
   (define start-pos (match start
                       [(? number?) start]
                       [(? parse-derivation?) (parse-derivation-end-position start)]
@@ -1129,19 +1129,23 @@ But I still need to encapsulate the port and give a start position.
                 #:start [start #f])
   (parse-inner enter-the-parser port/pbw parser start))
 
-(define (parse/direct-recursive port/pbw parser
+(define (parse/direct-recursive port parser
                                 #:start [start #f])
   ;; This one lets the user get a single result back, but the return is actually a stream.
-  (define (direct-recursive-parse-core port parser start)
+  (define (direct-recursive-parse-core port/pbw parser start)
     (call-with-composable-continuation
      (λ (k)
        (abort-current-continuation
         chido-parse-prompt
         ;; TODO - better failure handling and propagation
-        (λ () (for/parse ([d (parse* port/pbw parser #:start start)])
+        (λ () (for/parse ([d (parse* port parser #:start start)])
+
+                         ;; Get the port position right for the continuation.
+                         (define new-pos (parse-derivation-end-position d))
+                         (port-broker-port-reset-position port new-pos)
                          (k d)))))
      chido-parse-prompt))
-  (parse-inner direct-recursive-parse-core port/pbw parser start))
+  (parse-inner direct-recursive-parse-core port parser start))
 
 #|
 TODO
