@@ -1131,22 +1131,26 @@ But I still need to encapsulate the port and give a start position.
   (parse-inner enter-the-parser port/pbw parser start))
 
 (define (parse-direct port parser
-                                #:start [start #f])
+                      #:start [start #f])
+  (when (not (input-port? port))
+    (error 'parse-direct "parse-direct requires a port as an argument, given: ~v"
+           port))
+  (define start-use (or start (port->pos port)))
   ;; This one lets the user get a single result back, but the return is actually a stream.
-  (define (direct-recursive-parse-core port/pbw parser start)
-    (call-with-composable-continuation
-     (λ (k)
-       (abort-current-continuation
-        chido-parse-prompt
-        ;; TODO - better failure handling and propagation
-        (λ () (for/parse ([d (parse* port parser #:start start)])
-
-                         ;; Get the port position right for the continuation.
-                         (define new-pos (parse-derivation-end-position d))
-                         (port-broker-port-reset-position port new-pos)
-                         (k d)))))
-     chido-parse-prompt))
-  (parse-inner direct-recursive-parse-core port parser start))
+  (define (direct-recursive-parse-core pb parser core-start)
+    (define new-derivation
+      (call-with-composable-continuation
+       (λ (k)
+         (abort-current-continuation
+          chido-parse-prompt
+          ;; TODO - better failure handling and propagation
+          (λ () (for/parse ([d (parse* port parser #:start core-start)])
+                           (k d)))))
+       chido-parse-prompt))
+    (define new-pos (parse-derivation-end-position new-derivation))
+    (port-broker-port-reset-position! port new-pos)
+    new-derivation)
+  (parse-inner direct-recursive-parse-core port parser start-use))
 
 #|
 TODO
@@ -1198,7 +1202,7 @@ TODO
 
   (define (Aa-parser-proc/direct port)
     (define d/A (parse-direct port (get-A-parser/direct)))
-    (define d/a (parse-direct port a1-parser-obj #:start d/A))
+    (define d/a (parse-direct port a1-parser-obj))
     (make-parse-derivation (λ args (string-append (parse-derivation-result! d/A)
                                                   (parse-derivation-result! d/a)))
                            #:derivations (list d/A d/a)))

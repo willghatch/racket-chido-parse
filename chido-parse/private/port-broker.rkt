@@ -16,7 +16,7 @@
  port-broker-substring?
  port-broker-substring
 
- port-broker-port-reset-position
+ port-broker-port-reset-position!
  )
 
 (require
@@ -163,16 +163,15 @@
        (error 'port-broker-substring "substring goes beyond end of port"))
      (vector-ref info info-char-offset))))
 
-(define (port-broker-port-reset-position port new-pos)
+(define (port-broker-port-reset-position! port new-pos)
   (when (< new-pos 1)
-    (error 'port-broker-port-reset-position
+    (error 'port-broker-port-reset-position!
            "port reset to number less than 1: ~v" new-pos))
-  (define reset-proc (hash-ref port->reset-hash port #f))
-  (if reset-proc
-      (reset-proc new-pos)
-      (error 'port-broker-port-reset-position
-             "not given a valid port broker port: ~v"
-             port)))
+  (define reset-proc (hash-ref port->reset-proc port
+                               (λ () (error 'port-broker-port-reset-position!
+                                            "not given a valid port broker port: ~v"
+                                            port))))
+  (reset-proc new-pos))
 
 
 (define (port-broker->wrapped-port pb char-offset)
@@ -186,23 +185,23 @@
   (define info (info-for pb char-offset))
   (define char-pos (if info
                        char-offset
-                       (port-broker-extent pb)))
+                       (add1 (port-broker-extent pb))))
   (define byte-pos (if info
-                       (vector-ref info 0)
-                       (port-broker-peek-offset pb)))
+                       (vector-ref info info-byte-offset-offset)
+                       (add1 (port-broker-peek-offset pb))))
   ;; For when byte reads request fewer bytes than necessary to complete a utf-8 char...
   (define incomplete-char-byte-pos #f)
   (define incomplete-char-byte-len #f)
 
-  (define reset-position-procedure
-    (λ (new-pos)
-      (define info (info-for pb new-pos))
-      (set! char-pos (if info
-                         new-pos
-                         (port-broker-extent pb)))
-      (set! byte-pos (if info
-                         (vector-ref info 0)
-                         (port-broker-peek-offset pb)))
+  (define reset-procedure
+    (λ (reset-to-char-pos)
+      (define reset-pos-info (info-for pb reset-to-char-pos))
+      (set! byte-pos (if reset-pos-info
+                         (vector-ref reset-pos-info info-byte-offset-offset)
+                         (add1 (port-broker-peek-offset pb))))
+      (set! char-pos (if reset-pos-info
+                         reset-to-char-pos
+                         (add1 (port-broker-extent pb))))
       (set! incomplete-char-byte-pos #f)
       (set! incomplete-char-byte-len #f)))
 
@@ -320,12 +319,14 @@
      ;; count-lines!
      (λ () (void))
      ;; init-position
-     char-offset
+     char-pos
      ;; buffer-mode
      #f
      ))
 
-  (hash-set! port->reset-hash port-object reset-position-procedure)
+  (hash-set! port->reset-proc port-object reset-procedure)
+  ;; If port-count-lines! is not enabled, the custom location function is never called and everything is crazy and awful.
+  (port-count-lines! port-object)
 
   port-object)
 
@@ -353,7 +354,7 @@ A wrapped port should be able to give a handle to the broker it is wrapping.
 (define wrapper-cache
   (make-weak-hasheq))
 
-(define port->reset-hash
+(define port->reset-proc
   (make-weak-hasheq))
 
 (define (port-broker->wrapped-port/cached pb offset)
@@ -464,13 +465,28 @@ A wrapped port should be able to give a handle to the broker it is wrapping.
   (check-equal? (port-broker-char empty-pb 1) eof)
 
   ;; Check that I con reset the position
-  (port-broker-port-reset-position wp1 1)
+  (port-broker-port-reset-position! wp1 1)
   (check-true (se? (wp1-read) r1))
   (define-values (after-1-line after-1-col after-1-pos) (port-next-location wp1))
   (check-true (se? (wp1-read) r2))
   (check-true (se? (wp1-read) r3))
-  (port-broker-port-reset-position wp1 after-1-pos)
+  (port-broker-port-reset-position! wp1 after-1-pos)
+  (define-values (after-1-line/again after-1-col/again after-1-pos/again)
+    (port-next-location wp1))
+  (check-equal? after-1-line after-1-line/again)
+  (check-equal? after-1-col after-1-col/again)
+  (check-equal? after-1-pos after-1-pos/again)
   (check-true (se? (wp1-read) r2))
+  (define-values (after-2-line after-2-col after-2-pos) (port-next-location wp1))
+  (check-not-equal? after-1-line after-2-line)
+  (check-not-equal? after-1-col after-2-col)
+  (check-not-equal? after-1-pos after-2-pos)
+  (port-broker-port-reset-position! wp1 2)
+  (define-values (line/2 col/2 pos/2) (port-next-location wp1))
+  (port-broker-port-reset-position! wp1 4)
+  (define-values (line/4 col/4 pos/4) (port-next-location wp1))
+  (check-equal? pos/2 2)
+  (check-equal? pos/4 4)
 
   #|
   TODO - port-broker-commit-bytes is broken.  The following test fails.
