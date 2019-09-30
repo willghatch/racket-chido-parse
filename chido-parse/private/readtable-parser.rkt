@@ -1,5 +1,10 @@
 #lang racket/base
 
+#|
+Arguably the point of Racket's readtable is to have an extensible alternate parser that has a built-in symbol parser that is affected by each added alternate.
+This is an implementation of the same idea, but also adding support for operators with declarative precidence and associativity and potentially other extra features.
+|#
+
 (require racket/contract/base)
 (provide
  ;; TODO - the names provided should maybe be chido-readtable-* ...
@@ -73,6 +78,8 @@
 
    ;; If symbol support is off, then terminating, soft-terminating, and nonterminating parsers are indistinguishable.  The difference is only how it affects the built-in symbol parser.
    ;; For readtable-style extension, symbols need to be built-in so adding parsers affects the symbol parser implicitly.
+   ;; TODO - I should add more ways to affect the built-in symbol parser.  Eg. maybe soft-terminating-failure and nonterminating-failure parsers, which delimit symbols a la soft-terminating and nonterminating, making the symbol parser fail or not run when they succeed, but that don't create a derivation.  IE they make the symbol parser fail with a message saying that the other parser succeeded.  Basically programatic filters for symbols beyond just having a blacklist.  Eg. this would allow a convention for operator names (eg. they must be in <> like <+>, or they must be in : like :+: or :where:, etc, then fail symbols that match that pattern.)
+   ;; TODO - operator precidence programability -- if you have an operator family, such as an operator that reads the operator string as some family of symbols like :+:, :where:, etc, does it make sense to have some more complicated and programmable way of doing precidence and associativity?
    symbol-support?
    symbol-result-transformer
    literal-left-delimiter
@@ -183,6 +190,7 @@
    ))
 
 (define (extend-chido-readtable rt extension-type parser
+                                ;; TODO - better name for extension-type, and make it a keyword argument.
                                 #:operator [operator #f]
                                 #:precidence-less-than [precidence-less-than '()]
                                 #:precidence-greater-than [precidence-greater-than '()]
