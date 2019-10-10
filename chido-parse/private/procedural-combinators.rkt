@@ -28,6 +28,7 @@
  "parse-stream.rkt"
  racket/string
  racket/stream
+ racket/match
  (for-syntax
   racket/base
   syntax/parse
@@ -142,49 +143,104 @@ I need to re-think the derivation result interface for all these combinators.
                     #:min [min 0]
                     #:max [max +inf.0]
                     #:greedy? [greedy? #f]
+                    #:between [between #f]
+                    #:before [before #f]
+                    #:after [after #f]
                     parser)
   (define use-name (or name (format "repeat_~a_~a_~a"
                                     (parser-name parser)
                                     min max)))
+  (define before-parser (match before
+                          [#f #f]
+                          [#t between]
+                          [else before]))
+  (define after-parser (match after
+                         [#f #f]
+                         [#t between]
+                         [else after]))
+  (define (every-other xs)
+    (match xs
+      [(list) (list)]
+      [(list a b others ...)
+       (cons b (every-other others))]
+      ;; if there is just one, it is the after-parser derivation.
+      [(list a) (list)]))
+
+  (define result-wrapper
+    (λ (make-result)
+      (λ (derivations)
+        (make-parse-derivation
+         (λ args
+           (define non-between-ds
+             (cond [between (every-other (if before-parser
+                                             derivations
+                                             (cons 'dummy
+                                                   derivations)))]
+                   [(and before-parser after-parser)
+                    (reverse (cdr (reverse (cdr derivations))))]
+                   [before-parser (cdr derivations)]
+                   [after-parser (reverse (cdr (reverse derivations)))]
+                   [else derivations]))
+           (make-result (map parse-derivation-result non-between-ds)))
+         #:derivations derivations))))
+
   (define combiner
     (cond [(and derive make-result)
            (error 'repetition
                   "must provide either result or derive function, (and not both)")]
           [derive derive]
-          [make-result (λ (derivations)
-                         (make-parse-derivation
-                          (λ args
-                            (make-result (map parse-derivation-result derivations)))
-                          #:derivations derivations))]
-          [else (λ (derivations)
-                  (make-parse-derivation
-                   (λ args
-                     (map parse-derivation-result derivations))
-                   #:derivations derivations))]))
+          [make-result (result-wrapper make-result)]
+          [else (result-wrapper (λ(x)x))]))
   (define (proc pb)
     (define (finalize reversed-derivations)
-      (/end (port-broker-start-position pb)
-            (combiner (reverse reversed-derivations))))
-    (define (get-more-streams derivations)
-      (define next-stream (parse* pb parser #:start (if (null? derivations)
-                                                        #f
-                                                        (car derivations))))
+      (define (real-finalize! reversed-derivations)
+        (/end (port-broker-start-position pb)
+              (combiner (reverse reversed-derivations))))
+      (if after-parser
+          (let ([after-stream (parse* pb after-parser
+                                      #:start (if (null? reversed-derivations)
+                                                  #f
+                                                  (car reversed-derivations)))])
+            (for/parse ([d after-stream])
+                       (real-finalize! (cons d reversed-derivations))))
+          (real-finalize! reversed-derivations)))
+    (define (get-more-streams n-results derivations in-between?)
+      (define use-parser (cond [(and in-between? (equal? 0 n-results))
+                                before-parser]
+                               [in-between? between]
+                               [else parser]))
+      (define next-stream
+        (parse* pb use-parser #:start (if (null? derivations)
+                                          #f
+                                          (car derivations))))
       (if (and greedy?
+               (not in-between?)
                (stream-empty? next-stream)
-               (<= min (length derivations)))
+               (<= min n-results))
           (finalize derivations)
           (for/parse ([derivation next-stream])
-                     (rec (cons derivation derivations)))))
-    (define (rec derivations)
-      (define len (length derivations))
+                     (if in-between?
+                         (get-more-streams n-results
+                                           (cons derivation derivations)
+                                           #f)
+                         (rec (add1 n-results)
+                              (cons derivation derivations))))))
+    (define (rec n-results derivations)
+      (define len n-results)
+      (define do-between? (and between (not (equal? 0 n-results))))
       (cond [(or (< len min)
                  (and greedy? (< len max)))
-             (get-more-streams derivations)]
+             (get-more-streams n-results derivations do-between?)]
             [else (parse-stream-cons (finalize derivations)
                                      (if (>= len max)
                                          empty-stream
-                                         (get-more-streams derivations)))]))
-    (rec '()))
+                                         (get-more-streams n-results
+                                                           derivations
+                                                           do-between?)))]))
+    (if before-parser
+        (for/parse ([d (parse* pb before-parser #:start #f)])
+                   (rec 0 (list d)))
+        (rec 0 '())))
   (proc-parser #:name use-name proc
                #:promise-no-left-recursion?
                (not (parser-potentially-left-recursive? parser))
@@ -224,7 +280,6 @@ I need to re-think the derivation result interface for all these combinators.
               #:result make-result
               #:max 1))
 
-;; TODO - greedy repetition
 
 (define (epsilon-parser #:name [name "epsilon"]
                         #:result [result #f])
@@ -371,6 +426,8 @@ I need to re-think the derivation result interface for all these combinators.
             (parse* (open-input-string str2) BaBcp))))
      str2)
 
+  (define (->results ds)
+    (map parse-derivation-result (stream->list ds)))
 
   (c check-equal?
      (map parse-derivation-result
@@ -391,6 +448,56 @@ I need to re-think the derivation result interface for all these combinators.
                    (repetition "q" #:result (λ (elems) (string-join elems ""))
                                #:min 3 #:max 5))))
      (list "qqq" "qqqq" "qqqqq"))
+
+  ;;; repetition with between parsers
+  (c check-equal?
+     (->results (parse* (open-input-string "qaqaq")
+                        (repetition "q" #:result (λ (elems) (string-join elems ""))
+                                    #:between "a")))
+     (list "" "q" "qq" "qqq"))
+  (c check-equal?
+     (->results
+      (parse* (open-input-string "bqaqaq")
+              (repetition "q" #:result (λ (elems) (string-join elems ""))
+                          #:before "b"
+                          #:between "a")))
+     (list "" "q" "qq" "qqq"))
+  (c check-equal?
+     (->results
+      (parse* (open-input-string "bqaqaq")
+              (repetition "q" #:result (λ (elems) (string-join elems ""))
+                          #:before "b"
+                          #:between "a")))
+     (list "" "q" "qq" "qqq"))
+  (c check-equal?
+     (->results
+      (parse* (open-input-string "bqaqaqz")
+              (repetition "q" #:result (λ (elems) (string-join elems ""))
+                          #:before "b"
+                          #:after "z"
+                          #:between "a")))
+     (list "qqq"))
+  (c check-equal?
+     (->results
+      (parse* (open-input-string "aqaqaqa")
+              (repetition "q" #:result (λ (elems) (string-join elems ""))
+                          #:before #t
+                          #:after #t
+                          #:between "a")))
+     ;; no empty string, because it must parse before AND after...
+     (list "q" "qq" "qqq"))
+  (c check-equal?
+     (->results
+      (parse* (open-input-string "bqqq")
+              (repetition "q" #:result (λ (elems) (string-join elems ""))
+                          #:before "b")))
+     (list "" "q" "qq" "qqq"))
+  (c check-equal?
+     (->results
+      (parse* (open-input-string "qqqz")
+              (repetition "q" #:result (λ (elems) (string-join elems ""))
+                          #:after "z")))
+     (list "qqq"))
 
   (c check-equal?
      (map parse-derivation-result
