@@ -10,7 +10,6 @@
  not-parser
 
  ;; TODO - These are not great, should probably be replaced
- ;between*
  traditional-read-func->parse-result-func
  wrap-derivation
 
@@ -250,24 +249,36 @@ I need to re-think the derivation result interface for all these combinators.
                      #:derive [derive #f]
                      #:result [make-result #f]
                      #:greedy? [greedy? #f]
+                     #:between [between #f]
+                     #:before [before #f]
+                     #:after [after #f]
                      parser)
   (repetition parser
               #:name (or name (format "~a*" (parser-name parser)))
               #:derive derive
               #:result make-result
               #:greedy? greedy?
+              #:between between
+              #:before before
+              #:after after
               #:min 0))
 
 (define (kleene-plus #:name [name #f]
                      #:derive [derive #f]
                      #:result [make-result #f]
                      #:greedy? [greedy? #f]
+                     #:between [between #f]
+                     #:before [before #f]
+                     #:after [after #f]
                      parser)
   (repetition parser
               #:name (or name (format "~a+" (parser-name parser)))
               #:derive derive
               #:result make-result
               #:greedy? greedy?
+              #:between between
+              #:before before
+              #:after after
               #:min 1))
 
 (define (optional #:name [name #f]
@@ -316,39 +327,6 @@ I need to re-think the derivation result interface for all these combinators.
                                          #:position pos)))))
 
 
-(define (between* main-parser between-parser
-                  #:derive [derive #f]
-                  #:result [make-result #f])
-  ;; TODO - better version
-  ;; TODO - also, the result handling of this is wrong and doesn't match the new lazy API.
-  ;; This is like kleene star for the main parser, except that between any
-  ;; two of the main parser, the between parser must succeed, though its
-  ;; result is thrown away.
-  (define use-name "TODO-between*-name")
-  (define combiner
-    (cond [(or (and derive make-result)
-               (and (not derive) (not make-result)))
-           (error 'repetition
-                  "must provide either result or derive function, (and not both)")]
-          [derive derive]
-          [make-result (λ (derivations)
-                         (make-parse-derivation
-                          (make-result (map parse-derivation-result derivations))
-                          #:derivations derivations))]))
-  (define between+main (sequence between-parser main-parser
-                                 #:result (λ (r1 r2) r2)))
-  (define between+main+ (kleene-plus between+main #:result (λ(x)x)))
-  (define (proc port)
-    (parse-stream-cons
-     (/end (port->pos port) (combiner '()))
-     (for/parse ([d (parse* port main-parser)])
-                (parse-stream-cons
-                 (combiner (list d))
-                 (for/parse ([d2 (parse* port between+main+
-                                         #:start d)])
-                            (combiner
-                             (cons d (parse-derivation-derivation-list d2))))))))
-  (proc-parser #:name use-name proc))
 
 (define (wrap-derivation parser wrap-func #:name [name #f])
   (proc-parser #:name (or name (parser-name parser))
@@ -499,12 +477,6 @@ I need to re-think the derivation result interface for all these combinators.
                           #:after "z")))
      (list "qqq"))
 
-  (c check-equal?
-     (map parse-derivation-result
-          (stream->list
-           (parse* (open-input-string "q q q")
-                   (between* "q" " " #:result (λ (elems) (string-join elems ""))))))
-     (list "" "q" "qq" "qqq"))
 
   (c check-equal?
      (map parse-derivation-result
@@ -565,10 +537,9 @@ I need to re-think the derivation result interface for all these combinators.
                                   "("
                                   (kleene-star whitespace-char-parser
                                                #:result (λ (ws) #f))
-                                  (between* basic-s-exp
-                                            (kleene-plus whitespace-char-parser
-                                                         #:result (λ (ws) #f))
-                                            #:result (λ (elems) elems))
+                                  (kleene-star basic-s-exp
+                                               #:between (kleene-plus
+                                                          whitespace-char-parser))
                                   (kleene-star whitespace-char-parser
                                                #:result (λ (ws) #f))
                                   ")"))
