@@ -142,41 +142,103 @@ For sequence/repetition:
                #:preserve-prefix? #t
                #:use-port? #f))
 
+(define (do-ignore-and-splice derivations
+                              ignores
+                              splices)
+  ;; Helper function for binding-sequence
+  (cond [(null? derivations) '()]
+        [(car ignores) (do-ignore-and-splice (cdr derivations)
+                                             (cdr ignores)
+                                             (cdr splices))]
+        [(car splices)
+         (let* ([r (parse-derivation-result (car derivations))]
+                [this-list (cond [(and (syntax? r) (syntax->list r))]
+                                 [(list? r) r]
+                                 [else (error 'binding-sequence
+                                              "result to be spliced is not a list: ~v"
+                                              r)])])
+           (append this-list (do-ignore-and-splice (cdr derivations)
+                                                   (cdr ignores)
+                                                   (cdr splices))))]
+        [else (cons (parse-derivation-result (car derivations))
+                    (do-ignore-and-splice (cdr derivations)
+                                          (cdr ignores)
+                                          (cdr splices)))]))
 (begin-for-syntax
   (define-syntax-class binding-sequence-part
-    (pattern [#:bind name:id parser:expr])
-    (pattern parser:expr #:attr name #f)))
+    (pattern (~and whole-pattern
+                   [(~or (~optional parser-given:expr)
+                         (~optional (~seq #:bind name:id))
+                         (~optional (~seq #:ignore ignore-given:expr))
+                         (~optional (~seq #:splice splice-given:expr))
+                         )
+                    ...])
+             #:attr parser
+             (or (attribute parser-given)
+                 (raise-syntax-error 'binding-sequence
+                                     "given a parser spec with no parser"
+                                     #'whole-pattern))
+             #:attr ignore #'(~? ignore-given #f)
+             #:attr splice #'(~? splice-given #f))
+    (pattern parser:expr
+             #:attr name #f
+             #:attr ignore #'#f
+             #:attr splice #'#f)))
 (define-syntax (binding-sequence-helper stx)
   (syntax-parse stx
-    [(_ port derive start-point [done-int-names ...]
+    [(_ port derive make-result start-point
+        ([done-int-names ...] [done-ignores ...] [done-splices ...])
         [internal-name:id part:binding-sequence-part]
         rest ...)
      #'(for/parse ([internal-name (parse* port part.parser #:start start-point)])
                   (~? (define part.name internal-name) (void))
+                  (define current-ignore part.ignore)
+                  (define current-splice part.splice)
                   (binding-sequence-helper port
                                            derive
+                                           make-result
                                            internal-name
-                                           [done-int-names ... internal-name]
+                                           ([done-int-names ... internal-name]
+                                            [done-ignores ... current-ignore]
+                                            [done-splices ... current-splice])
                                            rest ...))]
-    [(_ port derive start-point [done-int-names ...])
-     #'(apply derive (list done-int-names ...))]))
+    [(_ port derive make-result start-point
+        ([done-int-names ...] [done-ignores ...] [done-splices ...]))
+     #'(let* ([derive-arg derive]
+              [make-result-arg make-result]
+              [ignored-spliced-thunk
+               (λ () (do-ignore-and-splice (list done-int-names ...)
+                                           (list done-ignores ...)
+                                           (list done-splices ...)))]
+              [do-derive (cond [derive-arg derive-arg]
+                               [make-result-arg
+                                (λ derivations
+                                  (make-parse-derivation
+                                   (λ (line col start end ds)
+                                     (apply make-result-arg (ignored-spliced-thunk)))
+                                   #:derivations derivations))]
+                               [else (λ derivations
+                                       (make-parse-derivation
+                                        (λ (line col start end ds)
+                                          (ignored-spliced-thunk))
+                                        #:derivations derivations))])])
+         (apply do-derive (list done-int-names ...)))]))
 (define-syntax (binding-sequence stx)
   (syntax-parse stx
     [(_ part:binding-sequence-part ...
-        (~or (~optional (~seq #:derive derive-arg:expr)))
+        (~or (~optional (~seq #:derive derive-arg:expr))
+             (~optional (~seq #:make-result make-result-arg:expr)))
         ...)
      (with-syntax ([(internal-name ...) (generate-temporaries #'(part ...))])
        #'(proc-parser #:name "TODO-binding-seq-name"
                       ;; TODO - other optional args
                       (λ (port)
                         (binding-sequence-helper
-                         port (~? derive-arg (λ args (make-parse-derivation
-                                                      (λ (line col start end ds)
-                                                        (map parse-derivation-result
-                                                             ds))
-                                                      #:derivations args)))
+                         port
+                         (~? derive-arg #f)
+                         (~? make-result-arg #f)
                          #f
-                         []
+                         ([] [] [])
                          [internal-name part] ...))))]))
 
 
@@ -695,15 +757,20 @@ For sequence/repetition:
      '("ab" "ab"))
 
 
-  (check-equal? (map parse-derivation-result
-                     (stream->list (parse* (open-input-string "ab")
-                                           (binding-sequence "a" "b"))))
+  (check-equal? (->results (parse* (open-input-string "ab")
+                                   (binding-sequence "a" "b")))
                 '(("a" "b")))
 
-  (check-equal? (map parse-derivation-result
-                     (stream->list (parse* (open-input-string "ab")
-                                           (binding-sequence [#:bind a1 "a"] "b"))))
+  (check-equal? (->results (parse* (open-input-string "ab")
+                                   (binding-sequence [#:bind a1 "a"] "b")))
                 '(("a" "b")))
+  (check-equal? (->results (parse* (open-input-string "ab")
+                                   (binding-sequence [#:ignore #t "a"] "b")))
+                '(("b")))
+  (check-equal? (->results (parse* (open-input-string "aaab")
+                                   (binding-sequence [#:splice #t (kleene-star "a")]
+                                                     "b")))
+                '(("a" "a" "a" "b")))
 
   (define bseq-a-not-a-parser
     (binding-sequence [#:bind a1 "a"]
@@ -715,10 +782,12 @@ For sequence/repetition:
                                       (not (equal?
                                             (parse-derivation-result a1)
                                             (parse-derivation-result derivation)))))))
-  (check-equal? (map parse-derivation-result
-                     (stream->list (parse* (open-input-string "ab")
-                                           bseq-a-not-a-parser)))
+  (check-equal? (->results (parse* (open-input-string "ab")
+                                   bseq-a-not-a-parser))
                 '(("a" "b")))
+  (check-equal? (->results (parse* (open-input-string "aa")
+                                   bseq-a-not-a-parser))
+                '())
 
   #|
   S-expression tests:
