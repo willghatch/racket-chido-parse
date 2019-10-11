@@ -148,16 +148,17 @@ For sequence/repetition:
     (pattern parser:expr #:attr name #f)))
 (define-syntax (binding-sequence-helper stx)
   (syntax-parse stx
-    [(_ port derive [done-int-names ...]
+    [(_ port derive start-point [done-int-names ...]
         [internal-name:id part:binding-sequence-part]
         rest ...)
-     #'(begin (define internal-name (parse-direct port part.parser))
-              (~? (define part.name internal-name) (void))
-              (binding-sequence-helper port
-                                       derive
-                                       [done-int-names ... internal-name]
-                                       rest ...))]
-    [(_ port derive [done-int-names ...])
+     #'(for/parse ([internal-name (parse* port part.parser #:start start-point)])
+                  (~? (define part.name internal-name) (void))
+                  (binding-sequence-helper port
+                                           derive
+                                           internal-name
+                                           [done-int-names ... internal-name]
+                                           rest ...))]
+    [(_ port derive start-point [done-int-names ...])
      #'(apply derive (list done-int-names ...))]))
 (define-syntax (binding-sequence stx)
   (syntax-parse stx
@@ -173,7 +174,9 @@ For sequence/repetition:
                                                       (λ (line col start end ds)
                                                         (map parse-derivation-result
                                                              ds))
-                                                      #:derivations args))) []
+                                                      #:derivations args)))
+                         #f
+                         []
                          [internal-name part] ...))))]))
 
 
