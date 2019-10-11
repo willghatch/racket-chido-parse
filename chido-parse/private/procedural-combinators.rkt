@@ -56,6 +56,11 @@
 #|
 TODO -
 I need to re-think the derivation result interface for all these combinators.
+
+For sequence/repetition:
+* The “#:result” interface is fairly nice, but lacks info necessary to make syntax objects.
+* The “#:derive” interface is poor.
+* Maybe I need a #:result/stx, #:derive/raw (current #:derive), #:derive (gives the full list of derivations, but also the non-between list separately)...
 |#
 
 
