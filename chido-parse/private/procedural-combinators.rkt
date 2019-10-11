@@ -28,6 +28,7 @@
  racket/string
  racket/stream
  racket/match
+ racket/list
  (for-syntax
   racket/base
   syntax/parse
@@ -61,42 +62,76 @@ I need to re-think the derivation result interface for all these combinators.
 (define (sequence #:name [name #f]
                   #:derive [derive #f]
                   #:result [make-result #f]
+                  #:between [between #f]
+                  #:before [before #f]
+                  #:after [after #f]
                   . parsers)
+  (define before-parser (match before
+                          [#f #f]
+                          [#t between]
+                          [else before]))
+  (define after-parser (match after
+                         [#f #f]
+                         [#t between]
+                         [else after]))
   (define (l-recursive? parsers)
     ;; TODO - I should disallow a null list of parsers...
     (cond [(null? parsers) #f]
           [(parser-potentially-left-recursive? (car parsers)) #t]
           [(parser-potentially-null? (car parsers)) (l-recursive? (cdr parsers))]
           [else #f]))
-  (define l-r (l-recursive? parsers))
-  ;(define null (andmap parser-potentially-null? parsers))
-  (define prefix (parser-prefix (car parsers)))
+  (define parsers-for-left-recursion-check
+    (filter (λ(x)x)
+            (match parsers
+              [(list p1 ps ...)
+               (flatten (list before-parser p1 between ps after-parser))]
+              [(list) (list before-parser after-parser)])))
+  (define l-r (l-recursive? parsers-for-left-recursion-check))
+  (define prefix (parser-prefix (car parsers-for-left-recursion-check)))
 
   (define use-name (or name (format "sequence_~a"
                                     (string-join (map parser-name parsers) "_"))))
+  (define (make-result-wrap make-result)
+    (λ derivations
+      (make-parse-derivation
+       (λ args
+         (define non-between-ds
+           (derivations->non-between derivations before-parser between after-parser))
+         (apply make-result
+                (map parse-derivation-result non-between-ds)))
+       #:derivations derivations)))
   (define combiner
     (cond [(and derive make-result)
            (error 'sequence
                   "must provide either result or derive function, not both")]
           [derive derive]
-          [make-result (λ derivations
-                         (make-parse-derivation
-                          (λ args
-                            (apply make-result
-                                   (map parse-derivation-result derivations)))
-                          #:derivations derivations))]
-          [else (error 'sequence
-                       "must provide a result or derivation transformer")]))
+          [make-result (make-result-wrap make-result)]
+          [else (make-result-wrap list)]))
   (define (proc pb)
-    (define (rec parsers derivations)
-      (cond [(null? parsers) (/end (port-broker-start-position pb)
-                                   (apply combiner (reverse derivations)))]
-            [else (for/parse ([result (parse* pb (car parsers)
-                                              #:start (if (null? derivations)
-                                                          #f
-                                                          (car derivations)))])
-                             (rec (cdr parsers) (cons result derivations)))]))
-    (rec parsers '()))
+    (define (rec parsers derivations in-between?)
+      (cond [(null? parsers)
+             (if after-parser
+                 (for/parse ([d (parse* pb after-parser
+                                        #:start (if (null? derivations)
+                                                    #f
+                                                    (car derivations)))])
+                            (/end (port-broker-start-position pb)
+                                  (apply combiner (reverse (cons d derivations)))))
+                 (/end (port-broker-start-position pb)
+                       (apply combiner (reverse derivations))))]
+            [else (for/parse ([d (parse* pb (if in-between?
+                                                between
+                                                (car parsers))
+                                         #:start (if (null? derivations)
+                                                     #f
+                                                     (car derivations)))])
+                             (rec (if in-between? parsers (cdr parsers))
+                                  (cons d derivations)
+                                  (and between (not in-between?))))]))
+    (if before-parser
+        (for/parse ([d (parse* pb before-parser #:start #f)])
+                   (rec parsers (list d) #f))
+        (rec parsers '() #f)))
   (proc-parser #:name use-name #:prefix prefix proc
                #:promise-no-left-recursion? (not l-r)
                #:preserve-prefix? #t
@@ -136,6 +171,26 @@ I need to re-think the derivation result interface for all these combinators.
                                                       #:derivations args))) []
                          [internal-name part] ...))))]))
 
+
+(define (derivations->non-between derivations before between after)
+  (define (every-other xs)
+    (match xs
+      [(list) (list)]
+      [(list a b others ...)
+       (cons b (every-other others))]
+      ;; if there is just one, it is the after-parser derivation.
+      [(list a) (list)]))
+  (cond [between (every-other (if before
+                                  derivations
+                                  (cons 'dummy
+                                        derivations)))]
+        [(and before after)
+         (reverse (cdr (reverse (cdr derivations))))]
+        [before (cdr derivations)]
+        [after (reverse (cdr (reverse derivations)))]
+        [else derivations]))
+
+
 (define (repetition #:name [name #f]
                     #:derive [derive #f]
                     #:result [make-result #f]
@@ -157,13 +212,6 @@ I need to re-think the derivation result interface for all these combinators.
                          [#f #f]
                          [#t between]
                          [else after]))
-  (define (every-other xs)
-    (match xs
-      [(list) (list)]
-      [(list a b others ...)
-       (cons b (every-other others))]
-      ;; if there is just one, it is the after-parser derivation.
-      [(list a) (list)]))
 
   (define result-wrapper
     (λ (make-result)
@@ -171,15 +219,7 @@ I need to re-think the derivation result interface for all these combinators.
         (make-parse-derivation
          (λ args
            (define non-between-ds
-             (cond [between (every-other (if before-parser
-                                             derivations
-                                             (cons 'dummy
-                                                   derivations)))]
-                   [(and before-parser after-parser)
-                    (reverse (cdr (reverse (cdr derivations))))]
-                   [before-parser (cdr derivations)]
-                   [after-parser (reverse (cdr (reverse derivations)))]
-                   [else derivations]))
+             (derivations->non-between derivations before-parser between after-parser))
            (make-result (map parse-derivation-result non-between-ds)))
          #:derivations derivations))))
 
@@ -476,6 +516,37 @@ I need to re-think the derivation result interface for all these combinators.
               (repetition "q" #:result (λ (elems) (string-join elems ""))
                           #:after "z")))
      (list "qqq"))
+
+  ;;; sequence with begin/before/after
+  (c check-equal?
+     (->results
+      (parse* (open-input-string "a_b_c")
+              (sequence "a" "b" "c" #:result (λ elems (string-join elems ""))
+                        #:between "_")))
+     (list "abc"))
+  (c check-equal?
+     (->results
+      (parse* (open-input-string "_a_b_c_")
+              (sequence "a" "b" "c" #:result (λ elems (string-join elems ""))
+                        #:before #t
+                        #:after #t
+                        #:between "_")))
+     (list "abc"))
+  (c check-equal?
+     (->results
+      (parse* (open-input-string "^a_b_c$")
+              (sequence "a" "b" "c" #:result (λ elems (string-join elems ""))
+                        #:before "^"
+                        #:after "$"
+                        #:between "_")))
+     (list "abc"))
+  (c check-equal?
+     (->results
+      (parse* (open-input-string "^abc$")
+              (sequence "a" "b" "c" #:result (λ elems (string-join elems ""))
+                        #:before "^"
+                        #:after "$")))
+     (list "abc"))
 
 
   (c check-equal?
