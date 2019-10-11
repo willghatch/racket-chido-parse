@@ -225,21 +225,38 @@ For sequence/repetition:
          (apply do-derive (list done-int-names ...)))]))
 (define-syntax (binding-sequence stx)
   (syntax-parse stx
-    [(_ part:binding-sequence-part ...
+    [(_ part:binding-sequence-part ...+
         (~or (~optional (~seq #:derive derive-arg:expr))
-             (~optional (~seq #:make-result make-result-arg:expr)))
+             (~optional (~seq #:make-result make-result-arg:expr))
+             (~optional (~seq #:between between-arg:expr)))
         ...)
-     (with-syntax ([(internal-name ...) (generate-temporaries #'(part ...))])
-       #'(proc-parser #:name "TODO-binding-seq-name"
-                      ;; TODO - other optional args
-                      (λ (port)
-                        (binding-sequence-helper
-                         port
-                         (~? derive-arg #f)
-                         (~? make-result-arg #f)
-                         #f
-                         ([] [] [])
-                         [internal-name part] ...))))]))
+     (define (add-betweens between-parser-stx partlist)
+       (if (null? partlist)
+           '()
+           (cons #`[#,between-parser-stx #:ignore #t]
+                 (cons (car partlist)
+                       (add-betweens between-parser-stx (cdr partlist))))))
+     (if (syntax-parse #'(~? between-arg #f) [#f #f] [else #t])
+         #`(let ([between-arg* between-arg])
+             #,(with-syntax ([(parts-with-betweens ...)
+                              (cons (car (syntax->list #'(part ...)))
+                                    (add-betweens #'between-arg*
+                                                  (cdr (syntax->list
+                                                        #'(part ...)))))])
+                 #'(binding-sequence parts-with-betweens ...
+                                     #:derive (~? derive-arg #f)
+                                     #:make-result (~? make-result-arg #f))))
+         (with-syntax ([(internal-name ...) (generate-temporaries #'(part ...))])
+           #'(proc-parser #:name "TODO-binding-seq-name"
+                          ;; TODO - other optional args
+                          (λ (port)
+                            (binding-sequence-helper
+                             port
+                             (~? derive-arg #f)
+                             (~? make-result-arg #f)
+                             #f
+                             ([] [] [])
+                             [internal-name part] ...)))))]))
 
 
 (define (derivations->non-between derivations before between after)
@@ -767,9 +784,26 @@ For sequence/repetition:
   (check-equal? (->results (parse* (open-input-string "ab")
                                    (binding-sequence [#:ignore #t "a"] "b")))
                 '(("b")))
+  (check-equal? (->results (parse* (open-input-string "a_b")
+                                   (binding-sequence [#:ignore #t "a"] "b"
+                                                     #:between "_")))
+                '(("b")))
   (check-equal? (->results (parse* (open-input-string "aaab")
                                    (binding-sequence [#:splice #t (kleene-star "a")]
                                                      "b")))
+                '(("a" "a" "a" "b")))
+  (check-equal? (->results (parse* (open-input-string "aaa_b")
+                                   (binding-sequence [#:splice #t (kleene-star "a")]
+                                                     "b"
+                                                     #:between "_")))
+                '(("a" "a" "a" "b")))
+  (check-equal? (->results
+                 (parse* (open-input-string "a-a-a_b")
+                         (binding-sequence [#:splice #t (kleene-star
+                                                         "a"
+                                                         #:between "-")]
+                                           "b"
+                                           #:between "_")))
                 '(("a" "a" "a" "b")))
 
   (define bseq-a-not-a-parser
