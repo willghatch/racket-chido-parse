@@ -386,7 +386,7 @@ This is an implementation of the same idea, but also adding support for operator
                        nonterminating/wrap
                        soft-terminating/wrap
                        terminating/wrap)]
-             [alt (make-alt-parser "chido-readtable-read1/alt"
+             [alt (make-alt-parser "chido-readtable-read1/base-alt"
                                    parsers)]
              [left-recursive-nonterminating-alt
               (make-alt-parser "chido-readtable-read1/lrn-alt"

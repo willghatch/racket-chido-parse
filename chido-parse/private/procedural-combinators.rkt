@@ -9,6 +9,9 @@
  eof-parser
  not-parser
 
+ binding-sequence
+ (for-syntax binding-sequence-elem)
+
  ;; TODO - These are not great, should probably be replaced
  traditional-read-func->parse-result-func
  wrap-derivation
@@ -165,7 +168,7 @@ For sequence/repetition:
                                           (cdr ignores)
                                           (cdr splices)))]))
 (begin-for-syntax
-  (define-syntax-class binding-sequence-part
+  (define-syntax-class binding-sequence-elem
     (pattern (~and whole-pattern
                    [(~or (~optional parser-given:expr)
                          (~optional (~seq #:bind name:id))
@@ -188,7 +191,7 @@ For sequence/repetition:
   (syntax-parse stx
     [(_ port derive make-result start-point
         ([done-int-names ...] [done-ignores ...] [done-splices ...])
-        [internal-name:id part:binding-sequence-part]
+        [internal-name:id part:binding-sequence-elem]
         rest ...)
      #'(for/parse ([internal-name (parse* port part.parser #:start start-point)])
                   (~? (define part.name internal-name) (void))
@@ -225,7 +228,7 @@ For sequence/repetition:
          (apply do-derive (list done-int-names ...)))]))
 (define-syntax (binding-sequence stx)
   (syntax-parse stx
-    [(_ part:binding-sequence-part ...+
+    [(_ part:binding-sequence-elem ...+
         (~or (~optional (~seq #:derive derive-arg:expr))
              (~optional (~seq #:make-result make-result-arg:expr))
              (~optional (~seq #:between between-arg:expr)))
@@ -243,9 +246,17 @@ For sequence/repetition:
                                     (add-betweens #'between-arg*
                                                   (cdr (syntax->list
                                                         #'(part ...)))))])
-                 #'(binding-sequence parts-with-betweens ...
-                                     #:derive (~? derive-arg #f)
-                                     #:make-result (~? make-result-arg #f))))
+                 ;; Allowing syntax-time #f or an expr that must evaluate to
+                 ;; a parser is a terrible interface.  So we will allow a
+                 ;; second chance to evaluate to false and get a non-between
+                 ;; sequence.
+                 #'(if between-arg*
+                       (binding-sequence parts-with-betweens ...
+                                         #:derive (~? derive-arg #f)
+                                         #:make-result (~? make-result-arg #f))
+                       (binding-sequence part ...
+                                         #:derive (~? derive-arg #f)
+                                         #:make-result (~? make-result-arg #f)))))
          (with-syntax ([(internal-name ...) (generate-temporaries #'(part ...))])
            #'(proc-parser #:name "TODO-binding-seq-name"
                           ;; TODO - other optional args
