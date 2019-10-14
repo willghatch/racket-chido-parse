@@ -603,6 +603,7 @@ This is an implementation of the same idea, but also adding support for operator
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;;; Operator Stuff
 
+;; TODO -- these predicates and other functions that operate on operators should normalize parsers -- maybe using parser->usable before comparison.  The normalization probably needs to be somewhat lazy, or at least should not be done during readtable construction/extension.  But it can probably be done during the readtable cache setup phase.
 (define (infix-operator? readtable parser)
   (dict-has-key? (chido-readtable-infix-operator->associativity readtable) parser))
 (define (prefix-operator? readtable parser)
