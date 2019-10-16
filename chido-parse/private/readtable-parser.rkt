@@ -600,6 +600,24 @@ This is an implementation of the same idea, but also adding support for operator
 (define chido-readtable->read1/layout
   (cached-access chido-readtable-layout*+read1-parser))
 
+(define (make-current-readtable-x-parser extractor name)
+  (proc-parser
+   #:name name
+   (λ (port) (parse* port (extractor (current-chido-readtable))))))
+(define current-readtable-read1-parser
+  (make-current-readtable-x-parser chido-readtable->read1
+                                   "current-readtable-read1-parser"))
+(define current-readtable-symbol-parser
+  (make-current-readtable-x-parser chido-readtable->symbol
+                                   "current-readtable-symbol-parser"))
+(define current-readtable-layout*-parser
+  (make-current-readtable-x-parser chido-readtable->layout*
+                                   "current-readtable-layout*-parser"))
+(define current-readtable-layout+-parser
+  (make-current-readtable-x-parser chido-readtable->layout+
+                                   "current-readtable-layout+-parser"))
+
+
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;;; Operator Stuff
 
@@ -791,8 +809,14 @@ This is an implementation of the same idea, but also adding support for operator
                             (- (parse-derivation-end-position derivation)
                                (parse-derivation-start-position derivation)))))
 
-(define hash-t-parser (wrap-derivation "#t" (λ(x)(mk-stx #t x))))
-(define hash-f-parser (wrap-derivation "#f" (λ(x)(mk-stx #f x))))
+(define hash-t-parser
+  (wrap-derivation (follow-filter "#t"
+                                  current-readtable-symbol-parser)
+                   (λ(x)(mk-stx #t x))))
+(define hash-f-parser
+  (wrap-derivation (follow-filter "#f"
+                                  current-readtable-symbol-parser)
+                   (λ(x)(mk-stx #f x))))
 
 (define post-quote-read-1
   (proc-parser
@@ -931,22 +955,6 @@ This is an implementation of the same idea, but also adding support for operator
    (extend-chido-readtable rt rt-add-type (make-raw-string-parser left right
                                                                   #:wrapper wrapper))
    rt-add-type right-parser))
-
-(define current-readtable-read1-parser
-  (proc-parser
-   #:name "current-readtable-read1-parser"
-   (λ (port) (parse* port (chido-readtable->read1
-                           (current-chido-readtable))))))
-(define current-readtable-layout*-parser
-  (proc-parser
-   #:name "current-readtable-layout*-parser"
-   (λ (port) (parse* port (chido-readtable->layout*
-                           (current-chido-readtable))))))
-(define current-readtable-layout+-parser
-  (proc-parser
-   #:name "current-readtable-layout+-parser"
-   (λ (port) (parse* port (chido-readtable->layout+
-                           (current-chido-readtable))))))
 
 
 (define (chido-readtable-add-mixfix-operator
