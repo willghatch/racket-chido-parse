@@ -26,7 +26,7 @@
  ;alt-parser-null?
  (rename-out [make-proc-parser proc-parser])
  proc-parser?
- ;prop:custom-parser
+ prop:custom-parser
 
  non-cached-parser-thunk
 

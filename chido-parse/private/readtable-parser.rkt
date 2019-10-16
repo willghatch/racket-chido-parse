@@ -131,10 +131,8 @@ This is an implementation of the same idea, but also adding support for operator
    ;; To cache precidence lattice traversal and cycle detection
    [precidence-transitive-greater-relations #:mutable]
    )
- ; #:prop prop:custom-parser
- ; (λ (self)
- ;   ;; return a parser object
- ;   TODO)
+  #:property prop:custom-parser
+  (λ (self) (chido-readtable->read1 self))
   )
 
 
@@ -1207,6 +1205,9 @@ This is an implementation of the same idea, but also adding support for operator
                  '((testing)))
    (define s1 "(hello ( goodbye () ( ( ) ) ) bandicoot kangaroo ( aardvark   ))")
    (check-equal? (p* s1 r1)
+                 (list (read (open-input-string s1))))
+   ;; Check that using the readtable directly is the same as ->read1
+   (check-equal? (p* s1 my-rt)
                  (list (read (open-input-string s1))))
    (check-equal? (p* "\"testing 123\"" r1)
                  '("testing 123"))
