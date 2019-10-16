@@ -7,6 +7,7 @@
  "parameters.rkt"
  racket/stream
  racket/match
+ racket/list
  (for-syntax
   racket/base
   syntax/parse
@@ -62,7 +63,7 @@
   )
 
 (define-syntax (define-bnf-arm stx)
-  ;; TODO - declare layout parsers
+  ;; TODO - option for whether or not to blacklist literal parts
   (syntax-parse stx
     [(_ arm-name:id
         spec:bnf-arm-alt-spec
@@ -73,20 +74,22 @@
         ...)
      (define/syntax-parse (alt-name/direct ...)
        #'((~? spec.name #f) ...))
-     (define/syntax-parse (alt-name/inferred ...)
+     (define/syntax-parse ([alt-name/inferred [symbol-blacklist ...]] ...)
        (for/list ([alt (syntax->list #'(spec ...))])
          (syntax-parse alt
            [s:bnf-arm-alt-spec
             (define elems
               (syntax->list #'(~? (s.elem ...) ())))
-            (define str-elems
-              (filter-map (syntax-parser [x:str (syntax->datum #'x)]
-                                         [else #f])
-                          elems))
+            (define str-elems/stx
+              (filter (syntax-parser [x:str #t]
+                                     [else #f])
+                      elems))
+            (define str-elems (map syntax->datum str-elems/stx))
             (define name (if (null? str-elems)
                              #f
                              (string-join str-elems "_")))
-            (datum->syntax alt name alt)])))
+            (list (datum->syntax alt name alt)
+                  (list str-elems))])))
      #'(begin
          (define rt1 (set-chido-readtable-symbol-support empty-chido-readtable #f))
          (define layout-arg-use (~? layout-arg 'required))
@@ -113,7 +116,11 @@
            (for/fold ([rt rt2])
                      ([parser (~? layout-parsers (list " " "\n" "\t" "\r"))])
              (extend-chido-readtable rt 'layout parser)))
-         (define arm-name (chido-parse-parameter rt3)))]))
+         (define rt4 (chido-readtable-blacklist-symbols
+                      rt3
+                      (flatten (list (list 'symbol-blacklist ...)
+                                     ...))))
+         (define arm-name (chido-parse-parameter rt4)))]))
 
 
 

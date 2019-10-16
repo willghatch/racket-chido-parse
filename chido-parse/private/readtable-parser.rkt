@@ -29,6 +29,9 @@ This is an implementation of the same idea, but also adding support for operator
   [chido-readtable->layout+ (-> chido-readtable? any/c)]
   [set-chido-readtable-symbol-support (-> chido-readtable? any/c chido-readtable?)]
   [chido-readtable-symbol-support? (-> chido-readtable? boolean?)]
+  [chido-readtable-blacklist-symbols (-> chido-readtable?
+                                         (listof (or/c symbol? string?))
+                                         chido-readtable?)]
   [chido-readtable-add-mixfix-operator
    (->* (chido-readtable? (or/c symbol? string?))
         (#:layout (or/c 'required 'optional 'none)
@@ -63,7 +66,6 @@ This is an implementation of the same idea, but also adding support for operator
   racket/base
   syntax/parse
   ))
-
 
 (struct chido-readtable
   (
@@ -250,22 +252,14 @@ This is an implementation of the same idea, but also adding support for operator
         [layout-parsers
          (cons parser (chido-readtable-layout-parsers rt))]
         [flush-state? #t])]))
-  (define (->symbol symstr)
-    (match symstr
-      [(? string?) (string->symbol symstr)]
-      [(? symbol?) symstr]))
   (define pre-op
     (match symbol-blacklist
       [#f pre-blacklist]
-      [#t (struct-copy chido-readtable pre-blacklist
-                       [symbol-blacklist (cons (->symbol (parser-name parser))
-                                               (chido-readtable-symbol-blacklist
-                                                pre-blacklist))])]
+      [#t (chido-readtable-blacklist-symbols
+           pre-blacklist
+           (list (->symbol (parser-name parser))))]
       [(list strsym ...)
-       (struct-copy chido-readtable pre-blacklist
-                    [symbol-blacklist (append (map ->symbol strsym)
-                                              (chido-readtable-symbol-blacklist
-                                               pre-blacklist))])]))
+       (chido-readtable-blacklist-symbols pre-blacklist (map ->symbol strsym))]))
 
   (define op-name->op
     (chido-readtable-operator-name->operator pre-op))
@@ -325,6 +319,12 @@ This is an implementation of the same idea, but also adding support for operator
   (struct-copy chido-readtable rt
                [symbol-support? (not (not bool))]
                [flush-state? #t]))
+
+(define (chido-readtable-blacklist-symbols rt symbols)
+  (struct-copy chido-readtable rt
+               [symbol-blacklist (remove-duplicates
+                                  (append (map ->symbol symbols)
+                                          (chido-readtable-symbol-blacklist rt)))]))
 
 (define (parser-list->trie parsers)
   (for/fold ([t empty-trie])
@@ -1086,6 +1086,11 @@ This is an implementation of the same idea, but also adding support for operator
                    #:precidence-less-than lts)
                   more)]))]))
 
+
+(define (->symbol symstr)
+  (match symstr
+    [(? string?) (string->symbol symstr)]
+    [(? symbol?) symstr]))
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
