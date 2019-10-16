@@ -48,10 +48,15 @@
   (define-syntax-class bnf-arm-alt-spec
     ;; TODO - name
     ;; TODO - detect left/right recursion (IE operator-ness)
-    (pattern [elem:binding-sequence-elem ...]
+    (pattern [elem:binding-sequence-elem
+              ...+
+              (~or (~optional (~seq #:name name:str)))
+              ...]
              #:attr parser #f)
     (pattern parser:expr
-             #:attr (elem 1) #f))
+             #:attr (elem 1) #f
+             #:attr name #f
+             ))
   )
 
 (define-syntax (define-bnf-arm stx)
@@ -77,7 +82,8 @@
                                  spec.elem ...
                                  #:between (if (eq? 'none layout-arg-use)
                                                #f
-                                               between-layout-parser)))
+                                               between-layout-parser)
+                                 #:name (~? spec.name #f)))
                             ...))
          (define rt2
            (for/fold ([rt rt1])
@@ -104,14 +110,12 @@
     ["a" "a" "b"]
     #:layout 'none)
   (define-bnf-arm test1/layout
-    ["a" [#:ignore #t "b"] "c"]
+    ["a" [#:ignore #t "b"] "c" #:name "test-name-1"]
     ["a" "a" "b"]
     #:layout 'required)
   (check-equal? (->results (parse* (open-input-string "abc")
                                    (chido-readtable->read1 (test1))))
                 '(("a" "c")))
-  (eprintf "test: ~v\n" (parse* (open-input-string "abc")
-                                (chido-readtable->read1 (test1))))
   (check-equal? (->results (parse* (open-input-string "aab")
                                    (chido-readtable->read1 (test1))))
                 '(("a" "a" "b")))
@@ -128,5 +132,13 @@
   (check-equal? (->results (parse* (open-input-string "a b b c")
                                    (chido-readtable->read1 (test1/layout))))
                 '())
+
+  ;; check that naming works
+  (check-equal? (parser-name
+                 (parse-derivation-parser
+                  (car (stream->list
+                        (parse* (open-input-string "a b c")
+                                (chido-readtable->read1 (test1/layout)))))))
+                "test-name-1")
 
   )

@@ -229,7 +229,8 @@ For sequence/repetition:
 (define-syntax (binding-sequence stx)
   (syntax-parse stx
     [(_ part:binding-sequence-elem ...+
-        (~or (~optional (~seq #:derive derive-arg:expr))
+        (~or (~optional (~seq #:name name:expr))
+             (~optional (~seq #:derive derive-arg:expr))
              (~optional (~seq #:make-result make-result-arg:expr))
              (~optional (~seq #:between between-arg:expr)))
         ...)
@@ -252,13 +253,15 @@ For sequence/repetition:
                  ;; sequence.
                  #'(if between-arg*
                        (binding-sequence parts-with-betweens ...
+                                         #:name (~? name #f)
                                          #:derive (~? derive-arg #f)
                                          #:make-result (~? make-result-arg #f))
                        (binding-sequence part ...
+                                         #:name (~? name #f)
                                          #:derive (~? derive-arg #f)
                                          #:make-result (~? make-result-arg #f)))))
          (with-syntax ([(internal-name ...) (generate-temporaries #'(part ...))])
-           #'(proc-parser #:name "TODO-binding-seq-name"
+           #'(proc-parser #:name (or (~? name #f) "TODO-binding-seq-name")
                           ;; TODO - other optional args
                           (λ (port)
                             (binding-sequence-helper
