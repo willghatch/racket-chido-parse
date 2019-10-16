@@ -10,6 +10,8 @@
  (for-syntax
   racket/base
   syntax/parse
+  racket/list
+  racket/string
   ))
 (module+ test
   (require
@@ -69,6 +71,22 @@
              (~optional (~seq #:layout-parsers layout-parsers:expr))
              )
         ...)
+     (define/syntax-parse (alt-name/direct ...)
+       #'((~? spec.name #f) ...))
+     (define/syntax-parse (alt-name/inferred ...)
+       (for/list ([alt (syntax->list #'(spec ...))])
+         (syntax-parse alt
+           [s:bnf-arm-alt-spec
+            (define elems
+              (syntax->list #'(~? (s.elem ...) ())))
+            (define str-elems
+              (filter-map (syntax-parser [x:str (syntax->datum #'x)]
+                                         [else #f])
+                          elems))
+            (define name (if (null? str-elems)
+                             #f
+                             (string-join str-elems "_")))
+            (datum->syntax alt name alt)])))
      #'(begin
          (define rt1 (set-chido-readtable-symbol-support empty-chido-readtable #f))
          (define layout-arg-use (~? layout-arg 'required))
@@ -83,7 +101,8 @@
                                  #:between (if (eq? 'none layout-arg-use)
                                                #f
                                                between-layout-parser)
-                                 #:name (~? spec.name #f)))
+                                 #:name (or alt-name/direct
+                                            alt-name/inferred)))
                             ...))
          (define rt2
            (for/fold ([rt rt1])
@@ -140,5 +159,11 @@
                         (parse* (open-input-string "a b c")
                                 (chido-readtable->read1 (test1/layout)))))))
                 "test-name-1")
+  (check-equal? (parser-name
+                 (parse-derivation-parser
+                  (car (stream->list
+                        (parse* (open-input-string "a a b")
+                                (chido-readtable->read1 (test1/layout)))))))
+                "a_a_b")
 
   )
