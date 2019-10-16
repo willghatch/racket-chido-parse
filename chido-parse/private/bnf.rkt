@@ -53,12 +53,18 @@
     ;; TODO - detect left/right recursion (IE operator-ness)
     (pattern [elem:binding-sequence-elem
               ...+
-              (~or (~optional (~seq #:name name:str)))
+              (~or (~optional (~seq #:name name:str))
+                   (~optional (~seq #:associativity assoc:expr))
+                   (~optional (~seq #:precidence-greater-than pgt:expr))
+                   (~optional (~seq #:precidence-less-than plt:expr)))
               ...]
              #:attr parser #f)
     (pattern parser:expr
              #:attr (elem 1) #f
              #:attr name #f
+             #:attr assoc #f
+             #:attr pgt #f
+             #:attr plt #f
              ))
   )
 
@@ -74,7 +80,13 @@
         ...)
      (define/syntax-parse (alt-name/direct ...)
        #'((~? spec.name #f) ...))
-     (define/syntax-parse ([alt-name/inferred [symbol-blacklist ...]] ...)
+     (define/syntax-parse
+       ([alt-name/inferred
+         [symbol-blacklist ...]
+         [prefix-op? postfix-op?]
+         assoc
+         precidence-gt
+         precidence-lt] ...)
        (for/list ([alt (syntax->list #'(spec ...))])
          (syntax-parse alt
            [s:bnf-arm-alt-spec
@@ -88,8 +100,29 @@
             (define name (if (null? str-elems)
                              #f
                              (string-join str-elems "_")))
+            (define prefix-op?
+              (syntax-parse elems
+                [(x:id others ...)
+                 (datum->syntax #'x
+                                (free-identifier=? #'x #'arm-name)
+                                #'x)]
+                [else #'#f]))
+            (define postfix-op?
+              (syntax-parse elems
+                [(others ... x:id)
+                 (datum->syntax #'x
+                                (free-identifier=? #'x #'arm-name)
+                                #'x)]
+                [else #'#f]))
+            (define assoc #'(~? s.assoc #f))
+            (define precidence-gt #'(~? s.pgt '()))
+            (define precidence-lt #'(~? s.plt '()))
             (list (datum->syntax alt name alt)
-                  (list str-elems))])))
+                  (list str-elems)
+                  (list prefix-op? postfix-op?)
+                  assoc
+                  precidence-gt
+                  precidence-lt)])))
      #'(begin
          (define rt1 (set-chido-readtable-symbol-support empty-chido-readtable #f))
          (define layout-arg-use (~? layout-arg 'required))
@@ -111,9 +144,24 @@
                             ...))
          (define rt2
            (for/fold ([rt rt1])
-                     ([parser alts])
+                     ([parser alts]
+                      [op-spec (list (list prefix-op? postfix-op?) ...)]
+                      [a (list assoc ...)]
+                      [pgt (list precidence-gt ...)]
+                      [plt (list precidence-lt ...)])
              ;; TODO - properly detect operators, precidence, assoc, etc
-             (extend-chido-readtable rt 'left-recursive-nonterminating parser)))
+             (define op-type
+               (match op-spec
+                 [(list #f #f) #f]
+                 [(list #f #t) 'postfix]
+                 [(list #t #f) 'prefix]
+                 [(list #t #t) 'infix]))
+             (extend-chido-readtable
+              rt 'left-recursive-nonterminating parser
+              #:operator op-type
+              #:associativity a
+              #:precidence-greater-than pgt
+              #:precidence-less-than plt)))
          (define rt3
            (for/fold ([rt rt2])
                      ([parser (~? layout-parsers (list " " "\n" "\t" "\r"))])
@@ -174,5 +222,22 @@
                         (parse* (open-input-string "a a b")
                                 (chido-readtable->read1 (test1/layout)))))))
                 "a_a_b")
+
+  (define-bnf-arm test2
+    ["n"]
+    [test2 "+" test2 #:associativity 'left]
+    [test2 "*" test2 #:associativity 'left #:precidence-greater-than '("+")]
+    [test2 "^" test2 #:associativity 'right #:precidence-greater-than '("*")]
+    [test2 "++"]
+    ["if" test2 "then" test2 "else" test2 #:precidence-less-than '("+")]
+    #:layout 'none)
+
+  ;; TODO - this is going into an infinite list for the plus operator... something is going wrong...
+  #;(check-equal? (->results (parse* (open-input-string "n")
+                                   (chido-readtable->read1 (test2))))
+                '("n"))
+  #;(check-equal? (->results (parse* (open-input-string "n + n * n * n + n")
+                                   test2))
+                '((("n" "+" (("n" "*" "n") "*" "n")) "+" "n")))
 
   )

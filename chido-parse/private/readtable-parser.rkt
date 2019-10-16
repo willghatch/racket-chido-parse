@@ -11,12 +11,20 @@ This is an implementation of the same idea, but also adding support for operator
  (contract-out
   ;; TODO - re-think what the empty readtable should be...
   [empty-chido-readtable chido-readtable?]
-  [extend-chido-readtable (-> chido-readtable?
-                              (or/c 'terminating 'soft-terminating
-                                    'nonterminating 'layout
-                                    'left-recursive-nonterminating)
-                              any/c
-                              chido-readtable?)]
+  [extend-chido-readtable
+   (->* (chido-readtable?
+         (or/c 'terminating 'soft-terminating
+               'nonterminating 'layout
+               'left-recursive-nonterminating)
+         ;; parser...
+         any/c)
+        (#:operator (or/c #f 'infix 'prefix 'postfix)
+         #:precidence-less-than (listof any/c)
+         #:precidence-greater-than (listof any/c)
+         #:associativity (or/c 'left 'right #f)
+         ;#:symbol-blacklist (listof (or/c symbol? string?))
+         )
+        chido-readtable?)]
   [chido-readtable-add-list-parser (-> chido-readtable?
                                        string? string?
                                        chido-readtable?)]
