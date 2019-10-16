@@ -93,10 +93,12 @@
      #'(begin
          (define rt1 (set-chido-readtable-symbol-support empty-chido-readtable #f))
          (define layout-arg-use (~? layout-arg 'required))
-         (define (between-layout-parser)
+         (define between-layout-parser
            (match layout-arg-use
-             ['required (chido-readtable->layout+ (arm-name))]
-             ['optional (chido-readtable->layout* (arm-name))]
+             ['required (non-cached-parser-thunk
+                         (λ() (chido-readtable->layout+ (arm-name))))]
+             ['optional (non-cached-parser-thunk
+                         (λ() (chido-readtable->layout* (arm-name))))]
              ['none #f]))
          (define alts (list (~? spec.parser
                                 (binding-sequence
