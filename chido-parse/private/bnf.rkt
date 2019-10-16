@@ -100,14 +100,14 @@
             (define name (if (null? str-elems)
                              #f
                              (string-join str-elems "_")))
-            (define prefix-op?
+            (define postfix-op?
               (syntax-parse elems
                 [(x:id others ...)
                  (datum->syntax #'x
                                 (free-identifier=? #'x #'arm-name)
                                 #'x)]
                 [else #'#f]))
-            (define postfix-op?
+            (define prefix-op?
               (syntax-parse elems
                 [(others ... x:id)
                  (datum->syntax #'x
@@ -149,15 +149,19 @@
                       [a (list assoc ...)]
                       [pgt (list precidence-gt ...)]
                       [plt (list precidence-lt ...)])
-             ;; TODO - properly detect operators, precidence, assoc, etc
              (define op-type
                (match op-spec
                  [(list #f #f) #f]
                  [(list #f #t) 'postfix]
                  [(list #t #f) 'prefix]
                  [(list #t #t) 'infix]))
+             ;; TODO - if I add everything as left-recursive-nonterminating, I get an infinite loop.  I'm not sure why.  It's a bad problem...
+             (define extension-type
+               (if (member op-type '(infix postfix))
+                   'left-recursive-nonterminating
+                   'nonterminating))
              (extend-chido-readtable
-              rt 'left-recursive-nonterminating parser
+              rt extension-type parser
               #:operator op-type
               #:associativity a
               #:precidence-greater-than pgt
@@ -224,20 +228,49 @@
                 "a_a_b")
 
   (define-bnf-arm test2
-    ["n"]
+    "n"
     [test2 "+" test2 #:associativity 'left]
     [test2 "*" test2 #:associativity 'left #:precidence-greater-than '("+")]
     [test2 "^" test2 #:associativity 'right #:precidence-greater-than '("*")]
-    [test2 "++"]
+    [test2 "++" #:precidence-less-than '("*") #:precidence-greater-than '("+")]
     ["if" test2 "then" test2 "else" test2 #:precidence-less-than '("+")]
-    #:layout 'none)
+    #:layout 'optional)
 
-  ;; TODO - this is going into an infinite list for the plus operator... something is going wrong...
-  #;(check-equal? (->results (parse* (open-input-string "n")
+  (check-equal? (->results (parse* (open-input-string "n")
                                    (chido-readtable->read1 (test2))))
                 '("n"))
-  #;(check-equal? (->results (parse* (open-input-string "n + n * n * n + n")
-                                   test2))
+  (check-equal? (->results (whole-parse*
+                            (open-input-string "n+n+n")
+                            test2))
+                '((("n" "+" "n") "+" "n")))
+  (check-equal? (->results (whole-parse*
+                            (open-input-string "n ++")
+                            test2))
+                '(("n" "++")))
+  (check-equal? (->results (whole-parse*
+                            (open-input-string "n + n ++")
+                            test2))
+                '(("n" "+" ("n" "++"))))
+  (check-equal? (->results (whole-parse*
+                            (open-input-string "n * n ++")
+                            test2))
+                '((("n" "*" "n") "++")))
+  (check-equal? (->results (whole-parse* (open-input-string "n + n * n * n + n")
+                                         test2))
                 '((("n" "+" (("n" "*" "n") "*" "n")) "+" "n")))
+
+  (check-equal? (->results (whole-parse*
+                            (open-input-string "if n then n else n")
+                            test2))
+                '(("if" "n" "then" "n" "else" "n")))
+  ;; Optional space around operators is not as nice as required space.
+  (check-equal? (->results (whole-parse*
+                            (open-input-string "ifnthennelsen")
+                            test2))
+                '(("if" "n" "then" "n" "else" "n")))
+  (check-equal? (->results (whole-parse*
+                            (open-input-string "n + if n then n else n + n")
+                            test2))
+                '(("n" "+" ("if" "n" "then" "n" "else" ("n" "+" "n")))))
 
   )
