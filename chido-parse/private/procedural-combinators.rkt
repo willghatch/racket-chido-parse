@@ -906,12 +906,6 @@ For sequence/repetition:
                               #:between "_")))
    '(("a" "1" "2" "3" "7" "8" "9" "b")))
 
-  #|
-  S-expression tests:
-  (()()()()()) -- this should work -- no spaces are needed between expressions in lists or in the top-level, except to denote boundaries between symbols and numbers.
-  |#
-
-
 
 
   )

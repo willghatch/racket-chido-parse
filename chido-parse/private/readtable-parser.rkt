@@ -1200,6 +1200,8 @@ This is an implementation of the same idea, but also adding support for operator
                  '((())))
    (check-equal? (p* "( ( ) )" r1)
                  '((())))
+   (check-equal? (p* "(()()()()())" r1)
+                 '((()()()()())))
    (check-pred parse-failure? (p* ")" r1))
    (check-equal? (p* "testing" r1)
                  '(testing))
