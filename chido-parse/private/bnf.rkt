@@ -88,6 +88,22 @@
                       "only exists for use as a hidden keyword of define-bnf-arm"
                       stx))
 
+(define-syntax (extend-bnf-arm stx)
+  (syntax-parse stx
+    [(_ arm:expr spec:bnf-arm-alt-spec ...+)
+     #|
+     TODO - the BNF arm needs to store its #:layout spec...
+          - This implies that readtables need to store extra data?!
+     Or...
+     • readtables have a hash table of extra user data, BNF stores stuff here and has a default value for a readtable that hasn't set it.
+     • !!! Maybe this means I just always add the between parsers, and they check the readtable field to tell whether they use the layout parser or an epsilon parser.
+     • or readtables could have a hash-table specific field
+     • or maybe I always just give the keyword... I don't like that.
+
+     So my favorite idea is for readtables to have a hash table of extra data, and have BNF have keys to store the layout inheritance policy.
+     |#
+     (raise-syntax-error 'TODO)]))
+
 (define-syntax (define-bnf-arm stx)
   ;; TODO - option for whether or not to blacklist literal parts
   (syntax-parse stx
@@ -101,7 +117,7 @@
              )
         ...
         spec:bnf-arm-alt-spec
-        ...)
+        ...+)
      (define/syntax-parse (alt-name/direct ...)
        #'((~? spec.name #f) ...))
      (define/syntax-parse
@@ -378,6 +394,18 @@
                             layout-parsers/use
                             layout-alt))))
            inner-bnf-name))]))
+
+(define-syntax (extend-bnf stx)
+  (syntax-parse stx
+    [(_ bnf arm-name new-parser/sequence-spec ...+)
+     #'(let ([bnf* bnf]
+             [arm-name* arm-name])
+         ;; TODO - better error message on this hash-ref
+         (struct-copy
+          bnf bnf*
+          [arm-hash (hash-set bnf* arm-name*
+                              (extend-bnf-arm (hash-ref bnf* arm-name*)
+                                              new-parser/sequence-spec ...))]))]))
 
 
 (module+ test
