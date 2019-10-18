@@ -150,17 +150,25 @@ For sequence/repetition:
                               ignores
                               splices)
   ;; Helper function for binding-sequence
+  (define (result->list r)
+    (cond [(and (syntax? r) (syntax->list r))]
+          [(list? r) r]
+          [else (error 'binding-sequence
+                       "result to be spliced is not a list: ~v"
+                       r)]))
+  (define (do-splices result n)
+    (if (< n 2)
+        (result->list result)
+        (apply append
+               (map (λ (x) (do-splices x (sub1 n)))
+                    (result->list result)))))
   (cond [(null? derivations) '()]
         [(car ignores) (do-ignore-and-splice (cdr derivations)
                                              (cdr ignores)
                                              (cdr splices))]
-        [(car splices)
+        [(and (car splices) (< 0 (car splices)))
          (let* ([r (parse-derivation-result (car derivations))]
-                [this-list (cond [(and (syntax? r) (syntax->list r))]
-                                 [(list? r) r]
-                                 [else (error 'binding-sequence
-                                              "result to be spliced is not a list: ~v"
-                                              r)])])
+                [this-list (do-splices r (car splices))])
            (append this-list (do-ignore-and-splice (cdr derivations)
                                                    (cdr ignores)
                                                    (cdr splices))))]
@@ -235,7 +243,11 @@ For sequence/repetition:
          (for/parse ([internal-name (parse* port parser/repeat #:start start-point)])
                     (~? (define part.name internal-name) (void))
                     (define current-ignore part.ignore)
-                    (define current-splice part.splice)
+                    (define current-splice (or part.splice 0))
+                    (when (not (integer? current-splice))
+                      (error 'binding-sequence
+                             "splice argument is not an integer: ~v"
+                             current-splice))
                     (binding-sequence-helper port
                                              derive
                                              make-result
@@ -783,10 +795,10 @@ For sequence/repetition:
      (list '()))
 
   (c check-equal?
-       (map parse-derivation-result
-            (stream->list
-             (parse* (open-input-string "test") basic-s-exp)))
-       '(t te tes test))
+     (map parse-derivation-result
+          (stream->list
+           (parse* (open-input-string "test") basic-s-exp)))
+     '(t te tes test))
 
   (define s-exp-str-1 "(test test (test test) test (hello foo (bar aoeu)
                                    thaoneuth)
@@ -858,19 +870,19 @@ For sequence/repetition:
                                                      #:between "_")))
                 '(("b")))
   (check-equal? (->results (parse* (open-input-string "aaab")
-                                   (binding-sequence [#:splice #t (kleene-star "a")]
+                                   (binding-sequence [#:splice 1 (kleene-star "a")]
                                                      "b")))
                 '(("a" "a" "a" "b")))
   (check-equal? (->results (parse* (open-input-string "aaa_b")
-                                   (binding-sequence [#:splice #t (kleene-star "a")]
+                                   (binding-sequence [#:splice 1 (kleene-star "a")]
                                                      "b"
                                                      #:between "_")))
                 '(("a" "a" "a" "b")))
   (check-equal? (->results
                  (parse* (open-input-string "a-a-a_b")
-                         (binding-sequence [#:splice #t (kleene-star
-                                                         "a"
-                                                         #:between "-")]
+                         (binding-sequence [#:splice 1 (kleene-star
+                                                        "a"
+                                                        #:between "-")]
                                            "b"
                                            #:between "_")))
                 '(("a" "a" "a" "b")))
@@ -894,7 +906,7 @@ For sequence/repetition:
 
   ;; check binding-sequence repeat
   (check-equal? (->results (parse* (open-input-string "a_a_a_b")
-                                   (binding-sequence [#:splice #t #:repeat-min 0 "a"]
+                                   (binding-sequence [#:splice 1 #:repeat-min 0 "a"]
                                                      "b"
                                                      #:between "_")))
                 '(("a" "a" "a" "b")))
@@ -903,14 +915,24 @@ For sequence/repetition:
    (->results
     (parse* (open-input-string "a_1_2_3_7-8-9_b")
             (binding-sequence "a"
-                              [#:splice #t (binding-sequence "1" "2" "3"
-                                                             #:inherit-between #t)]
-                              [#:splice #t (binding-sequence "7" "8" "9"
-                                                             #:inherit-between #t
-                                                             #:between "-")]
+                              [#:splice 1 (binding-sequence "1" "2" "3"
+                                                            #:inherit-between #t)]
+                              [#:splice 1 (binding-sequence "7" "8" "9"
+                                                            #:inherit-between #t
+                                                            #:between "-")]
                               "b"
                               #:between "_")))
    '(("a" "1" "2" "3" "7" "8" "9" "b")))
+  (check-equal?
+   (->results
+    (parse* (open-input-string "a_1_2_3_1_2_3_b")
+            (binding-sequence "a"
+                              [#:splice 2 #:repeat-min 0
+                               (binding-sequence "1" "2" "3"
+                                                 #:inherit-between #t)]
+                              "b"
+                              #:between "_")))
+   '(("a" "1" "2" "3" "1" "2" "3" "b")))
 
 
 
