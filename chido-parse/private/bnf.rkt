@@ -51,6 +51,10 @@
 
 |#
 
+;; TODO - repetition (kleene star/plus and generalization)
+;; TODO - sub-sequences (eg. so a repetition can be over a sequence)
+;; TODO - bnf extension forms -- something like (extend-bnf bnf-name arm-name new-parser/sequence-spec)
+
 (define bnf-default-layout-requirement 'optional)
 (define bnf-default-layout-parsers '(" " "\t" "\r" "\n"))
 
