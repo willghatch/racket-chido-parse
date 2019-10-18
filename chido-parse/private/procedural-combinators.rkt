@@ -174,6 +174,9 @@ For sequence/repetition:
                          (~optional (~seq #:bind name:id))
                          (~optional (~seq #:ignore ignore-given:expr))
                          (~optional (~seq #:splice splice-given:expr))
+                         (~optional (~seq #:repeat-min repeat-min-given:expr))
+                         (~optional (~seq #:repeat-max repeat-max-given:expr))
+                         (~optional (~seq #:repeat-greedy? repeat-greedy-given:expr))
                          )
                     ...])
              #:attr parser
@@ -182,30 +185,62 @@ For sequence/repetition:
                                      "given a parser spec with no parser"
                                      #'whole-pattern))
              #:attr ignore #'(~? ignore-given #f)
-             #:attr splice #'(~? splice-given #f))
+             #:attr splice #'(~? splice-given #f)
+             #:attr repeat-min #'(~? repeat-min-given #f)
+             #:attr repeat-max #'(~? repeat-max-given #f)
+             #:attr repeat-greedy #'(~? repeat-greedy-given #f)
+             )
     (pattern parser:expr
              #:attr name #f
              #:attr ignore #'#f
-             #:attr splice #'#f)))
+             #:attr splice #'#f
+             #:attr repeat-min #'#f
+             #:attr repeat-max #'#f
+             #:attr repeat-greedy #'#f
+             )))
+
+(define-syntax (hidden-between-propagate-key stx)
+  (raise-syntax-error 'hidden-between-propagate-key
+                      "only exists for use as a hidden keyword"
+                      stx))
+
 (define-syntax (binding-sequence-helper stx)
   (syntax-parse stx
     [(_ port derive make-result start-point
+        between-propagate
         ([done-int-names ...] [done-ignores ...] [done-splices ...])
         [internal-name:id part:binding-sequence-elem]
         rest ...)
-     #'(for/parse ([internal-name (parse* port part.parser #:start start-point)])
-                  (~? (define part.name internal-name) (void))
-                  (define current-ignore part.ignore)
-                  (define current-splice part.splice)
-                  (binding-sequence-helper port
-                                           derive
-                                           make-result
-                                           internal-name
-                                           ([done-int-names ... internal-name]
-                                            [done-ignores ... current-ignore]
-                                            [done-splices ... current-splice])
-                                           rest ...))]
+     #'(let* ([repeat-min* (~? part.repeat-min #f)]
+              [repeat-max* (~? part.repeat-max #f)]
+              [repeat-greedy? (~? part.repeat-greedy #f)]
+              [repeat (or repeat-min* repeat-max*)]
+              [repeat-min (match repeat-min* [#f 0] [#t 0] [else repeat-min*])]
+              [repeat-max (match repeat-max*
+                            [#f +inf.0] [#t +inf.0] [else repeat-max*])]
+              [parser/no-repeat part.parser]
+              [parser/repeat (if repeat
+                                 (repetition parser/no-repeat
+                                             #:min repeat-min
+                                             #:max repeat-max
+                                             #:between between-propagate
+                                             #:greedy? repeat-greedy?)
+                                 parser/no-repeat)])
+         (for/parse ([internal-name (parse* port parser/repeat #:start start-point)])
+                    (~? (define part.name internal-name) (void))
+                    (define current-ignore part.ignore)
+                    (define current-splice part.splice)
+                    (binding-sequence-helper port
+                                             derive
+                                             make-result
+                                             internal-name
+                                             between-propagate
+                                             ([done-int-names ... internal-name]
+                                              [done-ignores ... current-ignore]
+                                              [done-splices ... current-splice])
+                                             rest ...)))]
     [(_ port derive make-result start-point
+        between-propagate
         ([done-int-names ...] [done-ignores ...] [done-splices ...]))
      #'(let* ([derive-arg derive]
               [make-result-arg make-result]
@@ -228,7 +263,9 @@ For sequence/repetition:
          (apply do-derive (list done-int-names ...)))]))
 (define-syntax (binding-sequence stx)
   (syntax-parse stx
-    [(_ part:binding-sequence-elem ...+
+    [(_ (~optional (~seq (~literal hidden-between-propagate-key)
+                         between-propagate:expr))
+        part:binding-sequence-elem ...+
         (~or (~optional (~seq #:name name:expr))
              (~optional (~seq #:derive derive-arg:expr))
              (~optional (~seq #:make-result make-result-arg:expr))
@@ -252,7 +289,8 @@ For sequence/repetition:
                  ;; second chance to evaluate to false and get a non-between
                  ;; sequence.
                  #'(if between-arg*
-                       (binding-sequence parts-with-betweens ...
+                       (binding-sequence hidden-between-propagate-key between-arg*
+                                         parts-with-betweens ...
                                          #:name (~? name #f)
                                          #:derive (~? derive-arg #f)
                                          #:make-result (~? make-result-arg #f))
@@ -261,16 +299,19 @@ For sequence/repetition:
                                          #:derive (~? derive-arg #f)
                                          #:make-result (~? make-result-arg #f)))))
          (with-syntax ([(internal-name ...) (generate-temporaries #'(part ...))])
-           #'(proc-parser #:name (or (~? name #f) "TODO-binding-seq-name")
-                          ;; TODO - other optional args
-                          (λ (port)
-                            (binding-sequence-helper
-                             port
-                             (~? derive-arg #f)
-                             (~? make-result-arg #f)
-                             #f
-                             ([] [] [])
-                             [internal-name part] ...)))))]))
+
+           #'(let ([between-propagate/use (~? between-propagate #f)])
+               (proc-parser #:name (or (~? name #f) "TODO-binding-seq-name")
+                            ;; TODO - other optional args
+                            (λ (port)
+                              (binding-sequence-helper
+                               port
+                               (~? derive-arg #f)
+                               (~? make-result-arg #f)
+                               #f
+                               between-propagate/use
+                               ([] [] [])
+                               [internal-name part] ...))))))]))
 
 
 (define (derivations->non-between derivations before between after)
@@ -836,6 +877,12 @@ For sequence/repetition:
   (check-equal? (->results (parse* (open-input-string "aa")
                                    bseq-a-not-a-parser))
                 '())
+
+  (check-equal? (->results (parse* (open-input-string "a_a_a_b")
+                                   (binding-sequence [#:splice #t #:repeat-min 0 "a"]
+                                                     "b"
+                                                     #:between "_")))
+                '(("a" "a" "a" "b")))
 
   #|
   S-expression tests:
