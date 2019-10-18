@@ -32,6 +32,7 @@
  racket/stream
  racket/match
  racket/list
+ racket/stxparam
  (for-syntax
   racket/base
   syntax/parse
@@ -203,6 +204,7 @@ For sequence/repetition:
   (raise-syntax-error 'hidden-between-propagate-key
                       "only exists for use as a hidden keyword"
                       stx))
+(define-syntax-parameter binding-subsequence-layout #f)
 
 (define-syntax (binding-sequence-helper stx)
   (syntax-parse stx
@@ -218,7 +220,10 @@ For sequence/repetition:
               [repeat-min (match repeat-min* [#f 0] [#t 0] [else repeat-min*])]
               [repeat-max (match repeat-max*
                             [#f +inf.0] [#t +inf.0] [else repeat-max*])]
-              [parser/no-repeat part.parser]
+              [parser/no-repeat
+               (syntax-parameterize
+                   ([binding-subsequence-layout #'between-propagate])
+                 part.parser)]
               [parser/repeat (if repeat
                                  (repetition parser/no-repeat
                                              #:min repeat-min
@@ -277,8 +282,13 @@ For sequence/repetition:
            (cons #`[#,between-parser-stx #:ignore #t]
                  (cons (car partlist)
                        (add-betweens between-parser-stx (cdr partlist))))))
-     (if (syntax-parse #'(~? between-arg #f) [#f #f] [else #t])
-         #`(let ([between-arg* between-arg])
+     (define subsequence-layout
+       (or (syntax-parameter-value #'binding-subsequence-layout) #'#f))
+     (define/syntax-parse between-arg/use
+       (or (attribute between-arg)
+           subsequence-layout))
+     (if (syntax-parse #'between-arg/use [#f #f] [else #t])
+         #`(let ([between-arg* between-arg/use])
              #,(with-syntax ([(parts-with-betweens ...)
                               (cons (car (syntax->list #'(part ...)))
                                     (add-betweens #'between-arg*
@@ -288,18 +298,18 @@ For sequence/repetition:
                  ;; a parser is a terrible interface.  So we will allow a
                  ;; second chance to evaluate to false and get a non-between
                  ;; sequence.
-                 #'(if between-arg*
-                       (binding-sequence hidden-between-propagate-key between-arg*
-                                         parts-with-betweens ...
-                                         #:name (~? name #f)
-                                         #:derive (~? derive-arg #f)
-                                         #:make-result (~? make-result-arg #f))
-                       (binding-sequence part ...
-                                         #:name (~? name #f)
-                                         #:derive (~? derive-arg #f)
-                                         #:make-result (~? make-result-arg #f)))))
+                 #'(syntax-parameterize ([binding-subsequence-layout #f])
+                     (if between-arg*
+                         (binding-sequence hidden-between-propagate-key between-arg*
+                                           parts-with-betweens ...
+                                           #:name (~? name #f)
+                                           #:derive (~? derive-arg #f)
+                                           #:make-result (~? make-result-arg #f))
+                         (binding-sequence part ...
+                                           #:name (~? name #f)
+                                           #:derive (~? derive-arg #f)
+                                           #:make-result (~? make-result-arg #f))))))
          (with-syntax ([(internal-name ...) (generate-temporaries #'(part ...))])
-
            #'(let ([between-propagate/use (~? between-propagate #f)])
                (proc-parser #:name (or (~? name #f) "TODO-binding-seq-name")
                             ;; TODO - other optional args
@@ -878,11 +888,23 @@ For sequence/repetition:
                                    bseq-a-not-a-parser))
                 '())
 
+  ;; check binding-sequence repeat
   (check-equal? (->results (parse* (open-input-string "a_a_a_b")
                                    (binding-sequence [#:splice #t #:repeat-min 0 "a"]
                                                      "b"
                                                      #:between "_")))
                 '(("a" "a" "a" "b")))
+  ;; check binding-sequence subsequnce inheritance of #:between
+  (check-equal?
+   (->results
+    (parse* (open-input-string "a_1_2_3_7-8-9_b")
+            (binding-sequence "a"
+                              [#:splice #t (binding-sequence "1" "2" "3")]
+                              [#:splice #t (binding-sequence "7" "8" "9"
+                                                             #:between "-")]
+                              "b"
+                              #:between "_")))
+   '(("a" "1" "2" "3" "7" "8" "9" "b")))
 
   #|
   S-expression tests:
