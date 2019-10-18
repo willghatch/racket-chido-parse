@@ -275,6 +275,7 @@ For sequence/repetition:
         (~or (~optional (~seq #:name name:expr))
              (~optional (~seq #:derive derive-arg:expr))
              (~optional (~seq #:make-result make-result-arg:expr))
+             (~optional (~seq #:inherit-between inherit-between:boolean))
              (~optional (~seq #:between between-arg:expr)))
         ...)
      (define (add-betweens between-parser-stx partlist)
@@ -284,7 +285,9 @@ For sequence/repetition:
                  (cons (car partlist)
                        (add-betweens between-parser-stx (cdr partlist))))))
      (define subsequence-layout
-       (or (syntax-parameter-value #'binding-subsequence-layout) #'#f))
+       (syntax-parse #'(~? inherit-between #f)
+         [#f #'#f]
+         [#t (or (syntax-parameter-value #'binding-subsequence-layout) #'#f)]))
      (define/syntax-parse between-arg/use
        (or (attribute between-arg)
            subsequence-layout))
@@ -900,8 +903,10 @@ For sequence/repetition:
    (->results
     (parse* (open-input-string "a_1_2_3_7-8-9_b")
             (binding-sequence "a"
-                              [#:splice #t (binding-sequence "1" "2" "3")]
+                              [#:splice #t (binding-sequence "1" "2" "3"
+                                                             #:inherit-between #t)]
                               [#:splice #t (binding-sequence "7" "8" "9"
+                                                             #:inherit-between #t
                                                              #:between "-")]
                               "b"
                               #:between "_")))
