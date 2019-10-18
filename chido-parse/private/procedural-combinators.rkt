@@ -221,6 +221,7 @@ For sequence/repetition:
               [repeat-max (match repeat-max*
                             [#f +inf.0] [#t +inf.0] [else repeat-max*])]
               [parser/no-repeat
+               ;; TODO - right now this is making ALL subsequences inherit the between argument.  I don't like it.  I should have some specific form recognized by binding sequences to signify a subsequence that inherits.
                (syntax-parameterize
                    ([binding-subsequence-layout #'between-propagate])
                  part.parser)]
