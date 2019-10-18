@@ -236,6 +236,7 @@
 
 (define (parser-name p)
   (cond [(parser-struct? p) (parser-struct-name p)]
+        ;; TODO - custom parsers should be able to inform this
         [(custom-parser? p) (parser-name (parser->usable p))]
         [(string? p) p]
         [(procedure? p) (parser-name (p))]
@@ -252,6 +253,8 @@
                                (or (equal? "" (proc-parser-prefix p))
                                    (proc-parser-preserve-prefix? p)))]
         [(string? p) #f]
+        ;; TODO - custom parsers should be able to inform this
+        [(custom-parser? p) #t]
         ;; TODO - this is not great, but I need this predicate to work while
         ;;        *constructing* parsers...
         [(procedure? p) #t]
@@ -263,6 +266,11 @@
         [(proc-parser? p) (equal? "" (proc-parser-prefix p))]
         [(equal? p "") #t]
         [(string? p) #f]
+        ;; TODO - custom parsers should be able to inform this
+        [(custom-parser? p) #t]
+        ;; TODO - this is not great, but I need this predicate to work while
+        ;;        *constructing* parsers...
+        [(procedure? p) #t]
         [else (error 'parser-potentially-null?
                      "Not yet implemented for: ~s" p)]))
 

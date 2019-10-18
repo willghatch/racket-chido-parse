@@ -1,5 +1,10 @@
 #lang racket/base
 
+(provide
+ define-bnf-arm
+ define-bnf
+ )
+
 (require
  "scheduler.rkt"
  "readtable-parser.rkt"
@@ -46,6 +51,8 @@
 
 |#
 
+(define bnf-default-layout-requirement 'optional)
+(define bnf-default-layout-parsers '(" " "\t" "\r" "\n"))
 
 (begin-for-syntax
   (define-syntax-class bnf-arm-alt-spec
@@ -68,15 +75,28 @@
              ))
   )
 
+(define-syntax (layout-inherit stx)
+  (raise-syntax-error 'layout-inherit
+                      "only exists for use as a hidden keyword of define-bnf-arm"
+                      stx))
+(define-syntax (layout-parsers-inherit stx)
+  (raise-syntax-error 'layout-parsers-inherit
+                      "only exists for use as a hidden keyword of define-bnf-arm"
+                      stx))
+
 (define-syntax (define-bnf-arm stx)
   ;; TODO - option for whether or not to blacklist literal parts
   (syntax-parse stx
     [(_ arm-name:id
-        spec:bnf-arm-alt-spec
-        ...
         (~or (~optional (~seq #:layout layout-arg:expr))
              (~optional (~seq #:layout-parsers layout-parsers:expr))
+             (~optional (~seq (~literal layout-inherit)
+                              layout/inherit:expr))
+             (~optional (~seq (~literal layout-parsers-inherit)
+                              layout-parsers/inherit:expr))
              )
+        ...
+        spec:bnf-arm-alt-spec
         ...)
      (define/syntax-parse (alt-name/direct ...)
        #'((~? spec.name #f) ...))
@@ -125,7 +145,7 @@
                   precidence-lt)])))
      #'(begin
          (define rt1 (set-chido-readtable-symbol-support empty-chido-readtable #f))
-         (define layout-arg-use (~? layout-arg 'required))
+         (define layout-arg-use (~? layout-arg bnf-default-layout-requirement))
          (define between-layout-parser
            (match layout-arg-use
              ['required (non-cached-parser-thunk
@@ -168,7 +188,7 @@
               #:precidence-less-than plt)))
          (define rt3
            (for/fold ([rt rt2])
-                     ([parser (~? layout-parsers (list " " "\n" "\t" "\r"))])
+                     ([parser (~? layout-parsers bnf-default-layout-parsers)])
              (extend-chido-readtable rt 'layout parser)))
          (define rt4 (chido-readtable-blacklist-symbols
                       rt3
@@ -185,14 +205,23 @@
   (define (->results ds)
     (map parse-derivation-result (stream->list ds)))
 
+  (define number-parser
+    (proc-parser
+     (λ (port)
+       (define r (read port))
+       (define-values (line col pos) (port-next-location port))
+       (if (number? r)
+           (make-parse-derivation r #:end pos)
+           (error "not a number")))))
+
   (define-bnf-arm test1
+    #:layout 'none
     ["a" [#:ignore #t "b"] "c"]
-    ["a" "a" "b"]
-    #:layout 'none)
+    ["a" "a" "b"])
   (define-bnf-arm test1/layout
+    #:layout 'required
     ["a" [#:ignore #t "b"] "c" #:name "test-name-1"]
-    ["a" "a" "b"]
-    #:layout 'required)
+    ["a" "a" "b"])
   (check-equal? (->results (parse* (open-input-string "abc")
                                    (chido-readtable->read1 (test1))))
                 '(("a" "c")))
@@ -228,13 +257,13 @@
                 "a_a_b")
 
   (define-bnf-arm test2
+    #:layout 'optional
     "n"
     [test2 "+" test2 #:associativity 'left]
     [test2 "*" test2 #:associativity 'left #:precidence-greater-than '("+")]
     [test2 "^" test2 #:associativity 'right #:precidence-greater-than '("*")]
     [test2 "++" #:precidence-less-than '("*") #:precidence-greater-than '("+")]
-    ["if" test2 "then" test2 "else" test2 #:precidence-less-than '("+")]
-    #:layout 'optional)
+    ["if" test2 "then" test2 "else" test2 #:precidence-less-than '("+")])
 
   (check-equal? (->results (parse* (open-input-string "n")
                                    (chido-readtable->read1 (test2))))
@@ -273,4 +302,104 @@
                             test2))
                 '(("n" "+" ("if" "n" "then" "n" "else" ("n" "+" "n")))))
 
+  )
+
+(struct bnf-parser
+  (main-arm-key arm-hash layout-parsers layout-alt)
+  #:property prop:custom-parser
+  (λ (self) (hash-ref (bnf-parser-arm-hash self)
+                      (bnf-parser-main-arm-key self))))
+
+(define (bnf-parser-ref bnf-parser key
+                        [default (λ () (error 'bnf-parser-ref
+                                              "key not found: ~v"
+                                              key))])
+  (hash-ref (bnf-parser-arm-hash bnf-parser) key default))
+
+
+(define-syntax (define-bnf stx)
+  (syntax-parse stx
+    [(_ name:id
+        (~or (~optional (~seq #:layout-parsers layout-parsers:expr))
+             (~optional (~seq #:layout layout-arg:expr))
+             (~optional (~seq #:main-arm main-arm-arg:id))
+             )
+        ...
+        [arm-name:id arm-spec/kw ...]
+        ...)
+     (define/syntax-parse main-arm:id
+       (or (attribute main-arm-arg)
+           (first (syntax->list #'(arm-name ...)))))
+
+     #'(define name
+         (let ()
+           (define layout/inherit
+             (~? layout-arg bnf-default-layout-requirement))
+           (define layout-parsers/use
+             ;; TODO - maybe I should keep this as a separate thing that can be extended all together?
+             (~? layout-parsers bnf-default-layout-parsers))
+           (define layout-alt
+             (make-alt-parser (format "~a_master-layout-parser" 'name)
+                              layout-parsers/use))
+           (define master-layout-parser
+             (proc-parser #:name (format "~a_master-layout-parser" 'name)
+                          (λ (port)
+                            (parse* port
+                                    (bnf-parser-layout-alt
+                                     (inner-bnf-name))))))
+
+           ;; to avoid "arm-name used before initialization" errors, do some indirection
+           (define (get-current-bnf)
+             inner-bnf-name)
+           (define-syntax (arm-name stx)
+             (syntax-parse stx
+               [x:id #'(λ () (bnf-parser-ref ((get-current-bnf))
+                                             'arm-name))]
+               [else (raise-syntax-error
+                      'define-bnf
+                      "arm names can currently only be used as identifiers"
+                      stx)]))
+           ...
+           (define inner-bnf-name
+             (chido-parse-parameter
+              (let ([arm-name (let ()
+                                (define-bnf-arm arm-name
+                                  layout-parsers-inherit (list master-layout-parser)
+                                  layout-inherit layout/inherit
+                                  arm-spec/kw ...)
+                                arm-name)]
+                    ...)
+                (bnf-parser 'main-arm
+                            (hash (~@ 'arm-name arm-name) ...)
+                            layout-parsers/use
+                            layout-alt))))
+           inner-bnf-name))]))
+
+
+(module+ test
+  (define-bnf bnf-test-1
+    [statement ["pass"]
+               ["for" id "in" expression "do" statement]
+               ["{" statement "}" #:name "block"]
+               expression]
+    [expression number-parser
+                id
+                [expression "+" expression #:associativity 'left]
+                [expression "*" expression
+                            #:associativity 'right
+                            #:precidence-greater-than '("+")]]
+    [id "x"])
+
+  (check-equal? (->results (whole-parse*
+                            (open-input-string "pass")
+                            bnf-test-1))
+                '(("pass")))
+  (check-equal? (->results (whole-parse*
+                            (open-input-string "5 + 67 * 3")
+                            bnf-test-1))
+                '((5 "+" (67 "*" 3))))
+  (check-equal? (->results (whole-parse*
+                            (open-input-string "for x in 27 + 13 do { 555 * x }")
+                            bnf-test-1))
+                '(("for" "x" "in" (27 "+" 13) "do" ("{" (555 "*" "x") "}"))))
   )
