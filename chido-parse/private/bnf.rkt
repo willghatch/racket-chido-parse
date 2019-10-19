@@ -25,6 +25,20 @@
    rackunit
    ))
 
+#|
+TODO - bnf extension forms
+
+At some point I had one vision for how it would work, then I forgot about it and started implementing something else.  Here are some options:
+
+• BNF holds a bunch of readtables, and extend-bnf returns a new bnf object with extended readtables.  Maybe the BNF itself is in a chido-parameter, so you can parameterize the entire BNF struct at once.
+
+• BNF doesn't hold a table of readtables, but rather a table of of chido-parameters.  For this to work well, we probably want to define <bnf-name>-expression, etc, so they can be referred to and extended easily.  This would allow sub-parsers to do things like parameterize the expression parser to be something totally different, or just slightly extended, for a particular recursive parse.  Much like with readtables you can change the current readtable for a recursive parse.
+
+Originally I was planning on the table of readtables approach, and wrote code to that effect.  Then I forgot about it and started writing for the BNF struct to hold a bunch of readtables.
+
+Maybe using the BNF parser parameterizes each arm's chido-parameter, and the BNF object itself holds the default values (so that the default value looks up in the current value of the BNF parameter).  Then you could parameterize the whole BNF or an arm.  But then if you parameterize an arm, then parameterize the whole BNF, in the innermost part you get the outer-parameterized arm...
+
+|#
 
 #|
 * top-level parser function
@@ -52,9 +66,6 @@
 
 |#
 
-;; TODO - repetition (kleene star/plus and generalization)
-;; TODO - sub-sequences (eg. so a repetition can be over a sequence)
-;; TODO - bnf extension forms -- something like (extend-bnf bnf-name arm-name new-parser/sequence-spec)
 
 (define bnf-default-layout-requirement 'optional)
 (define bnf-default-layout-parsers '(" " "\t" "\r" "\n"))
@@ -102,22 +113,6 @@
                       "only exists for use as a hidden keyword of define-bnf-arm"
                       stx))
 
-(define-syntax (extend-bnf-arm stx)
-  (syntax-parse stx
-    [(_ arm:expr spec:bnf-arm-alt-spec ...+)
-     #|
-     TODO - the BNF arm needs to store its #:layout spec...
-          - This implies that readtables need to store extra data?!
-     Or...
-     • readtables have a hash table of extra user data, BNF stores stuff here and has a default value for a readtable that hasn't set it.
-     • !!! Maybe this means I just always add the between parsers, and they check the readtable field to tell whether they use the layout parser or an epsilon parser.
-     • or readtables could have a hash-table specific field
-     • or maybe I always just give the keyword... I don't like that.
-
-     So my favorite idea is for readtables to have a hash table of extra data, and have BNF have keys to store the layout inheritance policy.
-     |#
-     (raise-syntax-error 'TODO)]))
-
 (define-syntax (define-bnf-arm stx)
   ;; TODO - option for whether or not to blacklist literal parts
   (syntax-parse stx
@@ -132,6 +127,28 @@
         ...
         spec:bnf-arm-alt-spec
         ...+)
+     #'(begin
+         (define layout-arg-use (~? layout-arg bnf-default-layout-requirement))
+         (define rt1
+           (dict-set
+            (set-chido-readtable-symbol-support empty-chido-readtable #f)
+            bnf-layout-mode-key
+            layout-arg-use))
+
+         (define rt2
+           (for/fold ([rt rt1])
+                     ([parser (~? layout-parsers bnf-default-layout-parsers)])
+             (extend-chido-readtable rt 'layout parser)))
+
+         (define rt3 (extend-bnf-arm rt2 #:arm-name arm-name spec ...))
+         (define arm-name (chido-parse-parameter rt3)))]))
+
+
+(define-syntax (extend-bnf-arm stx)
+  (syntax-parse stx
+    [(_ arm:expr
+        (~or (~optional (~seq #:arm-name arm-name:id)))
+        spec:bnf-arm-alt-spec ...+)
      (define/syntax-parse (alt-name/direct ...)
        #'((~? spec.name #f) ...))
      (define/syntax-parse
@@ -158,14 +175,16 @@
               (syntax-parse elems
                 [(x:id others ...)
                  (datum->syntax #'x
-                                (free-identifier=? #'x #'arm-name)
+                                (or (free-identifier=? #'x #'arm-name)
+                                    (free-identifier=? #'x #'current-chido-readtable))
                                 #'x)]
                 [else #'#f]))
             (define prefix-op?
               (syntax-parse elems
                 [(others ... x:id)
                  (datum->syntax #'x
-                                (free-identifier=? #'x #'arm-name)
+                                (or (free-identifier=? #'x #'arm-name)
+                                    (free-identifier=? #'x #'current-chido-readtable))
                                 #'x)]
                 [else #'#f]))
             (define assoc #'(~? s.assoc #f))
@@ -177,53 +196,43 @@
                   assoc
                   precidence-gt
                   precidence-lt)])))
-     #'(begin
-         (define layout-arg-use (~? layout-arg bnf-default-layout-requirement))
-         (define rt1
-           (dict-set
-            (set-chido-readtable-symbol-support empty-chido-readtable #f)
-            bnf-layout-mode-key
-            layout-arg-use))
-         (define alts (list (~? spec.parser
-                                (binding-sequence
-                                 spec.elem ...
-                                 #:between bnf-inserted-layout-parser
-                                 #:name (or alt-name/direct
-                                            alt-name/inferred)))
-                            ...))
-         (define rt2
-           (for/fold ([rt rt1])
-                     ([parser alts]
-                      [op-spec (list (list prefix-op? postfix-op?) ...)]
-                      [a (list assoc ...)]
-                      [pgt (list precidence-gt ...)]
-                      [plt (list precidence-lt ...)])
-             (define op-type
-               (match op-spec
-                 [(list #f #f) #f]
-                 [(list #f #t) 'postfix]
-                 [(list #t #f) 'prefix]
-                 [(list #t #t) 'infix]))
-             ;; TODO - if I add everything as left-recursive-nonterminating, I get an infinite loop.  I'm not sure why.  It's a bad problem...
-             (define extension-type
-               (if (member op-type '(infix postfix))
-                   'left-recursive-nonterminating
-                   'nonterminating))
-             (extend-chido-readtable
-              rt extension-type parser
-              #:operator op-type
-              #:associativity a
-              #:precidence-greater-than pgt
-              #:precidence-less-than plt)))
-         (define rt3
-           (for/fold ([rt rt2])
-                     ([parser (~? layout-parsers bnf-default-layout-parsers)])
-             (extend-chido-readtable rt 'layout parser)))
-         (define rt4 (chido-readtable-blacklist-symbols
-                      rt3
-                      (flatten (list (list 'symbol-blacklist ...)
-                                     ...))))
-         (define arm-name (chido-parse-parameter rt4)))]))
+     #'(let* ([rt/start arm]
+              [alts (list (~? spec.parser
+                              (binding-sequence
+                               spec.elem ...
+                               #:between bnf-inserted-layout-parser
+                               #:name (or alt-name/direct
+                                          alt-name/inferred)))
+                          ...)]
+              [rt/extended
+               (for/fold ([rt rt/start])
+                         ([parser alts]
+                          [op-spec (list (list prefix-op? postfix-op?) ...)]
+                          [a (list assoc ...)]
+                          [pgt (list precidence-gt ...)]
+                          [plt (list precidence-lt ...)])
+                 (define op-type
+                   (match op-spec
+                     [(list #f #f) #f]
+                     [(list #f #t) 'postfix]
+                     [(list #t #f) 'prefix]
+                     [(list #t #t) 'infix]))
+                 ;; TODO - if I add everything as left-recursive-nonterminating, I get an infinite loop.  I'm not sure why.  It's a bad problem...
+                 (define extension-type
+                   (if (member op-type '(infix postfix))
+                       'left-recursive-nonterminating
+                       'nonterminating))
+                 (extend-chido-readtable
+                  rt extension-type parser
+                  #:operator op-type
+                  #:associativity a
+                  #:precidence-greater-than pgt
+                  #:precidence-less-than plt))]
+              [rt/blacklisted (chido-readtable-blacklist-symbols
+                               rt/extended
+                               (flatten (list (list 'symbol-blacklist ...)
+                                              ...)))])
+         rt/blacklisted)]))
 
 
 
@@ -404,24 +413,45 @@
                             layout-alt))))
            inner-bnf-name))]))
 
-(define-syntax (extend-bnf stx)
-  (syntax-parse stx
-    [(_ bnf arm-name new-parser/sequence-spec ...+)
-     #'(let ([bnf* bnf]
-             [arm-name* arm-name])
-         ;; TODO - better error message on this hash-ref
-         (struct-copy
-          bnf bnf*
-          [arm-hash (hash-set bnf* arm-name*
-                              (extend-bnf-arm (hash-ref bnf* arm-name*)
-                                              new-parser/sequence-spec ...))]))]))
+;(define-for-syntax get-current-bnf-arm
+;  (syntax-parser [x:id #'(bnf-parser-ref (current-bnf) 'x)]))
+;
+;(define-syntax (extend-bnf stx)
+;  (syntax-parse stx
+;    [(_ bnf [arm-name:id new-parser/sequence-spec ...] ...+)
+;     #'(let ([bnf* bnf])
+;         (let-syntax ([arm-name get-current-bnf-arm] ...)
+;           (extend-bnf-helper bnf* [arm-name new-parser/sequence-spec ...] ...)))]))
+;(define-syntax (extend-bnf-helper stx)
+;  (syntax-parse stx
+;    [(_ bnf-ref:id
+;        [arm-done:id] ...
+;        [arm-for-this-pass:id spec-for-this-pass ...]
+;        [arm-later spec-later ...]...)
+;     #'(let ([new-bnf-id
+;              (struct-copy
+;               bnf-parser bnf-ref
+;               [arm-hash (hash-set
+;                          bnf-ref 'arm-for-this-pass
+;                          (extend-bnf-arm
+;                           (hash-ref bnf-ref 'arm-for-this-pass
+;                                     (λ() (error
+;                                           'extend-bnf
+;                                           "adding new BNF arms not yet supported")))
+;                           #:arm-name arm-for-this-pass
+;                           spec-for-this-pass ...))])])
+;         (extend-bnf-helper new-bnf-id
+;                            [arm-done] ...
+;                            [arm-for-this-pass]
+;                            [arm-later spec-later ...] ...))]
+;    [(_ bnf-ref:id [arm-dane:id] ...) #'bnf-ref]))
 
 
 (module+ test
   (define-bnf bnf-test-1
     [statement ["pass"]
                ["for" id "in" expression "do" statement]
-               ["{" statement "}" #:name "block"]
+               ["{" [#:repeat-min 0 #:splice 1 statement] "}" #:name "block"]
                expression]
     [expression number-parser
                 id
@@ -443,4 +473,21 @@
                             (open-input-string "for x in 27 + 13 do { 555 * x }")
                             bnf-test-1))
                 '(("for" "x" "in" (27 "+" 13) "do" ("{" (555 "*" "x") "}"))))
+  (check-equal? (->results (whole-parse*
+                            (open-input-string "{ 5 6 7 }")
+                            bnf-test-1))
+                '(("{" 5 6 7 "}")))
+
+  ;(define bnf-test-2
+  ;  (extend-bnf
+  ;   (extend-bnf bnf-test-1 statement
+  ;               "break"
+  ;               [id ":=" expression])
+  ;   expression
+  ;   ["let" id "=" expression "in" expression #:precidence-greater-than '("*")]))
+
+  ;(check-equal? (->results (whole-parse*
+  ;                          (open-input-string "{ pass break 2 + let x = 5 in 2 + 2 }")))
+  ;              '(("{" "pass" "break" ((2 "+" ("let" "x" "=" 5 "in" 2)) "+" 2) "}")))
+
   )
