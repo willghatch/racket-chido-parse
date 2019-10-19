@@ -62,7 +62,7 @@ This is an implementation of the same idea, but also adding support for operator
  )
 
 (require
- "scheduler.rkt"
+ "core.rkt"
  "procedural-combinators.rkt"
  "trie.rkt"
  "parameters.rkt"

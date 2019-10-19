@@ -2,7 +2,7 @@
 
 (module+ main
   (require
-   "scheduler.rkt"
+   "core.rkt"
    "readtable-parser.rkt"
    "parameters.rkt"
    racket/cmdline

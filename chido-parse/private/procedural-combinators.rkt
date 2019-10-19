@@ -26,7 +26,7 @@
  )
 
 (require
- "scheduler.rkt"
+ "core.rkt"
  "parse-stream.rkt"
  racket/string
  racket/stream

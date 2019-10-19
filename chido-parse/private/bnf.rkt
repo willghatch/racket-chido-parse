@@ -6,7 +6,7 @@
  )
 
 (require
- "scheduler.rkt"
+ "core.rkt"
  "readtable-parser.rkt"
  "procedural-combinators.rkt"
  "parameters.rkt"
