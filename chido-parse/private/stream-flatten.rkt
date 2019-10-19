@@ -7,7 +7,7 @@
 
 (require
  racket/stream
- "structs.rkt"
+ "parse-failure.rkt"
  )
 
 #|

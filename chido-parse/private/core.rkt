@@ -67,7 +67,7 @@
 (require
  "port-broker.rkt"
  "util.rkt"
- "structs.rkt"
+ "parse-failure.rkt"
  "stream-flatten.rkt"
  "parameters.rkt"
  "trie.rkt"
