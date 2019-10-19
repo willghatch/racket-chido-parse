@@ -40,6 +40,8 @@ This is an implementation of the same idea, but also adding support for operator
   [chido-readtable-blacklist-symbols (-> chido-readtable?
                                          (listof (or/c symbol? string?))
                                          chido-readtable?)]
+  [chido-readtable-dict-ref (->* (chido-readtable? any/c) (any/c) any/c)]
+  [chido-readtable-dict-set (-> chido-readtable? any/c any/c chido-readtable?)]
   [chido-readtable-add-mixfix-operator
    (->* (chido-readtable? (or/c symbol? string?))
         (#:layout (or/c 'required 'optional 'none)
@@ -119,6 +121,10 @@ This is an implementation of the same idea, but also adding support for operator
    operator-name->operator
 
 
+   ;; Extra storage for miscellaneous applications, maybe user-defined.
+   dict
+
+
    ;; Basically these are cached results
    [flush-state? #:mutable]
    [terminating-trie #:mutable]
@@ -141,6 +147,14 @@ This is an implementation of the same idea, but also adding support for operator
    )
   #:property prop:custom-parser
   (λ (self) (chido-readtable->read1 self))
+  #:methods gen:dict
+  [(define (dict-ref rt key
+                     [default (λ () (error 'chido-readtable-dict-ref
+                                           "Key not found: ~v" key))])
+     (hash-ref (chido-readtable-dict rt) key default))
+   (define (dict-set rt key val)
+     (struct-copy chido-readtable rt
+                  [dict (hash-set (chido-readtable-dict rt) key val)]))]
   )
 
 
@@ -182,6 +196,9 @@ This is an implementation of the same idea, but also adding support for operator
    ;; operator-name->operator
    (hash)
 
+   ;; dict
+   (hash)
+
    ;;; cached stuff
 
    ;; flush-state?
@@ -196,6 +213,13 @@ This is an implementation of the same idea, but also adding support for operator
    ;; precidence-transitive-greater-relations
    (hash)
    ))
+
+(define (chido-readtable-dict-ref rt key
+                                  [default (λ () (error 'chido-readtable-dict-ref
+                                                        "Key not found: ~v" key))])
+  (dict-ref rt key default))
+(define (chido-readtable-dict-set rt key val)
+  (dict-set rt key val))
 
 (define (extend-chido-readtable rt extension-type parser
                                 ;; TODO - better name for extension-type, and make it a keyword argument.
@@ -1316,20 +1340,6 @@ This is an implementation of the same idea, but also adding support for operator
                (p* "some-symbol" r1/no-symbol))
 
 
-   #|
-   TODO - operators
-   * decide a better interface for adding operators
-   ** maybe I should have an operator adding macro that does this conveniently -- eg. add mixfix, that allows holes for current-readtable and strings for the operator part names.  The whole parser name will be op_part_with_holes, leaving out pre and post underscores.  But each part of the mixfix operator will be added to the symbol blacklist.
-   * Make some sort of whitespace-inserting sequence combinator.  Maybe there should be a more generic current-layout-parser that the readtable should use.  Or maybe it should be a readtable-specific combinator?
-
-   * What about space requirements around operators, and whether they should be terminating, nonterminating, or soft-terminating?  Or whether the characters themselves should be disallowed in symbols?
-   ** I think they should generally be nonterminating and have no requirements about the characters not being IN symbols.  In such restrictive languages maybe you just make a symbol parser and rely on this readtable implementation just for its operator handling, and turn off its automatic symbol parsing.
-
-   * test infix operators
-   * test prefix operators
-   * test postfix operators
-   * test deep precidence cases
-   |#
 
    )
 

@@ -13,6 +13,7 @@
  racket/stream
  racket/match
  racket/list
+ racket/dict
  (for-syntax
   racket/base
   syntax/parse
@@ -57,6 +58,19 @@
 
 (define bnf-default-layout-requirement 'optional)
 (define bnf-default-layout-parsers '(" " "\t" "\r" "\n"))
+(define bnf-layout-mode-key (gensym 'bnf-layout-mode-key))
+
+(define bnf-inserted-layout-parser
+  (proc-parser
+   (λ (port)
+     (define real-parser
+       (match (dict-ref (current-chido-readtable)
+                        bnf-layout-mode-key
+                        bnf-default-layout-requirement)
+         ['required (chido-readtable->layout+ (current-chido-readtable))]
+         ['optional (chido-readtable->layout* (current-chido-readtable))]
+         ['none epsilon-parser]))
+     (parse* port real-parser))))
 
 (begin-for-syntax
   (define-syntax-class bnf-arm-alt-spec
@@ -164,21 +178,16 @@
                   precidence-gt
                   precidence-lt)])))
      #'(begin
-         (define rt1 (set-chido-readtable-symbol-support empty-chido-readtable #f))
          (define layout-arg-use (~? layout-arg bnf-default-layout-requirement))
-         (define between-layout-parser
-           (match layout-arg-use
-             ['required (non-cached-parser-thunk
-                         (λ() (chido-readtable->layout+ (arm-name))))]
-             ['optional (non-cached-parser-thunk
-                         (λ() (chido-readtable->layout* (arm-name))))]
-             ['none #f]))
+         (define rt1
+           (dict-set
+            (set-chido-readtable-symbol-support empty-chido-readtable #f)
+            bnf-layout-mode-key
+            layout-arg-use))
          (define alts (list (~? spec.parser
                                 (binding-sequence
                                  spec.elem ...
-                                 #:between (if (eq? 'none layout-arg-use)
-                                               #f
-                                               between-layout-parser)
+                                 #:between bnf-inserted-layout-parser
                                  #:name (or alt-name/direct
                                             alt-name/inferred)))
                             ...))
