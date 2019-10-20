@@ -217,9 +217,9 @@ Maybe using the BNF parser parameterizes each arm's chido-parameter, and the BNF
                      [(list #f #t) 'postfix]
                      [(list #t #f) 'prefix]
                      [(list #t #t) 'infix]))
-                 ;; TODO - if I add everything as left-recursive-nonterminating, I get an infinite loop.  I'm not sure why.  It's a bad problem...
                  (define extension-type
-                   (if (member op-type '(infix postfix))
+                   'left-recursive-nonterminating
+                   #;(if (member op-type '(infix postfix))
                        'left-recursive-nonterminating
                        'nonterminating))
                  (extend-chido-readtable

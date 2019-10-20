@@ -274,7 +274,8 @@ This is an implementation of the same idea, but also adding support for operator
         chido-readtable
         rt
         [left-recursive-nonterminating-parsers
-         (cons parser (chido-readtable-left-recursive-nonterminating-parsers rt))])]
+         (cons parser (chido-readtable-left-recursive-nonterminating-parsers rt))]
+        [flush-state? #t])]
       ['layout
        (struct-copy
         chido-readtable
@@ -412,12 +413,11 @@ This is an implementation of the same idea, but also adding support for operator
      ;; TODO - better name!
      (proc-parser
       #:name "chido-readtable-read1"
-      (let* ([parsers (append
-                       nonterminating/wrap
-                       soft-terminating/wrap
-                       terminating/wrap)]
-             [alt (make-alt-parser "chido-readtable-read1/base-alt"
-                                   parsers)]
+      (let* ([alt (make-alt-parser "chido-readtable-read1/base-alt"
+                                   (append
+                                    nonterminating/wrap
+                                    soft-terminating/wrap
+                                    terminating/wrap))]
              [left-recursive-nonterminating-alt
               (make-alt-parser "chido-readtable-read1/lrn-alt"
                                left-recursive-nonterminating/wrap)])
@@ -436,16 +436,16 @@ This is an implementation of the same idea, but also adding support for operator
                       parsers-result
                       symbol-result))]
                [else parsers-result]))
-           ;; TODO - use a stream-append that preserves failures!!
            (parse-stream-cons
-            symbol-result
-            (parse* port left-recursive-nonterminating-alt)))))
+                symbol-result
+                (parse* port left-recursive-nonterminating-alt)))))
       #:use-port? #f
       #:promise-no-left-recursion?
       (not (ormap parser-potentially-left-recursive?
                   (append nonterminating/wrap
                           soft-terminating/wrap
                           terminating/wrap
+                          left-recursive-nonterminating/wrap
                           (chido-readtable-layout-parsers rt))))))
     (set-chido-readtable-layout*+read1-parser!
      rt
