@@ -218,8 +218,7 @@ Maybe using the BNF parser parameterizes each arm's chido-parameter, and the BNF
                      [(list #t #f) 'prefix]
                      [(list #t #t) 'infix]))
                  (define extension-type
-                   'left-recursive-nonterminating
-                   #;(if (member op-type '(infix postfix))
+                   (if (member op-type '(infix postfix))
                        'left-recursive-nonterminating
                        'nonterminating))
                  (extend-chido-readtable
