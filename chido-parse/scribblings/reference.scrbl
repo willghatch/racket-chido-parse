@@ -2,6 +2,8 @@
 
 @title{Reference}
 
+NOTE - chido-parse is NOT YET STABLE, and APIs may change.
+
 @section{Core API}
 
 parse
