@@ -3,6 +3,9 @@
 (provide
  define-bnf-arm
  define-bnf
+
+ readtable-extend-as-bnf-arm
+ extend-bnf
  )
 
 (require
@@ -25,20 +28,6 @@
    rackunit
    ))
 
-#|
-TODO - bnf extension forms
-
-At some point I had one vision for how it would work, then I forgot about it and started implementing something else.  Here are some options:
-
-• BNF holds a bunch of readtables, and extend-bnf returns a new bnf object with extended readtables.  Maybe the BNF itself is in a chido-parameter, so you can parameterize the entire BNF struct at once.
-
-• BNF doesn't hold a table of readtables, but rather a table of of chido-parameters.  For this to work well, we probably want to define <bnf-name>-expression, etc, so they can be referred to and extended easily.  This would allow sub-parsers to do things like parameterize the expression parser to be something totally different, or just slightly extended, for a particular recursive parse.  Much like with readtables you can change the current readtable for a recursive parse.
-
-Originally I was planning on the table of readtables approach, and wrote code to that effect.  Then I forgot about it and started writing for the BNF struct to hold a bunch of readtables.
-
-Maybe using the BNF parser parameterizes each arm's chido-parameter, and the BNF object itself holds the default values (so that the default value looks up in the current value of the BNF parameter).  Then you could parameterize the whole BNF or an arm.  But then if you parameterize an arm, then parameterize the whole BNF, in the innermost part you get the outer-parameterized arm...
-
-|#
 
 #|
 * top-level parser function
@@ -70,6 +59,7 @@ Maybe using the BNF parser parameterizes each arm's chido-parameter, and the BNF
 (define bnf-default-layout-requirement 'optional)
 (define bnf-default-layout-parsers '(" " "\t" "\r" "\n"))
 (define bnf-layout-mode-key (gensym 'bnf-layout-mode-key))
+(define current-bnf (chido-parse-parameter #f))
 
 (define bnf-inserted-layout-parser
   (proc-parser
@@ -140,12 +130,15 @@ Maybe using the BNF parser parameterizes each arm's chido-parameter, and the BNF
                      ([parser (~? layout-parsers bnf-default-layout-parsers)])
              (extend-chido-readtable rt 'layout parser)))
 
-         (define rt3 (extend-bnf-arm rt2 #:arm-name arm-name spec ...))
-         (define arm-name (chido-parse-parameter rt3)))]))
+         (define rt3 (readtable-extend-as-bnf-arm rt2 #:arm-name arm-name spec ...))
+         (define arm-name rt3))]))
 
 
-(define-syntax (extend-bnf-arm stx)
+(define-syntax (readtable-extend-as-bnf-arm stx)
   (syntax-parse stx
+    [(_ arm:expr
+        (~or (~optional (~seq #:arm-name arm-name:id))))
+     #'arm]
     [(_ arm:expr
         (~or (~optional (~seq #:arm-name arm-name:id)))
         spec:bnf-arm-alt-spec ...+)
@@ -196,44 +189,45 @@ Maybe using the BNF parser parameterizes each arm's chido-parameter, and the BNF
                   assoc
                   precidence-gt
                   precidence-lt)])))
-     #'(let* ([rt/start arm]
-              [alts (list (~? spec.parser
-                              (binding-sequence
-                               spec.elem ...
-                               #:between bnf-inserted-layout-parser
-                               #:name (or alt-name/direct
-                                          alt-name/inferred)))
-                          ...)]
-              [rt/extended
-               (for/fold ([rt rt/start])
-                         ([parser alts]
-                          [op-spec (list (list prefix-op? postfix-op?) ...)]
-                          [a (list assoc ...)]
-                          [pgt (list precidence-gt ...)]
-                          [plt (list precidence-lt ...)])
-                 (define op-type
-                   (match op-spec
-                     [(list #f #f) #f]
-                     [(list #f #t) 'postfix]
-                     [(list #t #f) 'prefix]
-                     [(list #t #t) 'infix]))
-                 (define extension-type
-                   ;; TODO - I should have an option for symbol support, and if symbols are supported divide the parsers.  But when symbol support is undesired, it would be better to make everything either left-recursive-nonterminating or make everything NOT left-recursive-nonterminating.  If the user adds a custom procedure NOT built using the built-in binding-sequence of define-bnf-arm, and makes it left-recursive but doesn't mark it left-recursive-nonterminating, it WON'T see the results of things that ARE marked left-recursive-nonterminating.  If symbol support is on, then users need to take care to mark alternates explicitly to affect symbol parsing.
-                   'left-recursive-nonterminating
-                   #;(if (member op-type '(infix postfix))
-                       'left-recursive-nonterminating
-                       'nonterminating))
-                 (extend-chido-readtable
-                  rt extension-type parser
-                  #:operator op-type
-                  #:associativity a
-                  #:precidence-greater-than pgt
-                  #:precidence-less-than plt))]
-              [rt/blacklisted (chido-readtable-blacklist-symbols
-                               rt/extended
-                               (flatten (list (list 'symbol-blacklist ...)
-                                              ...)))])
-         rt/blacklisted)]))
+     #'(let-syntax ([arm-name (syntax-parser [_ #'current-chido-readtable])])
+         (let* ([rt/start arm]
+                [alts (list (~? spec.parser
+                                (binding-sequence
+                                 spec.elem ...
+                                 #:between bnf-inserted-layout-parser
+                                 #:name (or alt-name/direct
+                                            alt-name/inferred)))
+                            ...)]
+                [rt/extended
+                 (for/fold ([rt rt/start])
+                           ([parser alts]
+                            [op-spec (list (list prefix-op? postfix-op?) ...)]
+                            [a (list assoc ...)]
+                            [pgt (list precidence-gt ...)]
+                            [plt (list precidence-lt ...)])
+                   (define op-type
+                     (match op-spec
+                       [(list #f #f) #f]
+                       [(list #f #t) 'postfix]
+                       [(list #t #f) 'prefix]
+                       [(list #t #t) 'infix]))
+                   (define extension-type
+                     ;; TODO - I should have an option for symbol support, and if symbols are supported divide the parsers.  But when symbol support is undesired, it would be better to make everything either left-recursive-nonterminating or make everything NOT left-recursive-nonterminating.  If the user adds a custom procedure NOT built using the built-in binding-sequence of define-bnf-arm, and makes it left-recursive but doesn't mark it left-recursive-nonterminating, it WON'T see the results of things that ARE marked left-recursive-nonterminating.  If symbol support is on, then users need to take care to mark alternates explicitly to affect symbol parsing.
+                     'left-recursive-nonterminating
+                     #;(if (member op-type '(infix postfix))
+                           'left-recursive-nonterminating
+                           'nonterminating))
+                   (extend-chido-readtable
+                    rt extension-type parser
+                    #:operator op-type
+                    #:associativity a
+                    #:precidence-greater-than pgt
+                    #:precidence-less-than plt))]
+                [rt/blacklisted (chido-readtable-blacklist-symbols
+                                 rt/extended
+                                 (flatten (list (list 'symbol-blacklist ...)
+                                                ...)))])
+           rt/blacklisted))]))
 
 
 
@@ -262,23 +256,23 @@ Maybe using the BNF parser parameterizes each arm's chido-parameter, and the BNF
     ["a" [#:ignore #t "b"] "c" #:name "test-name-1"]
     ["a" "a" "b"])
   (check-equal? (->results (parse* (open-input-string "abc")
-                                   (chido-readtable->read1 (test1))))
+                                   (chido-readtable->read1 test1)))
                 '(("a" "c")))
   (check-equal? (->results (parse* (open-input-string "aab")
-                                   (chido-readtable->read1 (test1))))
+                                   (chido-readtable->read1 test1)))
                 '(("a" "a" "b")))
   (check-equal? (->results (parse* (open-input-string "abbc")
-                                   (chido-readtable->read1 (test1))))
+                                   (chido-readtable->read1 test1)))
                 '())
 
   (check-equal? (->results (parse* (open-input-string "a b c")
-                                   (chido-readtable->read1 (test1/layout))))
+                                   (chido-readtable->read1 test1/layout)))
                 '(("a" "c")))
   (check-equal? (->results (parse* (open-input-string "a a b")
-                                   (chido-readtable->read1 (test1/layout))))
+                                   (chido-readtable->read1 test1/layout)))
                 '(("a" "a" "b")))
   (check-equal? (->results (parse* (open-input-string "a b b c")
-                                   (chido-readtable->read1 (test1/layout))))
+                                   (chido-readtable->read1 test1/layout)))
                 '())
 
   ;; check that naming works
@@ -286,13 +280,13 @@ Maybe using the BNF parser parameterizes each arm's chido-parameter, and the BNF
                  (parse-derivation-parser
                   (car (stream->list
                         (parse* (open-input-string "a b c")
-                                (chido-readtable->read1 (test1/layout)))))))
+                                (chido-readtable->read1 test1/layout))))))
                 "test-name-1")
   (check-equal? (parser-name
                  (parse-derivation-parser
                   (car (stream->list
                         (parse* (open-input-string "a a b")
-                                (chido-readtable->read1 (test1/layout)))))))
+                                (chido-readtable->read1 test1/layout))))))
                 "a_a_b")
 
   (define-bnf-arm test2
@@ -305,7 +299,7 @@ Maybe using the BNF parser parameterizes each arm's chido-parameter, and the BNF
     ["if" test2 "then" test2 "else" test2 #:precidence-less-than '("+")])
 
   (check-equal? (->results (parse* (open-input-string "n")
-                                   (chido-readtable->read1 (test2))))
+                                   (chido-readtable->read1 test2)))
                 '("n"))
   (check-equal? (->results (whole-parse*
                             (open-input-string "n+n+n")
@@ -346,8 +340,14 @@ Maybe using the BNF parser parameterizes each arm's chido-parameter, and the BNF
 (struct bnf-parser
   (main-arm-key arm-hash layout-parsers layout-alt)
   #:property prop:custom-parser
-  (λ (self) (hash-ref (bnf-parser-arm-hash self)
-                      (bnf-parser-main-arm-key self))))
+  (λ (self)
+    (proc-parser
+     (λ (port)
+       (chido-parse-parameterize
+        ([current-bnf self])
+        (parse* port
+                (hash-ref (bnf-parser-arm-hash self)
+                          (bnf-parser-main-arm-key self))))))))
 
 (define (bnf-parser-ref bnf-parser key
                         [default (λ () (error 'bnf-parser-ref
@@ -385,67 +385,70 @@ Maybe using the BNF parser parameterizes each arm's chido-parameter, and the BNF
                           (λ (port)
                             (parse* port
                                     (bnf-parser-layout-alt
-                                     (inner-bnf-name))))))
+                                     (current-bnf))))))
 
            ;; to avoid "arm-name used before initialization" errors, do some indirection
-           (define (get-current-bnf)
-             inner-bnf-name)
            (define-syntax (arm-name stx)
              (syntax-parse stx
-               [x:id #'(λ () (bnf-parser-ref ((get-current-bnf))
-                                             'arm-name))]
+               [x:id #'(proc-parser
+                        (λ (port)
+                          (parse* port (bnf-parser-ref (current-bnf)
+                                                       'arm-name))))]
                [else (raise-syntax-error
                       'define-bnf
                       "arm names can currently only be used as identifiers"
                       stx)]))
            ...
            (define inner-bnf-name
-             (chido-parse-parameter
-              (let ([arm-name (let ()
-                                (define-bnf-arm arm-name
-                                  layout-parsers-inherit (list master-layout-parser)
-                                  layout-inherit layout/inherit
-                                  arm-spec/kw ...)
-                                arm-name)]
-                    ...)
-                (bnf-parser 'main-arm
-                            (hash (~@ 'arm-name arm-name) ...)
-                            layout-parsers/use
-                            layout-alt))))
+             (let ([arm-name (let ()
+                               (define-bnf-arm arm-name
+                                 layout-parsers-inherit (list master-layout-parser)
+                                 layout-inherit layout/inherit
+                                 arm-spec/kw ...)
+                               arm-name)]
+                   ...)
+               (bnf-parser 'main-arm
+                           (hash (~@ 'arm-name arm-name) ...)
+                           layout-parsers/use
+                           layout-alt)))
            inner-bnf-name))]))
 
-;(define-for-syntax get-current-bnf-arm
-;  (syntax-parser [x:id #'(bnf-parser-ref (current-bnf) 'x)]))
-;
-;(define-syntax (extend-bnf stx)
-;  (syntax-parse stx
-;    [(_ bnf [arm-name:id new-parser/sequence-spec ...] ...+)
-;     #'(let ([bnf* bnf])
-;         (let-syntax ([arm-name get-current-bnf-arm] ...)
-;           (extend-bnf-helper bnf* [arm-name new-parser/sequence-spec ...] ...)))]))
-;(define-syntax (extend-bnf-helper stx)
-;  (syntax-parse stx
-;    [(_ bnf-ref:id
-;        [arm-done:id] ...
-;        [arm-for-this-pass:id spec-for-this-pass ...]
-;        [arm-later spec-later ...]...)
-;     #'(let ([new-bnf-id
-;              (struct-copy
-;               bnf-parser bnf-ref
-;               [arm-hash (hash-set
-;                          bnf-ref 'arm-for-this-pass
-;                          (extend-bnf-arm
-;                           (hash-ref bnf-ref 'arm-for-this-pass
-;                                     (λ() (error
-;                                           'extend-bnf
-;                                           "adding new BNF arms not yet supported")))
-;                           #:arm-name arm-for-this-pass
-;                           spec-for-this-pass ...))])])
-;         (extend-bnf-helper new-bnf-id
-;                            [arm-done] ...
-;                            [arm-for-this-pass]
-;                            [arm-later spec-later ...] ...))]
-;    [(_ bnf-ref:id [arm-dane:id] ...) #'bnf-ref]))
+(define-for-syntax get-current-bnf-arm
+  (syntax-parser [x:id #'(proc-parser
+                          (λ (port)
+                            (parse* port
+                                    (bnf-parser-ref (current-bnf) 'x))))]))
+
+(define-syntax (extend-bnf stx)
+  (syntax-parse stx
+    [(_ bnf [arm-name:id new-parser/sequence-spec ...] ...+)
+     #'(let ([bnf* bnf])
+         (let-syntax ([arm-name get-current-bnf-arm] ...)
+           (extend-bnf-helper bnf* () [arm-name new-parser/sequence-spec ...] ...)))]))
+(define-syntax (extend-bnf-helper stx)
+  (syntax-parse stx
+    [(_ bnf-ref:id
+        (arm-done:id ...)
+        [arm-for-this-pass:id spec-for-this-pass ...]
+        [arm-later spec-later ...] ...)
+     #'(let ([new-bnf-id
+              (struct-copy
+               bnf-parser bnf-ref
+               [arm-hash (hash-set
+                          (bnf-parser-arm-hash bnf-ref)
+                          'arm-for-this-pass
+                          (readtable-extend-as-bnf-arm
+                           (hash-ref (bnf-parser-arm-hash bnf-ref)
+                                     'arm-for-this-pass
+                                     (λ() (error
+                                           'extend-bnf
+                                           "adding new BNF arms not yet supported")))
+                           #:arm-name arm-for-this-pass
+                           spec-for-this-pass ...))])])
+         (extend-bnf-helper new-bnf-id
+                            (arm-done ... arm-for-this-pass)
+                            [arm-later spec-later ...] ...))]
+    [(_ bnf-ref:id (arm-done:id ...)) #'bnf-ref]))
 
 
 (module+ test
@@ -479,16 +482,18 @@ Maybe using the BNF parser parameterizes each arm's chido-parameter, and the BNF
                             bnf-test-1))
                 '(("{" 5 6 7 "}")))
 
-  ;(define bnf-test-2
-  ;  (extend-bnf
-  ;   (extend-bnf bnf-test-1 statement
-  ;               "break"
-  ;               [id ":=" expression])
-  ;   expression
-  ;   ["let" id "=" expression "in" expression #:precidence-greater-than '("*")]))
+  (define bnf-test-2
+    (extend-bnf
+     bnf-test-1
+     [statement "break"
+                [id ":=" expression]]
+     [expression ["let" id "=" expression "in" expression
+                        #:precidence-greater-than '("*")]]
+     [id]))
 
-  ;(check-equal? (->results (whole-parse*
-  ;                          (open-input-string "{ pass break 2 + let x = 5 in 2 + 2 }")))
-  ;              '(("{" "pass" "break" ((2 "+" ("let" "x" "=" 5 "in" 2)) "+" 2) "}")))
+  (check-equal? (->results (whole-parse*
+                            (open-input-string "{ pass break 2 + let x = 5 in 2 + 2 }")
+                            bnf-test-2))
+                '(("{" ("pass") "break" ((2 "+" ("let" "x" "=" 5 "in" 2)) "+" 2) "}")))
 
   )

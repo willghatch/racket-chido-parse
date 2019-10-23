@@ -23,7 +23,7 @@
 
 (define-syntax (chido-parse-parameterize stx)
   (syntax-parse stx
-    [(_ ([param val] ...) body ...)
+    [(_ ([param val] ...) (~describe "body expression" body:expr) ...+)
      (with-syntax ([(pv ...) (generate-temporaries #'(param ...))])
        #'(let ([pv param] ...)
            (and (or (chido-parse-parameter? pv)
