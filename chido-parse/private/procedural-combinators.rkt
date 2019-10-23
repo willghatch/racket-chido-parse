@@ -119,7 +119,9 @@ For sequence/repetition:
            (error 'sequence
                   "must provide either result or derive function, not both")]
           [derive derive]
+          [(eq? #t make-result/stx) (make-result-wrap list #t)]
           [make-result/stx (make-result-wrap make-result/stx #t)]
+          [(eq? #t make-result) (make-result-wrap list #f)]
           [make-result (make-result-wrap make-result #f)]
           ;; TODO - make this default true
           [else (make-result-wrap list #f)]))
@@ -287,8 +289,11 @@ For sequence/repetition:
                             pre-stx)))
                     #:derivations derivations)))]
               [do-derive (cond [derive-arg derive-arg]
+                               [(eq? #t make-result-arg) (make-result-wrap list #f)]
                                [make-result-arg
                                 (make-result-wrap make-result-arg #f)]
+                               [(eq? #t make-result/stx-arg)
+                                (make-result-wrap list #t)]
                                [make-result/stx-arg
                                 (make-result-wrap make-result/stx-arg #t)]
                                ;; TODO - use #t to default to making syntax objects
@@ -419,7 +424,9 @@ For sequence/repetition:
            (error 'repetition
                   "must provide either result or derive function, (and not both)")]
           [derive derive]
+          [(eq? #t make-result/stx) (make-result-wrap (λ(x)x) #t)]
           [make-result/stx (make-result-wrap make-result/stx #t)]
+          [(eq? #t make-result) (make-result-wrap (λ(x)x) #f)]
           [make-result (make-result-wrap make-result #f)]
           ;; TODO - make this default true
           [else (make-result-wrap (λ(x)x) #f)]))
@@ -902,10 +909,19 @@ For sequence/repetition:
   (check-equal? (->results (parse* (open-input-string "ab")
                                    (binding-sequence "a" "b")))
                 '(("a" "b")))
+  (check-equal? (->results (parse* (open-input-string "ab")
+                                   (binding-sequence "a" "b"
+                                                     #:result #t)))
+                '(("a" "b")))
   (check-syntax-equal?
    (->results (parse* (open-input-string "ab")
                       (binding-sequence "a" "b"
                                         #:result/stx list)))
+   (list (datum->syntax #f '("a" "b") (list 'string 1 1 1 2))))
+  (check-syntax-equal?
+   (->results (parse* (open-input-string "ab")
+                      (binding-sequence "a" "b"
+                                        #:result/stx #t)))
    (list (datum->syntax #f '("a" "b") (list 'string 1 1 1 2))))
 
   (check-equal? (->results (parse* (open-input-string "ab")
