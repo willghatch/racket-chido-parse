@@ -71,6 +71,7 @@ For sequence/repetition:
 (define (sequence #:name [name #f]
                   #:derive [derive #f]
                   #:result [make-result #f]
+                  #:result/stx [make-result/stx #f]
                   #:between [between #f]
                   #:before [before #f]
                   #:after [after #f]
@@ -100,22 +101,28 @@ For sequence/repetition:
 
   (define use-name (or name (format "sequence_~a"
                                     (string-join (map parser-name parsers) "_"))))
-  (define (make-result-wrap make-result)
+  (define (make-result-wrap make-result stx?)
     (λ derivations
       (make-parse-derivation
-       (λ args
+       (λ (src line col pos span derivations)
          (define non-between-ds
            (derivations->non-between derivations before-parser between after-parser))
-         (apply make-result
-                (map parse-derivation-result non-between-ds)))
+         (let ([pre-stx (apply make-result
+                               (map parse-derivation-result non-between-ds))])
+           (if stx?
+               (datum->syntax #f pre-stx
+                              (list src line col pos span))
+               pre-stx)))
        #:derivations derivations)))
   (define combiner
-    (cond [(and derive make-result)
+    (cond [(> 2 (count not (list derive make-result make-result/stx)))
            (error 'sequence
                   "must provide either result or derive function, not both")]
           [derive derive]
-          [make-result (make-result-wrap make-result)]
-          [else (make-result-wrap list)]))
+          [make-result/stx (make-result-wrap make-result/stx #t)]
+          [make-result (make-result-wrap make-result #f)]
+          ;; TODO - make this default true
+          [else (make-result-wrap list #f)]))
   (define (proc pb)
     (define (rec parsers derivations in-between?)
       (cond [(null? parsers)
@@ -362,6 +369,7 @@ For sequence/repetition:
 (define (repetition #:name [name #f]
                     #:derive [derive #f]
                     #:result [make-result #f]
+                    #:result/stx [make-result/stx #f]
                     #:min [min 0]
                     #:max [max +inf.0]
                     #:greedy? [greedy? #f]
@@ -381,23 +389,28 @@ For sequence/repetition:
                          [#t between]
                          [else after]))
 
-  (define result-wrapper
-    (λ (make-result)
+  (define make-result-wrap
+    (λ (make-result stx?)
       (λ (derivations)
         (make-parse-derivation
-         (λ args
+         (λ (src line col pos span derivations)
            (define non-between-ds
              (derivations->non-between derivations before-parser between after-parser))
-           (make-result (map parse-derivation-result non-between-ds)))
+           (let ([pre-stx (make-result (map parse-derivation-result non-between-ds))])
+             (if stx?
+                 (datum->syntax #f pre-stx (list src line col pos span))
+                 pre-stx)))
          #:derivations derivations))))
 
   (define combiner
-    (cond [(and derive make-result)
+    (cond [(> 2 (count not (list derive make-result make-result/stx)))
            (error 'repetition
                   "must provide either result or derive function, (and not both)")]
           [derive derive]
-          [make-result (result-wrapper make-result)]
-          [else (result-wrapper (λ(x)x))]))
+          [make-result/stx (make-result-wrap make-result/stx #t)]
+          [make-result (make-result-wrap make-result #f)]
+          ;; TODO - make this default true
+          [else (make-result-wrap (λ(x)x) #f)]))
   (define (proc pb)
     (define (finalize reversed-derivations)
       (define (real-finalize! reversed-derivations)
@@ -456,6 +469,7 @@ For sequence/repetition:
 (define (kleene-star #:name [name #f]
                      #:derive [derive #f]
                      #:result [make-result #f]
+                     #:result/stx [make-result/stx #f]
                      #:greedy? [greedy? #f]
                      #:between [between #f]
                      #:before [before #f]
@@ -465,6 +479,7 @@ For sequence/repetition:
               #:name (or name (format "~a*" (parser-name parser)))
               #:derive derive
               #:result make-result
+              #:result/stx make-result/stx
               #:greedy? greedy?
               #:between between
               #:before before
@@ -474,6 +489,7 @@ For sequence/repetition:
 (define (kleene-plus #:name [name #f]
                      #:derive [derive #f]
                      #:result [make-result #f]
+                     #:result/stx [make-result/stx #f]
                      #:greedy? [greedy? #f]
                      #:between [between #f]
                      #:before [before #f]
@@ -483,6 +499,7 @@ For sequence/repetition:
               #:name (or name (format "~a+" (parser-name parser)))
               #:derive derive
               #:result make-result
+              #:result/stx make-result/stx
               #:greedy? greedy?
               #:between between
               #:before before
@@ -492,11 +509,13 @@ For sequence/repetition:
 (define (optional #:name [name #f]
                   #:derive [derive #f]
                   #:result [make-result #f]
+                  #:result/stx [make-result/stx #f]
                   parser)
   (repetition parser
               #:name (or name (format "~a?" (parser-name parser)))
               #:derive derive
               #:result make-result
+              #:result/stx make-result/stx
               #:max 1))
 
 
@@ -584,6 +603,19 @@ For sequence/repetition:
        (datum->syntax stx
                       (syntax-e #'(check-not-exn (λ () (check-name arg ...))))
                       stx)]))
+  (define (syntax-equal? l r)
+    (cond [(and (syntax? l) (syntax? r))
+           (and (equal? (syntax-source l) (syntax-source r))
+                (equal? (syntax-line l) (syntax-line r))
+                (equal? (syntax-column l) (syntax-column r))
+                (equal? (syntax-position l) (syntax-position r))
+                (equal? (syntax-span l) (syntax-span r))
+                (equal? (syntax->datum l) (syntax->datum r)))]
+          [(and (list? l) (list? r))
+           (andmap syntax-equal? l r)]
+          [else (equal? l r)]))
+  (define (check-syntax-equal? l r)
+    (check syntax-equal? l r))
 
   (define ap "a")
   (define bp "b")
@@ -678,20 +710,20 @@ For sequence/repetition:
               (repetition "q" #:result (λ (elems) (string-join elems ""))
                           #:before "b")))
      (list "" "q" "qq" "qqq"))
-  (c check-equal?
+  (c check-syntax-equal?
      (->results
       (parse* (open-input-string "qqqz")
-              (repetition "q" #:result (λ (elems) (string-join elems ""))
+              (repetition "q" #:result/stx (λ (elems) (string-join elems ""))
                           #:after "z")))
-     (list "qqq"))
+     (list (datum->syntax #f "qqq" (list 'string 1 1 1 4))))
 
   ;;; sequence with begin/before/after
-  (c check-equal?
+  (c check-syntax-equal?
      (->results
       (parse* (open-input-string "a_b_c")
-              (sequence "a" "b" "c" #:result (λ elems (string-join elems ""))
+              (sequence "a" "b" "c" #:result/stx (λ elems (string-join elems ""))
                         #:between "_")))
-     (list "abc"))
+     (list (datum->syntax #f "abc" (list 'string 1 1 1 5))))
   (c check-equal?
      (->results
       (parse* (open-input-string "_a_b_c_")
