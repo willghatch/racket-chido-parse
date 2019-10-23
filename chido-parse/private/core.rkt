@@ -5,6 +5,7 @@
  parse-derivation?
  (rename-out [parse-derivation-result! parse-derivation-result])
  parse-derivation-parser
+ parse-derivation-source-name
  parse-derivation-line
  parse-derivation-column
  parse-derivation-start-position
