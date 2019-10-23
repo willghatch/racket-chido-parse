@@ -829,7 +829,7 @@ This is an implementation of the same idea, but also adding support for operator
                #:preserve-prefix? #t))
 
 (define (mk-stx v derivation)
-  (datum->syntax #f v (list "TODO-need-port-name-here"
+  (datum->syntax #f v (list (parse-derivation-source-name derivation)
                             (parse-derivation-line derivation)
                             (parse-derivation-column derivation)
                             (parse-derivation-start-position derivation)
