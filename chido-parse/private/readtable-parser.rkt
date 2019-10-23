@@ -454,7 +454,7 @@ This is an implementation of the same idea, but also adding support for operator
       (chido-readtable-read1-parser rt)
       #:derive (λ derivations
                  (make-parse-derivation
-                  (λ (src line col pos end-pos derivations)
+                  (λ (src line col pos span derivations)
                     (parse-derivation-result (second derivations)))
                   #:derivations derivations))))
 
@@ -465,7 +465,7 @@ This is an implementation of the same idea, but also adding support for operator
              (chido-readtable-layout*-parser rt)
              #:derive (λ derivations
                         (make-parse-derivation
-                         (λ (src line col pos end-pos derivations)
+                         (λ (src line col pos span derivations)
                            (parse-derivation-result (first derivations)))
                          #:derivations derivations)))]
           [no-content-parser (chido-readtable-layout*-parser rt)])
@@ -596,15 +596,13 @@ This is an implementation of the same idea, but also adding support for operator
      (let ()
        (define span sym/num-length)
        (define result-func
-         (λ (src line column start-position end-position derivations)
+         (λ (src line column start-position span derivations)
 
            ;; TODO - check options for whether complex numbers, rational numbers, and numbers of any kind are supported in this readtable...
            (define number (string->number str))
            (define datum (or number (string->symbol str)))
            (define stx
-             (datum->syntax #f datum (list src
-                                           line column start-position
-                                           (- end-position start-position))))
+             (datum->syntax #f datum (list src line column start-position span)))
            ;; TODO - use result transformer
            ;datum
            stx
@@ -789,11 +787,11 @@ This is an implementation of the same idea, but also adding support for operator
      ;; TODO - the result should be a syntax object by default
      #:derive (λ derivations
                 (make-parse-derivation
-                 (λ (src line col pos end-pos derivations)
+                 (λ (src line col pos span derivations)
                    (define pre-result (parse-derivation-result (second derivations)))
                    (define (->stx pre-result)
                      (datum->syntax #f pre-result
-                                    (list src line col pos (- end-pos pos))))
+                                    (list src line col pos span)))
                    (match wrapper
                      [(? procedure?) (wrapper (->stx pre-result))]
                      [(? symbol?) (->stx (cons (datum->syntax
@@ -858,12 +856,12 @@ This is an implementation of the same idea, but also adding support for operator
             post-quote-read-1
             #:derive (λ derivations
                        (make-parse-derivation
-                        (λ (src line col pos end-pos derivations)
+                        (λ (src line col pos span derivations)
                           (datum->syntax
                            #f
                            (list (mk-stx quotey-symbol (first derivations))
                                  (parse-derivation-result (second derivations)))
-                           (list src line col pos (- end-pos pos))))
+                           (list src line col pos span)))
                         #:derivations derivations))))
 
 (define (make-line-comment-parser prefix)
@@ -886,14 +884,14 @@ This is an implementation of the same idea, but also adding support for operator
                                      (current-chido-readtable)))))
             #:derive (λ derivations
                        (make-parse-derivation
-                        (λ (src line col pos end-pos derivations)
+                        (λ (src line col pos span derivations)
                           (datum->syntax
                            #f
                            (string->keyword
                             (symbol->string
                              (syntax->datum
                               (parse-derivation-result (second derivations)))))
-                           (list src line col pos (- end-pos pos))))
+                           (list src line col pos span)))
                         #:derivations derivations))))
 
 (define (make-raw-string-parser l-delim r-delim #:wrapper [wrapper #f])
@@ -947,9 +945,8 @@ This is an implementation of the same idea, but also adding support for operator
      (define-values (line col pos) (port-next-location port))
 
      (make-parse-derivation
-      (λ (src line col pos end-pos derivations)
-        (define stx (datum->syntax #f the-string
-                                   (list src line col pos (- end-pos pos))))
+      (λ (src line col pos span derivations)
+        (define stx (datum->syntax #f the-string (list src line col pos span)))
         (cond [(procedure? wrapper) (wrapper stx)]
               [(symbol? wrapper) (datum->syntax
                                   #f (list (datum->syntax
@@ -1059,7 +1056,7 @@ This is an implementation of the same idea, but also adding support for operator
      #:name operator-name-use
      #:derive (λ derivations
                 (make-parse-derivation
-                 (λ (src line col pos end-pos derivations)
+                 (λ (src line col pos span derivations)
                    (datum->syntax
                     #f
                     `(,(match operator-style
@@ -1071,7 +1068,7 @@ This is an implementation of the same idea, but also adding support for operator
                       ,@(map (λ (i) (parse-derivation-result
                                      (list-ref derivations i)))
                              result-indices))
-                    (list src line col pos (- end-pos pos))))
+                    (list src line col pos span)))
                  #:derivations derivations))
      parsers))
 
