@@ -70,7 +70,7 @@ For sequence/repetition:
 
 (define (sequence #:name [name #f]
                   #:derive [derive #f]
-                  #:result [make-result #f]
+                  #:result/bare [make-result/bare #f]
                   #:result/stx [make-result/stx #f]
                   #:between [between #f]
                   #:before [before #f]
@@ -115,14 +115,14 @@ For sequence/repetition:
                pre-stx)))
        #:derivations derivations)))
   (define combiner
-    (cond [(> 2 (count not (list derive make-result make-result/stx)))
+    (cond [(> 2 (count not (list derive make-result/bare make-result/stx)))
            (error 'sequence
                   "must provide either result or derive function, not both")]
           [derive derive]
           [(eq? #t make-result/stx) (make-result-wrap list #t)]
           [make-result/stx (make-result-wrap make-result/stx #t)]
-          [(eq? #t make-result) (make-result-wrap list #f)]
-          [make-result (make-result-wrap make-result #f)]
+          [(eq? #t make-result/bare) (make-result-wrap list #f)]
+          [make-result/bare (make-result-wrap make-result/bare #f)]
           ;; TODO - make this default true
           [else (make-result-wrap list #f)]))
   (define (proc pb)
@@ -225,7 +225,7 @@ For sequence/repetition:
 
 (define-syntax (binding-sequence-helper stx)
   (syntax-parse stx
-    [(_ port derive make-result make-result/stx start-point
+    [(_ port derive make-result/bare make-result/stx start-point
         between-propagate
         ([done-int-names ...] [done-ignores ...] [done-splices ...])
         [internal-name:id part:binding-sequence-elem]
@@ -259,7 +259,7 @@ For sequence/repetition:
                              current-splice))
                     (binding-sequence-helper port
                                              derive
-                                             make-result
+                                             make-result/bare
                                              make-result/stx
                                              internal-name
                                              between-propagate
@@ -267,11 +267,11 @@ For sequence/repetition:
                                               [done-ignores ... current-ignore]
                                               [done-splices ... current-splice])
                                              rest ...)))]
-    [(_ port derive make-result make-result/stx start-point
+    [(_ port derive make-result/bare make-result/stx start-point
         between-propagate
         ([done-int-names ...] [done-ignores ...] [done-splices ...]))
      #'(let* ([derive-arg derive]
-              [make-result-arg make-result]
+              [make-result/bare-arg make-result/bare]
               [make-result/stx-arg make-result/stx]
               [ignored-spliced-thunk
                (λ () (do-ignore-and-splice (list done-int-names ...)
@@ -289,9 +289,10 @@ For sequence/repetition:
                             pre-stx)))
                     #:derivations derivations)))]
               [do-derive (cond [derive-arg derive-arg]
-                               [(eq? #t make-result-arg) (make-result-wrap list #f)]
-                               [make-result-arg
-                                (make-result-wrap make-result-arg #f)]
+                               [(eq? #t make-result/bare-arg)
+                                (make-result-wrap list #f)]
+                               [make-result/bare-arg
+                                (make-result-wrap make-result/bare-arg #f)]
                                [(eq? #t make-result/stx-arg)
                                 (make-result-wrap list #t)]
                                [make-result/stx-arg
@@ -306,7 +307,7 @@ For sequence/repetition:
         part:binding-sequence-elem ...+
         (~or (~optional (~seq #:name name:expr))
              (~optional (~seq #:derive derive-arg:expr))
-             (~optional (~seq #:result make-result-arg:expr))
+             (~optional (~seq #:result/bare make-result-bare-arg:expr))
              (~optional (~seq #:result/stx make-result-stx-arg:expr))
              (~optional (~seq #:inherit-between inherit-between:boolean))
              (~optional (~seq #:between between-arg:expr)))
@@ -341,12 +342,12 @@ For sequence/repetition:
                                            parts-with-betweens ...
                                            #:name (~? name #f)
                                            #:derive (~? derive-arg #f)
-                                           #:result (~? make-result-arg #f)
+                                           #:result/bare (~? make-result-bare-arg #f)
                                            #:result/stx (~? make-result-stx-arg #f))
                          (binding-sequence part ...
                                            #:name (~? name #f)
                                            #:derive (~? derive-arg #f)
-                                           #:result (~? make-result-arg #f)
+                                           #:result/bare (~? make-result-bare-arg #f)
                                            #:result/stx (~? make-result-stx-arg #f))))))
          (with-syntax ([(internal-name ...) (generate-temporaries #'(part ...))])
            #'(let ([between-propagate/use (~? between-propagate #f)])
@@ -356,7 +357,7 @@ For sequence/repetition:
                               (binding-sequence-helper
                                port
                                (~? derive-arg #f)
-                               (~? make-result-arg #f)
+                               (~? make-result-bare-arg #f)
                                (~? make-result-stx-arg #f)
                                #f
                                between-propagate/use
@@ -385,7 +386,7 @@ For sequence/repetition:
 
 (define (repetition #:name [name #f]
                     #:derive [derive #f]
-                    #:result [make-result #f]
+                    #:result/bare [make-result/bare #f]
                     #:result/stx [make-result/stx #f]
                     #:min [min 0]
                     #:max [max +inf.0]
@@ -420,14 +421,14 @@ For sequence/repetition:
          #:derivations derivations))))
 
   (define combiner
-    (cond [(> 2 (count not (list derive make-result make-result/stx)))
+    (cond [(> 2 (count not (list derive make-result/bare make-result/stx)))
            (error 'repetition
                   "must provide either result or derive function, (and not both)")]
           [derive derive]
           [(eq? #t make-result/stx) (make-result-wrap (λ(x)x) #t)]
           [make-result/stx (make-result-wrap make-result/stx #t)]
-          [(eq? #t make-result) (make-result-wrap (λ(x)x) #f)]
-          [make-result (make-result-wrap make-result #f)]
+          [(eq? #t make-result/bare) (make-result-wrap (λ(x)x) #f)]
+          [make-result/bare (make-result-wrap make-result/bare #f)]
           ;; TODO - make this default true
           [else (make-result-wrap (λ(x)x) #f)]))
   (define (proc pb)
@@ -487,7 +488,7 @@ For sequence/repetition:
 
 (define (kleene-star #:name [name #f]
                      #:derive [derive #f]
-                     #:result [make-result #f]
+                     #:result/bare [make-result/bare #f]
                      #:result/stx [make-result/stx #f]
                      #:greedy? [greedy? #f]
                      #:between [between #f]
@@ -497,7 +498,7 @@ For sequence/repetition:
   (repetition parser
               #:name (or name (format "~a*" (parser-name parser)))
               #:derive derive
-              #:result make-result
+              #:result/bare make-result/bare
               #:result/stx make-result/stx
               #:greedy? greedy?
               #:between between
@@ -507,7 +508,7 @@ For sequence/repetition:
 
 (define (kleene-plus #:name [name #f]
                      #:derive [derive #f]
-                     #:result [make-result #f]
+                     #:result/bare [make-result/bare #f]
                      #:result/stx [make-result/stx #f]
                      #:greedy? [greedy? #f]
                      #:between [between #f]
@@ -517,7 +518,7 @@ For sequence/repetition:
   (repetition parser
               #:name (or name (format "~a+" (parser-name parser)))
               #:derive derive
-              #:result make-result
+              #:result/bare make-result/bare
               #:result/stx make-result/stx
               #:greedy? greedy?
               #:between between
@@ -527,13 +528,13 @@ For sequence/repetition:
 
 (define (optional #:name [name #f]
                   #:derive [derive #f]
-                  #:result [make-result #f]
+                  #:result/bare [make-result/bare #f]
                   #:result/stx [make-result/stx #f]
                   parser)
   (repetition parser
               #:name (or name (format "~a?" (parser-name parser)))
               #:derive derive
-              #:result make-result
+              #:result/bare make-result/bare
               #:result/stx make-result/stx
               #:max 1))
 
@@ -641,11 +642,14 @@ For sequence/repetition:
   (define cp "c")
   (define (Bp) (make-alt-parser "B"
                                 (list bp
-                                      (sequence #:name "Bb" #:result string-append
+                                      (sequence #:name "Bb"
+                                                #:result/bare string-append
                                                 Bp bp))))
-  (define aBcp (sequence #:name "aBc" #:result string-append
+  (define aBcp (sequence #:name "aBc"
+                         #:result/bare string-append
                          ap Bp cp))
-  (define BaBcp (sequence #:name "aBc" #:result string-append
+  (define BaBcp (sequence #:name "aBc"
+                          #:result/bare string-append
                           Bp ap Bp cp))
 
 
@@ -670,46 +674,49 @@ For sequence/repetition:
      (map parse-derivation-result
           (stream->list
            (parse* (open-input-string "qqq")
-                   (kleene-star "q" #:result (λ (elems) (string-join elems ""))))))
+                   (kleene-star "q"
+                                #:result/bare (λ (elems) (string-join elems ""))))))
      (list "" "q" "qq" "qqq"))
   (c check-equal?
      (map parse-derivation-result
           (stream->list
            (parse* (open-input-string "qqq")
-                   (kleene-plus "q" #:result (λ (elems) (string-join elems ""))))))
+                   (kleene-plus "q"
+                                #:result/bare (λ (elems) (string-join elems ""))))))
      (list "q" "qq" "qqq"))
   (c check-equal?
      (map parse-derivation-result
           (stream->list
            (parse* (open-input-string "qqqqqqqqqqqqqqqqqqqqqqq")
-                   (repetition "q" #:result (λ (elems) (string-join elems ""))
+                   (repetition "q" #:result/bare (λ (elems) (string-join elems ""))
                                #:min 3 #:max 5))))
      (list "qqq" "qqqq" "qqqqq"))
 
   ;;; repetition with between parsers
   (c check-equal?
      (->results (parse* (open-input-string "qaqaq")
-                        (repetition "q" #:result (λ (elems) (string-join elems ""))
+                        (repetition "q"
+                                    #:result/bare (λ (elems) (string-join elems ""))
                                     #:between "a")))
      (list "" "q" "qq" "qqq"))
   (c check-equal?
      (->results
       (parse* (open-input-string "bqaqaq")
-              (repetition "q" #:result (λ (elems) (string-join elems ""))
+              (repetition "q" #:result/bare (λ (elems) (string-join elems ""))
                           #:before "b"
                           #:between "a")))
      (list "" "q" "qq" "qqq"))
   (c check-equal?
      (->results
       (parse* (open-input-string "bqaqaq")
-              (repetition "q" #:result (λ (elems) (string-join elems ""))
+              (repetition "q" #:result/bare (λ (elems) (string-join elems ""))
                           #:before "b"
                           #:between "a")))
      (list "" "q" "qq" "qqq"))
   (c check-equal?
      (->results
       (parse* (open-input-string "bqaqaqz")
-              (repetition "q" #:result (λ (elems) (string-join elems ""))
+              (repetition "q" #:result/bare (λ (elems) (string-join elems ""))
                           #:before "b"
                           #:after "z"
                           #:between "a")))
@@ -717,7 +724,7 @@ For sequence/repetition:
   (c check-equal?
      (->results
       (parse* (open-input-string "aqaqaqa")
-              (repetition "q" #:result (λ (elems) (string-join elems ""))
+              (repetition "q" #:result/bare (λ (elems) (string-join elems ""))
                           #:before #t
                           #:after #t
                           #:between "a")))
@@ -726,7 +733,7 @@ For sequence/repetition:
   (c check-equal?
      (->results
       (parse* (open-input-string "bqqq")
-              (repetition "q" #:result (λ (elems) (string-join elems ""))
+              (repetition "q" #:result/bare (λ (elems) (string-join elems ""))
                           #:before "b")))
      (list "" "q" "qq" "qqq"))
   (c check-syntax-equal?
@@ -746,7 +753,7 @@ For sequence/repetition:
   (c check-equal?
      (->results
       (parse* (open-input-string "_a_b_c_")
-              (sequence "a" "b" "c" #:result (λ elems (string-join elems ""))
+              (sequence "a" "b" "c" #:result/bare (λ elems (string-join elems ""))
                         #:before #t
                         #:after #t
                         #:between "_")))
@@ -754,7 +761,7 @@ For sequence/repetition:
   (c check-equal?
      (->results
       (parse* (open-input-string "^a_b_c$")
-              (sequence "a" "b" "c" #:result (λ elems (string-join elems ""))
+              (sequence "a" "b" "c" #:result/bare (λ elems (string-join elems ""))
                         #:before "^"
                         #:after "$"
                         #:between "_")))
@@ -762,7 +769,7 @@ For sequence/repetition:
   (c check-equal?
      (->results
       (parse* (open-input-string "^abc$")
-              (sequence "a" "b" "c" #:result (λ elems (string-join elems ""))
+              (sequence "a" "b" "c" #:result/bare (λ elems (string-join elems ""))
                         #:before "^"
                         #:after "$")))
      (list "abc"))
@@ -772,7 +779,7 @@ For sequence/repetition:
      (map parse-derivation-result
           (stream->list
            (parse* (open-input-string "a")
-                   (sequence (epsilon-parser) "a" #:result (λ (a b) b)))))
+                   (sequence (epsilon-parser) "a" #:result/bare (λ (a b) b)))))
      (list "a"))
 
   (c check-equal?
@@ -817,21 +824,21 @@ For sequence/repetition:
                                           symbol-char-func))
   (define symbol-parser (kleene-plus symbol-char-parser
                                      #:name "symbol"
-                                     #:result (λ (chars)
-                                                (string->symbol
-                                                 (apply string chars)))))
+                                     #:result/bare (λ (chars)
+                                                     (string->symbol
+                                                      (apply string chars)))))
 
   (define (list-parser) (sequence #:name "list"
-                                  #:result (λ (lparen ws1? vals ws2? rparen)
-                                             vals)
+                                  #:result/bare (λ (lparen ws1? vals ws2? rparen)
+                                                  vals)
                                   "("
                                   (kleene-star whitespace-char-parser
-                                               #:result (λ (ws) #f))
+                                               #:result/bare (λ (ws) #f))
                                   (kleene-star basic-s-exp
                                                #:between (kleene-plus
                                                           whitespace-char-parser))
                                   (kleene-star whitespace-char-parser
-                                               #:result (λ (ws) #f))
+                                               #:result/bare (λ (ws) #f))
                                   ")"))
 
   (define (basic-s-exp)
@@ -902,7 +909,7 @@ For sequence/repetition:
           (stream->list
            (parse* (open-input-string "ab")
                    (sequence two-a-parser "b"
-                             #:result (λ (r1 r2) (string-append r1 r2))))))
+                             #:result/bare (λ (r1 r2) (string-append r1 r2))))))
      '("ab" "ab"))
 
 
@@ -911,7 +918,7 @@ For sequence/repetition:
                 '(("a" "b")))
   (check-equal? (->results (parse* (open-input-string "ab")
                                    (binding-sequence "a" "b"
-                                                     #:result #t)))
+                                                     #:result/bare #t)))
                 '(("a" "b")))
   (check-syntax-equal?
    (->results (parse* (open-input-string "ab")
