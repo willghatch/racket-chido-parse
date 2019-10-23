@@ -242,13 +242,16 @@ For sequence/repetition:
                (syntax-parameterize
                    ([binding-subsequence-layout #'between-propagate])
                  part.parser)]
-              [parser/repeat (if repeat
-                                 (repetition parser/no-repeat
-                                             #:min repeat-min
-                                             #:max repeat-max
-                                             #:between between-propagate
-                                             #:greedy? repeat-greedy?)
-                                 parser/no-repeat)])
+              [parser/repeat
+               (if repeat
+                   (repetition parser/no-repeat
+                               #:min repeat-min
+                               #:max repeat-max
+                               #:between between-propagate
+                               #:greedy? repeat-greedy?
+                               #:result/bare (not (not make-result/bare))
+                               #:result/stx (not (not make-result/stx)))
+                   parser/no-repeat)])
          (for/parse ([internal-name (parse* port parser/repeat #:start start-point)])
                     (~? (define part.name internal-name) (void))
                     (define current-ignore part.ignore)
@@ -350,15 +353,17 @@ For sequence/repetition:
                                            #:result/bare (~? make-result-bare-arg #f)
                                            #:result/stx (~? make-result-stx-arg #f))))))
          (with-syntax ([(internal-name ...) (generate-temporaries #'(part ...))])
-           #'(let ([between-propagate/use (~? between-propagate #f)])
+           #'(let ([between-propagate/use (~? between-propagate #f)]
+                   [make-result/bare (~? make-result-bare-arg #f)]
+                   [make-result/stx (~? make-result-stx-arg #f)])
                (proc-parser #:name (or (~? name #f) "TODO-binding-seq-name")
                             ;; TODO - other optional args
                             (λ (port)
                               (binding-sequence-helper
                                port
                                (~? derive-arg #f)
-                               (~? make-result-bare-arg #f)
-                               (~? make-result-stx-arg #f)
+                               make-result/bare
+                               make-result/stx
                                #f
                                between-propagate/use
                                ([] [] [])
