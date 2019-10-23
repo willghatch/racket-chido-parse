@@ -223,7 +223,7 @@ For sequence/repetition:
 
 (define-syntax (binding-sequence-helper stx)
   (syntax-parse stx
-    [(_ port derive make-result start-point
+    [(_ port derive make-result make-result/stx start-point
         between-propagate
         ([done-int-names ...] [done-ignores ...] [done-splices ...])
         [internal-name:id part:binding-sequence-elem]
@@ -258,33 +258,41 @@ For sequence/repetition:
                     (binding-sequence-helper port
                                              derive
                                              make-result
+                                             make-result/stx
                                              internal-name
                                              between-propagate
                                              ([done-int-names ... internal-name]
                                               [done-ignores ... current-ignore]
                                               [done-splices ... current-splice])
                                              rest ...)))]
-    [(_ port derive make-result start-point
+    [(_ port derive make-result make-result/stx start-point
         between-propagate
         ([done-int-names ...] [done-ignores ...] [done-splices ...]))
      #'(let* ([derive-arg derive]
               [make-result-arg make-result]
+              [make-result/stx-arg make-result/stx]
               [ignored-spliced-thunk
                (λ () (do-ignore-and-splice (list done-int-names ...)
                                            (list done-ignores ...)
                                            (list done-splices ...)))]
+              [make-result-wrap
+               (λ (make-result-func stx?)
+                 (λ derivations
+                   (make-parse-derivation
+                    (λ (src line col pos span ds)
+                      (let ([pre-stx (apply make-result-func
+                                            (ignored-spliced-thunk))])
+                        (if stx?
+                            (datum->syntax #f pre-stx (list src line col pos span))
+                            pre-stx)))
+                    #:derivations derivations)))]
               [do-derive (cond [derive-arg derive-arg]
                                [make-result-arg
-                                (λ derivations
-                                  (make-parse-derivation
-                                   (λ (src line col start span ds)
-                                     (apply make-result-arg (ignored-spliced-thunk)))
-                                   #:derivations derivations))]
-                               [else (λ derivations
-                                       (make-parse-derivation
-                                        (λ (src line col start span ds)
-                                          (ignored-spliced-thunk))
-                                        #:derivations derivations))])])
+                                (make-result-wrap make-result-arg #f)]
+                               [make-result/stx-arg
+                                (make-result-wrap make-result/stx-arg #t)]
+                               ;; TODO - use #t to default to making syntax objects
+                               [else (make-result-wrap list #f)])])
          (apply do-derive (list done-int-names ...)))]))
 (define-syntax (binding-sequence stx)
   (syntax-parse stx
@@ -293,7 +301,8 @@ For sequence/repetition:
         part:binding-sequence-elem ...+
         (~or (~optional (~seq #:name name:expr))
              (~optional (~seq #:derive derive-arg:expr))
-             (~optional (~seq #:make-result make-result-arg:expr))
+             (~optional (~seq #:result make-result-arg:expr))
+             (~optional (~seq #:result/stx make-result-stx-arg:expr))
              (~optional (~seq #:inherit-between inherit-between:boolean))
              (~optional (~seq #:between between-arg:expr)))
         ...)
@@ -327,11 +336,13 @@ For sequence/repetition:
                                            parts-with-betweens ...
                                            #:name (~? name #f)
                                            #:derive (~? derive-arg #f)
-                                           #:make-result (~? make-result-arg #f))
+                                           #:result (~? make-result-arg #f)
+                                           #:result/stx (~? make-result-stx-arg #f))
                          (binding-sequence part ...
                                            #:name (~? name #f)
                                            #:derive (~? derive-arg #f)
-                                           #:make-result (~? make-result-arg #f))))))
+                                           #:result (~? make-result-arg #f)
+                                           #:result/stx (~? make-result-stx-arg #f))))))
          (with-syntax ([(internal-name ...) (generate-temporaries #'(part ...))])
            #'(let ([between-propagate/use (~? between-propagate #f)])
                (proc-parser #:name (or (~? name #f) "TODO-binding-seq-name")
@@ -341,6 +352,7 @@ For sequence/repetition:
                                port
                                (~? derive-arg #f)
                                (~? make-result-arg #f)
+                               (~? make-result-stx-arg #f)
                                #f
                                between-propagate/use
                                ([] [] [])
@@ -890,6 +902,11 @@ For sequence/repetition:
   (check-equal? (->results (parse* (open-input-string "ab")
                                    (binding-sequence "a" "b")))
                 '(("a" "b")))
+  (check-syntax-equal?
+   (->results (parse* (open-input-string "ab")
+                      (binding-sequence "a" "b"
+                                        #:result/stx list)))
+   (list (datum->syntax #f '("a" "b") (list 'string 1 1 1 2))))
 
   (check-equal? (->results (parse* (open-input-string "ab")
                                    (binding-sequence [#:bind a1 "a"] "b")))
