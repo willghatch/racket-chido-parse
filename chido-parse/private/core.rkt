@@ -103,6 +103,7 @@
   (
    [result #:mutable] [result-forced? #:mutable]
    parser
+   source-name
    line column start-position end-position
    derivation-list
    )
@@ -113,7 +114,8 @@
       (parse-derivation-result pd)
       (let* ([f (parse-derivation-result pd)]
              [r (with-handlers ([(λ(e)#t)(λ(e)e)])
-                  (f (parse-derivation-line pd)
+                  (f (parse-derivation-source-name pd)
+                     (parse-derivation-line pd)
                      (parse-derivation-column pd)
                      (parse-derivation-start-position pd)
                      (parse-derivation-end-position pd)
@@ -171,6 +173,7 @@
            #:scheduler scheduler
            #:start-position start-position)
      (define pb (scheduler-port-broker scheduler))
+     (define source-name (port-broker-source-name pb))
      (define line (port-broker-line pb start-position))
      (define column (port-broker-column pb start-position))
      (define end-use (or end
@@ -184,6 +187,7 @@
      (define delayed? (procedure? result))
      (parse-derivation result (not delayed?)
                        parser
+                       source-name
                        line column start-position end-use
                        derivation-list)]
     [else (error 'make-parse-derivation

@@ -270,12 +270,12 @@ For sequence/repetition:
                                [make-result-arg
                                 (λ derivations
                                   (make-parse-derivation
-                                   (λ (line col start end ds)
+                                   (λ (src line col start end ds)
                                      (apply make-result-arg (ignored-spliced-thunk)))
                                    #:derivations derivations))]
                                [else (λ derivations
                                        (make-parse-derivation
-                                        (λ (line col start end ds)
+                                        (λ (src line col start end ds)
                                           (ignored-spliced-thunk))
                                         #:derivations derivations))])])
          (apply do-derive (list done-int-names ...)))]))

@@ -16,6 +16,8 @@
  port-broker-substring?
  port-broker-substring
 
+ port-broker-source-name
+
  port-broker-port-reset-position!
  )
 
@@ -162,6 +164,9 @@
      (when (not info)
        (error 'port-broker-substring "substring goes beyond end of port"))
      (vector-ref info info-char-offset))))
+
+(define (port-broker-source-name pb)
+  (object-name (port-broker-port pb)))
 
 (define (port-broker-port-reset-position! port new-pos)
   (when (< new-pos 1)
