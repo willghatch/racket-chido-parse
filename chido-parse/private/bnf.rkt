@@ -82,7 +82,10 @@
               (~or (~optional (~seq #:name name:str))
                    (~optional (~seq #:associativity assoc:expr))
                    (~optional (~seq #:precidence-greater-than pgt:expr))
-                   (~optional (~seq #:precidence-less-than plt:expr)))
+                   (~optional (~seq #:precidence-less-than plt:expr))
+                   (~optional (~seq #:result/stx result/stx:expr))
+                   (~optional (~seq #:result/bare result/bare:expr))
+                   )
               ...]
              #:attr parser #f)
     (pattern parser:expr
@@ -91,9 +94,19 @@
              #:attr assoc #f
              #:attr pgt #f
              #:attr plt #f
+             #:attr result/stx #f
+             #:attr result/bare #f
              ))
   )
 
+(define-syntax (result/bare-inherit stx)
+  (raise-syntax-error 'result/bare-inherit
+                      "only exists for use as a hidden keyword of define-bnf-arm"
+                      stx))
+(define-syntax (result/stx-inherit stx)
+  (raise-syntax-error 'result/stx-inherit
+                      "only exists for use as a hidden keyword of define-bnf-arm"
+                      stx))
 (define-syntax (layout-inherit stx)
   (raise-syntax-error 'layout-inherit
                       "only exists for use as a hidden keyword of define-bnf-arm"
@@ -109,6 +122,12 @@
     [(_ arm-name:id
         (~or (~optional (~seq #:layout layout-arg:expr))
              (~optional (~seq #:layout-parsers layout-parsers:expr))
+             (~optional (~seq #:result/stx arm-result/stx:expr))
+             (~optional (~seq #:result/bare arm-result/bare:expr))
+             (~optional (~seq (~literal result/stx-inherit)
+                              result/stx/inherit:expr))
+             (~optional (~seq (~literal result/bare-inherit)
+                              result/bare/inherit:expr))
              (~optional (~seq (~literal layout-inherit)
                               layout/inherit:expr))
              (~optional (~seq (~literal layout-parsers-inherit)
@@ -119,6 +138,16 @@
         ...+)
      #'(begin
          (define layout-arg-use (~? layout-arg bnf-default-layout-requirement))
+         (define given-result/bare? (~? arm-result/bare #f))
+         (define given-result/stx? (~? arm-result/stx #f))
+         (define inherit-result/bare? (~? result/bare/inherit #f))
+         (define inherit-result/stx? (~? result/stx/inherit #f))
+         (define use-result/bare? (or given-result/bare?
+                                      (and inherit-result/bare?
+                                           (not (given-result/stx?)))))
+         (define use-result/stx? (or given-result/stx?
+                                     (and inherit-result/stx?
+                                          (not (given-result/bare?)))))
          (define rt1
            (dict-set
             (set-chido-readtable-symbol-support empty-chido-readtable #f)
@@ -130,18 +159,23 @@
                      ([parser (~? layout-parsers bnf-default-layout-parsers)])
              (extend-chido-readtable rt 'layout parser)))
 
-         (define rt3 (readtable-extend-as-bnf-arm rt2 #:arm-name arm-name spec ...))
+         (define rt3 (readtable-extend-as-bnf-arm rt2
+                                                  #:result/stx use-result/stx?
+                                                  #:result/bare use-result/bare?
+                                                  #:arm-name arm-name
+                                                  spec ...))
          (define arm-name rt3))]))
 
 
 (define-syntax (readtable-extend-as-bnf-arm stx)
   (syntax-parse stx
     [(_ arm:expr
-        (~or (~optional (~seq #:arm-name arm-name:id))))
-     #'arm]
-    [(_ arm:expr
-        (~or (~optional (~seq #:arm-name arm-name:id)))
-        spec:bnf-arm-alt-spec ...+)
+        (~or (~optional (~seq #:arm-name arm-name:id))
+             (~optional (~seq #:result/stx default-result/stx:expr))
+             (~optional (~seq #:result/bare default-result/bare:expr))
+             )
+        ...
+        spec:bnf-arm-alt-spec ...)
      (define/syntax-parse (alt-name/direct ...)
        #'((~? spec.name #f) ...))
      (define/syntax-parse
@@ -150,7 +184,9 @@
          [prefix-op? postfix-op?]
          assoc
          precidence-gt
-         precidence-lt] ...)
+         precidence-lt
+         result/stx
+         result/bare] ...)
        (for/list ([alt (syntax->list #'(spec ...))])
          (syntax-parse alt
            [s:bnf-arm-alt-spec
@@ -183,20 +219,34 @@
             (define assoc #'(~? s.assoc #f))
             (define precidence-gt #'(~? s.pgt '()))
             (define precidence-lt #'(~? s.plt '()))
+            (define result/stx #'(~? s.result/stx #f))
+            (define result/bare #'(~? s.result/bare #f))
             (list (datum->syntax alt name alt)
                   (list str-elems)
                   (list prefix-op? postfix-op?)
                   assoc
                   precidence-gt
-                  precidence-lt)])))
+                  precidence-lt
+                  result/stx
+                  result/bare)])))
      #'(let-syntax ([arm-name (syntax-parser [_ #'current-chido-readtable])])
          (let* ([rt/start arm]
+                [use-result/stx? (~? default-result/stx #f)]
+                [use-result/bare? (~? default-result/bare #f)]
                 [alts (list (~? spec.parser
-                                (binding-sequence
-                                 spec.elem ...
-                                 #:between bnf-inserted-layout-parser
-                                 #:name (or alt-name/direct
-                                            alt-name/inferred)))
+                                (let ([send-result/stx
+                                       (or result/stx (and (not result/bare)
+                                                           use-result/stx?))]
+                                      [send-result/bare
+                                       (or result/bare (and (not result/stx)
+                                                            use-result/bare?))])
+                                  (binding-sequence
+                                   spec.elem ...
+                                   #:result/stx send-result/stx
+                                   #:result/bare send-result/bare
+                                   #:between bnf-inserted-layout-parser
+                                   #:name (or alt-name/direct
+                                              alt-name/inferred))))
                             ...)]
                 [rt/extended
                  (for/fold ([rt rt/start])
@@ -361,6 +411,8 @@
     [(_ name:id
         (~or (~optional (~seq #:layout-parsers layout-parsers:expr))
              (~optional (~seq #:layout layout-arg:expr))
+             (~optional (~seq #:result/stx result/stx:expr))
+             (~optional (~seq #:result/bare result/bare:expr))
              (~optional (~seq #:main-arm main-arm-arg:id))
              )
         ...
@@ -374,6 +426,8 @@
          (let ()
            (define layout/inherit
              (~? layout-arg bnf-default-layout-requirement))
+           (define result/stx/inherit (~? result/stx #f))
+           (define result/bare/inherit (~? result/bare #f))
            (define layout-parsers/use
              ;; TODO - maybe I should keep this as a separate thing that can be extended all together?
              (~? layout-parsers bnf-default-layout-parsers))
@@ -404,6 +458,8 @@
                                (define-bnf-arm arm-name
                                  layout-parsers-inherit (list master-layout-parser)
                                  layout-inherit layout/inherit
+                                 result/bare-inherit result/bare/inherit
+                                 result/stx-inherit result/stx/inherit
                                  arm-spec/kw ...)
                                arm-name)]
                    ...)
@@ -422,6 +478,7 @@
 (define-syntax (extend-bnf stx)
   (syntax-parse stx
     [(_ bnf [arm-name:id new-parser/sequence-spec ...] ...+)
+     ;; TODO - layout and result/bare/stx arguments
      #'(let ([bnf* bnf])
          (let-syntax ([arm-name get-current-bnf-arm] ...)
            (extend-bnf-helper bnf* () [arm-name new-parser/sequence-spec ...] ...)))]))
