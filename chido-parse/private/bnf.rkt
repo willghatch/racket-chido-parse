@@ -641,7 +641,15 @@
   (define-bnf/quick quick-simple
     [thing [(as-syntax "a")]
            [(as-syntax "b")]
-           [/ "(" @ thing * / ")"]])
+           [/ "(" @ thing * / ")"]
+           [thing "badmirror" thing]
+           [first = thing "mirror" (parse-filter
+                                    thing
+                                    (λ (port derivation)
+                                      (equal? (syntax->datum
+                                               (parse-derivation-result derivation))
+                                              (syntax->datum
+                                               (parse-derivation-result first))))) ]])
 
   (check se/datum?
          (->results (whole-parse* (open-input-string "a")
@@ -655,6 +663,14 @@
          (->results (whole-parse* (open-input-string "(aa(ba)ba)")
                                   quick-simple))
          (list #'("a" "a" ("b" "a") "b" "a")))
+  (check se/datum?
+         (->results (whole-parse* (open-input-string "a mirror a")
+                                  quick-simple))
+         (list #'("a" "mirror" "a")))
+  (check se/datum?
+         (->results (whole-parse* (open-input-string "a mirror b")
+                                  quick-simple))
+         '())
 
   (define-bnf/quick bnf-test-1/quick
     [statement ["pass"]
