@@ -3,6 +3,7 @@
 (provide
  define-bnf-arm
  define-bnf
+ define-bnf/quick
 
  readtable-extend-as-bnf-arm
  extend-bnf
