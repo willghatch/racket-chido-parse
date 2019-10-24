@@ -615,19 +615,8 @@
        (datum->syntax stx
                       (syntax-e #'(check-not-exn (λ () (check-name arg ...))))
                       stx)]))
-  (define (syntax-equal? l r)
-    (cond [(and (syntax? l) (syntax? r))
-           (and (equal? (syntax-source l) (syntax-source r))
-                (equal? (syntax-line l) (syntax-line r))
-                (equal? (syntax-column l) (syntax-column r))
-                (equal? (syntax-position l) (syntax-position r))
-                (equal? (syntax-span l) (syntax-span r))
-                (equal? (syntax->datum l) (syntax->datum r)))]
-          [(and (list? l) (list? r))
-           (andmap syntax-equal? l r)]
-          [else (equal? l r)]))
-  (define (check-syntax-equal? l r)
-    (check syntax-equal? l r))
+
+  (require "test-util.rkt")
 
   (define ap "a")
   (define bp "b")
@@ -728,7 +717,7 @@
               (repetition "q" #:result/bare (λ (elems) (string-join elems ""))
                           #:before "b")))
      (list "" "q" "qq" "qqq"))
-  (c check-syntax-equal?
+  (c check se?
      (->results
       (parse* (open-input-string "qqqz")
               (repetition "q" #:result/stx (λ (elems) (string-join elems ""))
@@ -736,7 +725,7 @@
      (list (datum->syntax #f "qqq" (list 'string 1 1 1 4))))
 
   ;;; sequence with begin/before/after
-  (c check-syntax-equal?
+  (c check se?
      (->results
       (parse* (open-input-string "a_b_c")
               (sequence "a" "b" "c" #:result/stx (λ elems (string-join elems ""))
@@ -915,12 +904,12 @@
                                    (binding-sequence "a" "b"
                                                      #:result/bare #t)))
                 '(("a" "b")))
-  (check-syntax-equal?
+  (check se?
    (->results (parse* (open-input-string "ab")
                       (binding-sequence "a" "b"
                                         #:result/stx list)))
    (list (datum->syntax #f '("a" "b") (list 'string 1 1 1 2))))
-  (check-syntax-equal?
+  (check se?
    (->results (parse* (open-input-string "ab")
                       (binding-sequence "a" "b"
                                         #:result/stx #t)))

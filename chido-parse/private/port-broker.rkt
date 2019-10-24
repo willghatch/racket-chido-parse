@@ -378,34 +378,7 @@ A wrapped port should be able to give a handle to the broker it is wrapping.
 
 (module+ test
   (require rackunit)
-  (define (se? a b)
-    ;; syntax-equal? for datum and position.
-    ;; Ignores syntax properties.
-    (or
-     (and (match (list a b)
-            [(list (list ai ...) (list bi ...))
-             (andmap se? ai bi)]
-            [(list (? syntax?) b) #f]
-            [else (equal? a b)]))
-     (and (syntax? a)
-          (syntax? b)
-          (se? (syntax-e a) (syntax-e b))
-          (equal? (syntax-source a) (syntax-source b))
-          (equal? (syntax-line a) (syntax-line b))
-          (equal? (syntax-column a) (syntax-column b))
-          (equal? (syntax-position a) (syntax-position b))
-          (equal? (syntax-span a) (syntax-span b)))
-     (begin
-       (if (and (syntax? a) (syntax? b))
-           (eprintf "different: ~s while expected ~s\n"
-                    (list a (syntax->datum a) (syntax-source a)
-                          (syntax-line a) (syntax-column a)
-                          (syntax-position a) (syntax-span a))
-                    (list b (syntax->datum b) (syntax-source b)
-                          (syntax-line b) (syntax-column b)
-                          (syntax-position b) (syntax-span b)))
-           (eprintf "different: ~s while expected ~s\n" a b))
-       #f)))
+  (require "test-util.rkt")
 
 
   (define test-str
