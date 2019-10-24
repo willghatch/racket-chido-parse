@@ -175,10 +175,25 @@
                     (do-ignore-and-splice (cdr derivations)
                                           (cdr ignores)
                                           (cdr splices)))]))
+
+(define (do-full-sequence-splice val n)
+  (match n
+    [#f val]
+    [0 val]
+    [(and (? number?) (? (λ (x) (< 0 x))))
+     (match val
+       [(list x) (do-full-sequence-splice x (sub1 n))]
+       [(? syntax?) (do-full-sequence-splice (syntax-e val) n)]
+       [else (error
+              'binding-sequence
+              "can't do full-sequence splice of something that is not a list of a single element"
+              val)])]))
+
 (begin-for-syntax
   (define-syntax-class binding-sequence-elem
     (pattern (~and whole-pattern
-                   [(~or (~optional parser-given:expr)
+                   [(~datum :)
+                    (~or (~optional parser-given:expr)
                          (~optional (~seq #:bind name:id))
                          (~optional (~seq #:ignore ignore-given:expr))
                          (~optional (~seq #:splice splice-given:expr))
@@ -215,7 +230,7 @@
 
 (define-syntax (binding-sequence-helper stx)
   (syntax-parse stx
-    [(_ port derive make-result/bare make-result/stx start-point
+    [(_ port derive make-result/bare make-result/stx splice start-point
         between-propagate
         ([done-int-names ...] [done-ignores ...] [done-splices ...])
         [internal-name:id part:binding-sequence-elem]
@@ -254,13 +269,14 @@
                                              derive
                                              make-result/bare
                                              make-result/stx
+                                             splice
                                              internal-name
                                              between-propagate
                                              ([done-int-names ... internal-name]
                                               [done-ignores ... current-ignore]
                                               [done-splices ... current-splice])
                                              rest ...)))]
-    [(_ port derive make-result/bare make-result/stx start-point
+    [(_ port derive make-result/bare make-result/stx splice start-point
         between-propagate
         ([done-int-names ...] [done-ignores ...] [done-splices ...]))
      #'(let* ([derive-arg derive]
@@ -275,8 +291,10 @@
                  (λ derivations
                    (make-parse-derivation
                     (λ (src line col pos span ds)
-                      (let ([pre-stx (apply make-result-func
-                                            (ignored-spliced-thunk))])
+                      (let* ([pre-stx+splice (apply make-result-func
+                                                    (ignored-spliced-thunk))]
+                             [pre-stx (do-full-sequence-splice pre-stx+splice
+                                                               splice)])
                         (if stx?
                             (datum->syntax #f pre-stx (list src line col pos span))
                             pre-stx)))
@@ -301,13 +319,14 @@
              (~optional (~seq #:derive derive-arg:expr))
              (~optional (~seq #:result/bare make-result-bare-arg:expr))
              (~optional (~seq #:result/stx make-result-stx-arg:expr))
+             (~optional (~seq #:splice splice-arg:expr))
              (~optional (~seq #:inherit-between inherit-between:boolean))
              (~optional (~seq #:between between-arg:expr)))
         ...)
      (define (add-betweens between-parser-stx partlist)
        (if (null? partlist)
            '()
-           (cons #`[#,between-parser-stx #:ignore #t]
+           (cons #`[: #,between-parser-stx #:ignore #t]
                  (cons (car partlist)
                        (add-betweens between-parser-stx (cdr partlist))))))
      (define subsequence-layout
@@ -341,10 +360,14 @@
                                            #:derive (~? derive-arg #f)
                                            #:result/bare (~? make-result-bare-arg #f)
                                            #:result/stx (~? make-result-stx-arg #f))))))
-         (with-syntax ([(internal-name ...) (generate-temporaries #'(part ...))])
+         (with-syntax ([(internal-name ...) (generate-temporaries #'(part ...))]
+                       [sequence-length
+                        (datum->syntax #'here
+                                       (length (syntax->list #'(part ...))))])
            #'(let ([between-propagate/use (~? between-propagate #f)]
                    [make-result/bare (~? make-result-bare-arg #f)]
-                   [make-result/stx (~? make-result-stx-arg #f)])
+                   [make-result/stx (~? make-result-stx-arg #f)]
+                   [splice (~? splice-arg (and (equal? sequence-length 1) 1))])
                (proc-parser #:name (or (~? name #f) "TODO-binding-seq-name")
                             ;; TODO - other optional args
                             (λ (port)
@@ -353,6 +376,7 @@
                                (~? derive-arg #f)
                                make-result/bare
                                make-result/stx
+                               splice
                                #f
                                between-propagate/use
                                ([] [] [])
@@ -925,46 +949,46 @@
    (list (datum->syntax #f '("a" "b") (list 'string 1 1 1 2))))
 
   (check-equal? (->results (parse* (open-input-string "ab")
-                                   (binding-sequence [#:bind a1 "a"] "b"
+                                   (binding-sequence [: #:bind a1 "a"] "b"
                                                      #:result/bare #t)))
                 '(("a" "b")))
   (check-equal? (->results (parse* (open-input-string "ab")
-                                   (binding-sequence [#:ignore #t "a"] "b"
+                                   (binding-sequence [: #:ignore #t "a"] "b"
                                                      #:result/bare #t)))
                 '(("b")))
   (check-equal? (->results (parse* (open-input-string "a_b")
-                                   (binding-sequence [#:ignore #t "a"] "b"
+                                   (binding-sequence [: #:ignore #t "a"] "b"
                                                      #:between "_"
                                                      #:result/bare #t)))
                 '(("b")))
   (check-equal? (->results (parse* (open-input-string "aaab")
-                                   (binding-sequence [#:splice 1
-                                                      (kleene-star "a"
-                                                                   #:result/bare #t)]
+                                   (binding-sequence [: #:splice 1
+                                                        (kleene-star "a"
+                                                                     #:result/bare #t)]
                                                      "b"
                                                      #:result/bare #t)))
                 '(("a" "a" "a" "b")))
   (check-equal? (->results (parse* (open-input-string "aaa_b")
-                                   (binding-sequence [#:splice 1
-                                                      (kleene-star "a"
-                                                                   #:result/bare #t)]
+                                   (binding-sequence [: #:splice 1
+                                                        (kleene-star "a"
+                                                                     #:result/bare #t)]
                                                      "b"
                                                      #:between "_"
                                                      #:result/bare #t)))
                 '(("a" "a" "a" "b")))
   (check-equal? (->results
                  (parse* (open-input-string "a-a-a_b")
-                         (binding-sequence [#:splice 1 (kleene-star
-                                                        "a"
-                                                        #:between "-"
-                                                        #:result/bare #t)]
+                         (binding-sequence [: #:splice 1 (kleene-star
+                                                          "a"
+                                                          #:between "-"
+                                                          #:result/bare #t)]
                                            "b"
                                            #:between "_"
                                            #:result/bare #t)))
                 '(("a" "a" "a" "b")))
 
   (define bseq-a-not-a-parser
-    (binding-sequence [#:bind a1 "a"]
+    (binding-sequence [: #:bind a1 "a"]
                       (parse-filter (proc-parser (λ (port)
                                                    (make-parse-derivation
                                                     (read-string 1 port)
@@ -983,7 +1007,7 @@
 
   ;; check binding-sequence repeat
   (check-equal? (->results (parse* (open-input-string "a_a_a_b")
-                                   (binding-sequence [#:splice 1 #:repeat-min 0 "a"]
+                                   (binding-sequence [: #:splice 1 #:repeat-min 0 "a"]
                                                      "b"
                                                      #:between "_"
                                                      #:result/bare #t)))
@@ -993,13 +1017,13 @@
    (->results
     (parse* (open-input-string "a_1_2_3_7-8-9_b")
             (binding-sequence "a"
-                              [#:splice 1 (binding-sequence "1" "2" "3"
-                                                            #:inherit-between #t
-                                                            #:result/bare #t)]
-                              [#:splice 1 (binding-sequence "7" "8" "9"
-                                                            #:inherit-between #t
-                                                            #:between "-"
-                                                            #:result/bare #t)]
+                              [: #:splice 1 (binding-sequence "1" "2" "3"
+                                                              #:inherit-between #t
+                                                              #:result/bare #t)]
+                              [: #:splice 1 (binding-sequence "7" "8" "9"
+                                                              #:inherit-between #t
+                                                              #:between "-"
+                                                              #:result/bare #t)]
                               "b"
                               #:between "_"
                               #:result/bare #t)))
@@ -1008,15 +1032,19 @@
    (->results
     (parse* (open-input-string "a_1_2_3_1_2_3_b")
             (binding-sequence "a"
-                              [#:splice 2 #:repeat-min 0
-                               (binding-sequence "1" "2" "3"
-                                                 #:inherit-between #t
-                                                 #:result/bare #t)]
+                              [: #:splice 2 #:repeat-min 0
+                                 (binding-sequence "1" "2" "3"
+                                                   #:inherit-between #t
+                                                   #:result/bare #t)]
                               "b"
                               #:between "_"
                               #:result/bare #t)))
    '(("a" "1" "2" "3" "1" "2" "3" "b")))
 
+  (check se/datum?
+         (->results (parse* (open-input-string "foo")
+                            (as-syntax "foo")))
+         (list #'"foo"))
 
 
   )
