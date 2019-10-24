@@ -478,16 +478,26 @@
                             (parse* port
                                     (bnf-parser-ref (current-bnf) 'x))))]))
 
+
 (define-syntax (extend-bnf stx)
   (syntax-parse stx
-    [(_ bnf [arm-name:id new-parser/sequence-spec ...] ...+)
-     ;; TODO - layout and result/bare/stx arguments
-     #'(let ([bnf* bnf])
+    [(_ bnf
+        (~or (~optional (~seq #:result/stx result/stx:expr))
+             (~optional (~seq #:result/bare result/bare:expr)))
+        ...
+        [arm-name:id new-parser/sequence-spec ...] ...+)
+     #'(let* ([bnf* bnf]
+              [result/stx-given (~? result/stx #f)]
+              [result/bare-given (~? result/bare #f)])
          (let-syntax ([arm-name get-current-bnf-arm] ...)
-           (extend-bnf-helper bnf* () [arm-name new-parser/sequence-spec ...] ...)))]))
+           (extend-bnf-helper bnf*
+                              (result/stx-given result/bare-given)
+                              ()
+                              [arm-name new-parser/sequence-spec ...] ...)))]))
 (define-syntax (extend-bnf-helper stx)
   (syntax-parse stx
     [(_ bnf-ref:id
+        (result/stx result/bare)
         (arm-done:id ...)
         [arm-for-this-pass:id spec-for-this-pass ...]
         [arm-later spec-later ...] ...)
@@ -504,11 +514,14 @@
                                            'extend-bnf
                                            "adding new BNF arms not yet supported")))
                            #:arm-name arm-for-this-pass
+                           #:result/stx result/stx
+                           #:result/bare result/bare
                            spec-for-this-pass ...))])])
          (extend-bnf-helper new-bnf-id
+                            (result/stx result/bare)
                             (arm-done ... arm-for-this-pass)
                             [arm-later spec-later ...] ...))]
-    [(_ bnf-ref:id (arm-done:id ...)) #'bnf-ref]))
+    [(_ bnf-ref:id (result/stx result/bare) (arm-done:id ...)) #'bnf-ref]))
 
 
 (module+ test
@@ -546,6 +559,7 @@
   (define bnf-test-2
     (extend-bnf
      bnf-test-1
+     #:result/bare #t
      [statement "break"
                 [id ":=" expression]]
      [expression ["let" id "=" expression "in" expression
