@@ -643,11 +643,10 @@
            [(as-syntax "b")]
            [/ "(" @ thing * / ")"]
            [thing "badmirror" thing]
-           [first = thing "mirror" (parse-filter
+           [first = thing "mirror" (result-filter
                                     thing
-                                    (λ (port derivation)
-                                      (equal? (syntax->datum
-                                               (parse-derivation-result derivation))
+                                    (λ (r)
+                                      (equal? (syntax->datum r)
                                               (syntax->datum
                                                (parse-derivation-result first))))) ]])
 
