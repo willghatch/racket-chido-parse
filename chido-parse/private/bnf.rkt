@@ -87,7 +87,8 @@
                    )
               ...]
              #:attr parser #f)
-    (pattern parser:expr
+    ;; TODO - this is a bad pattern!
+    #;(pattern parser:expr
              #:attr (elem 1) #f
              #:attr name #f
              #:attr assoc #f
@@ -299,12 +300,12 @@
   (define-bnf-arm test1
     #:result/bare #t
     #:layout 'none
-    ["a" [#:ignore #t "b"] "c"]
+    ["a" [: #:ignore #t "b"] "c"]
     ["a" "a" "b"])
   (define-bnf-arm test1/layout
     #:result/bare #t
     #:layout 'required
-    ["a" [#:ignore #t "b"] "c" #:name "test-name-1"]
+    ["a" [: #:ignore #t "b"] "c" #:name "test-name-1"]
     ["a" "a" "b"])
   (check-equal? (->results (parse* (open-input-string "abc")
                                    (chido-readtable->read1 test1)))
@@ -343,7 +344,7 @@
   (define-bnf-arm test2
     #:layout 'optional
     #:result/bare #t
-    "n"
+    ["n"]
     [test2 "+" test2 #:associativity 'left]
     [test2 "*" test2 #:associativity 'left #:precidence-greater-than '("+")]
     [test2 "^" test2 #:associativity 'right #:precidence-greater-than '("*")]
@@ -528,20 +529,20 @@
     #:result/bare #t
     [statement ["pass"]
                ["for" id "in" expression "do" statement]
-               ["{" [#:repeat-min 0 #:splice 1 statement] "}" #:name "block"]
-               expression]
-    [expression number-parser
-                id
+               ["{" [: #:repeat-min 0 #:splice 1 statement] "}" #:name "block"]
+               [expression]]
+    [expression [number-parser]
+                [id]
                 [expression "+" expression #:associativity 'left]
                 [expression "*" expression
                             #:associativity 'right
                             #:precidence-greater-than '("+")]]
-    [id "x"])
+    [id ["x"]])
 
   (check-equal? (->results (whole-parse*
                             (open-input-string "pass")
                             bnf-test-1))
-                '(("pass")))
+                '("pass"))
   (check-equal? (->results (whole-parse*
                             (open-input-string "5 + 67 * 3")
                             bnf-test-1))
@@ -559,7 +560,7 @@
     (extend-bnf
      bnf-test-1
      #:result/bare #t
-     [statement "break"
+     [statement ["break"]
                 [id ":=" expression]]
      [expression ["let" id "=" expression "in" expression
                         #:precidence-greater-than '("*")]]
@@ -568,7 +569,7 @@
   (check-equal? (->results (whole-parse*
                             (open-input-string "{ pass break 2 + let x = 5 in 2 + 2 }")
                             bnf-test-2))
-                '(("{" ("pass") "break" ((2 "+" ("let" "x" "=" 5 "in" 2)) "+" 2) "}")))
+                '(("{" "pass" "break" ((2 "+" ("let" "x" "=" 5 "in" 2)) "+" 2) "}")))
 
   )
 
@@ -644,16 +645,18 @@
 (module+ test
 
   (define-bnf/quick quick-simple
-    [thing "a"
-           ["b"]
+    [thing ["a"]
+           [(as-syntax "b")]
            ["(" thing ")"]])
 
-  (check se/datum? (->results (whole-parse* (open-input-string "a")
-                                            quick-simple))
+  (check se/datum?
+         (->results (whole-parse* (open-input-string "a")
+                                  quick-simple))
          (list #'"a"))
-  (check se/datum? (->results (whole-parse* (open-input-string "b")
-                                            quick-simple))
-         (list #'("b")))
+  (check se/datum?
+         (->results (whole-parse* (open-input-string "b")
+                                  quick-simple))
+         (list #'"b"))
 
   #;(define-bnf/quick bnf-test-1/quick
     [statement ["pass"]
