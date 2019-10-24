@@ -188,7 +188,8 @@
                          (error 'make-parse-derivation
                                 "Couldn't infer end location and none provided.")))
      (define delayed? (procedure? result))
-     (parse-derivation result (not delayed?)
+     (parse-derivation result
+                       (not delayed?)
                        parser
                        source-name
                        line column start-position end-use
@@ -937,6 +938,9 @@ But I still need to encapsulate the port and give a start position.
                                                             proc-start-position)
                                          (port-broker-wrap port-broker
                                                            proc-start-position)))
+                  (define (port->pos p)
+                    (define-values (line col pos) (port-next-location p))
+                    pos)
                   ;; TODO - optimize this peek for alt parsers, at least...
                   (if (port-broker-substring? port-broker start-position prefix)
                       (do-run! scheduler
@@ -944,7 +948,24 @@ But I still need to encapsulate the port and give a start position.
                                  (parameterize ([current-chido-parse-parameters
                                                  cp-params])
                                    (let ([result (procedure proc-input)])
-                                     result)))
+                                     ;; Do auto-conversion to parse-derivation for easy cases.
+                                     (if (and (not (parse-derivation? result))
+                                              (not (stream? result))
+                                              (not (procedure? result))
+                                              use-port?)
+                                         (parse-derivation
+                                          result
+                                          #t ;; forced?
+                                          parser
+                                          (port-broker-source-name port-broker)
+                                          (port-broker-line port-broker
+                                                            start-position)
+                                          (port-broker-column port-broker
+                                                              start-position)
+                                          start-position
+                                          (port->pos proc-input)
+                                          '())
+                                         result))))
                                job
                                #f #f)
                       (begin (prefix-fail! scheduler job)
@@ -1103,7 +1124,7 @@ But I still need to encapsulate the port and give a start position.
      (define next-job (get-next-job! job))
      (set-parser-job-result-stream! next-job result)
      (cache-result-and-ready-dependents!/procedure-job
-      scheduler job (raw-result->parse-derivation job (stream-first result)))]
+      scheduler job (reject-raw-results job (stream-first result)))]
     [(s/kw parse-derivation)
      (define next-job (get-next-job! job))
      (define wrapped-result
@@ -1112,14 +1133,15 @@ But I still need to encapsulate the port and give a start position.
      (ready-dependents! job)]
     [else (cache-result-and-ready-dependents! scheduler
                                               job
-                                              (raw-result->parse-derivation
+                                              (reject-raw-results
                                                job
                                                result))]))
 
-(define (raw-result->parse-derivation job result)
+(define (reject-raw-results job result)
   (if (parse-derivation? result)
       result
-      (error 'TODO "auto-transformation to proper parse result not yet implemented.  In job: ~a, got ~s\n" (job->display job) result)))
+      (error 'chido-parse "job ~a returned non-derivation: ~v"
+             (job->display job) result)))
 
 
 
@@ -1232,6 +1254,15 @@ TODO
   (define results2 (parse* p1 A-parser/direct))
   (check-equal? (map parse-derivation-result! (stream->list results2))
                 (list "a" "aa" "aaa" "aaaa" "aaaaa"))
+
+  (define c3-parser
+    (make-proc-parser #:name "c3-parser" (λ (port) (read-string 3 port))))
+  (check-equal?
+   (map parse-derivation-result!
+        (stream->list
+         (parse* (open-input-string "abc")
+                 c3-parser)))
+   '("abc"))
 
   )
 
