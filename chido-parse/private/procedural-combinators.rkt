@@ -22,6 +22,8 @@
  ;; filters
  parse-filter
  follow-filter
+ derivation-filter
+ result-filter
 
  whole-parse*
  )
@@ -1068,9 +1070,9 @@ TODO - what kind of filters do I need?
 |#
 
 (define (parse-filter parser
-                      ;; filter-func is (-> port derivation bool-or-new-result)
+                      ;; filter-func is (-> port derivation bool-or-new-derivation)
                       filter-func
-                      #:replace-result? [replace-result? #f])
+                      #:replace-derivation? [replace-derivation? #f])
   (proc-parser
    #:name (format "~a/filtered" (parser-name parser))
    #:prefix (parser-prefix parser)
@@ -1087,7 +1089,7 @@ TODO - what kind of filters do I need?
                                                  failures))]
              [else (define r1 (stream-first results))
                    (define filter-result (filter-func port r1))
-                   (define use-result (if (and replace-result? filter-result)
+                   (define use-result (if (and replace-derivation? filter-result)
                                           filter-result
                                           r1))
                    (if filter-result
@@ -1111,6 +1113,25 @@ TODO - what kind of filters do I need?
                   (define r-follow (parse* port not-follow-parser #:start result))
                   (if (parse-failure? r-follow) #t #f))))
 
+(define (derivation-filter parser filter-func
+                           #:replace-derivation? [replace-derivation? #f])
+  ;; filter-func is of type (-> derivation bool-or-new-derivation)
+  (parse-filter parser (λ (port derivation)
+                         (filter-func derivation))
+                #:replace-derivation? replace-derivation?))
+(define (result-filter parser filter-func
+                       #:replace-result? [replace-result? #f])
+  ;; filter-func is of type (-> result bool-or-new-result)
+  (parse-filter parser
+                (λ (port derivation)
+                  (let ([filter-result (filter-func
+                                        (parse-derivation-result derivation))])
+                    (if replace-result?
+                        (make-parse-derivation filter-result
+                                               #:derivations (list derivation))
+                        filter-result)))
+                #:replace-derivation? replace-result?))
+
 
 (module+ test
 
@@ -1127,13 +1148,71 @@ TODO - what kind of filters do I need?
       (car
        (stream->list
         (parse* (open-input-string "testing")
-                (parse-filter "testing" (λ (port result) #t))))))
+                (parse-filter "testing" (λ (port derivation) #t))))))
      "testing")
+  (c check-equal?
+     (parse-derivation-result
+      (car
+       (stream->list
+        (parse* (open-input-string "testing")
+                (parse-filter #:replace-derivation? #t
+                              "testing"
+                              (λ (port derivation)
+                                (make-parse-derivation
+                                 "a dog, a frog, a log"
+                                 #:derivations (list derivation))))))))
+     "a dog, a frog, a log")
   (c check-equal?
      (stream->list
       (parse* (open-input-string "testing")
               (parse-filter "testing" (λ (port result) #f))))
      '())
+
+  (check se/datum?
+         (->results (whole-parse* (open-input-string "aaa")
+                                  (kleene-star "a")))
+         (list #'("a" "a" "a")))
+  (check se/datum?
+         (->results (whole-parse* (open-input-string "aaaa")
+                                  (derivation-filter
+                                   (kleene-star "a")
+                                   (λ (d)
+                                     (even? (length
+                                             (syntax->list
+                                              (parse-derivation-result d))))))))
+         (list #'("a" "a" "a" "a")))
+  (check se/datum?
+         (->results (whole-parse* (open-input-string "aaa")
+                                  (derivation-filter
+                                   (kleene-star "a")
+                                   (λ (d)
+                                     (even? (length
+                                             (syntax->list
+                                              (parse-derivation-result d))))))))
+         (list))
+  (check se/datum?
+         (->results (whole-parse* (open-input-string "aaaa")
+                                  (derivation-filter
+                                   #:replace-derivation? #t
+                                   (kleene-star "a")
+                                   (λ (d)
+                                     (let ([r (length
+                                               (syntax->list
+                                                (parse-derivation-result d)))])
+                                       (and (even? r)
+                                            (make-parse-derivation
+                                             r #:derivations d)))))))
+         (list 4))
+  (check se/datum?
+         (->results (whole-parse* (open-input-string "aaaa")
+                                  (result-filter
+                                   #:replace-result? #t
+                                   (kleene-star "a")
+                                   (λ (r)
+                                     (let ([len (length (syntax->list r))])
+                                       (and (even? len) len))))))
+         (list 4))
+
 
   )
 
