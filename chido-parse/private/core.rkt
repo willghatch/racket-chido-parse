@@ -165,10 +165,11 @@
 
 (define (make-parse-derivation result
                                #:end [end #f]
-                               #:derivations [derivation-list '()])
+                               #:derivations [derivations '()])
   ;; `result` should be a non-procedure OR a procedure that accepts
   ;; line column start-position end-position derivation-list
   (define job (current-chido-parse-job))
+  (define derivation-list (if (list? derivations) derivations (list derivations)))
   (match job
     [(s/kw parser-job
            #:parser parser
