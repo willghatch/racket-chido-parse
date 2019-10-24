@@ -15,6 +15,7 @@
  ;; TODO - These are not great, should probably be replaced
  traditional-read-func->parse-result-func
  wrap-derivation
+ as-syntax
 
  regexp->parser
 
@@ -582,6 +583,14 @@
                #:promise-no-left-recursion?
                (not (parser-potentially-left-recursive? parser))
                #:use-port? #f))
+
+(define (as-syntax parser)
+  (wrap-derivation parser
+                   (λ (d)
+                     (λ (src line col pos span derivations)
+                       (datum->syntax #f
+                                      (parse-derivation-result d)
+                                      (list src line col pos span))))))
 
 (define (traditional-read-func->parse-result-func f #:syntax? [syntax? #f])
   (λ (port)
