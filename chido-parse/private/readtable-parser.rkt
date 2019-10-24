@@ -19,8 +19,8 @@ This is an implementation of the same idea, but also adding support for operator
          ;; parser...
          any/c)
         (#:operator (or/c #f 'infix 'prefix 'postfix)
-         #:precidence-less-than (listof any/c)
-         #:precidence-greater-than (listof any/c)
+         #:precidence-less-than (or/c any/c (listof any/c))
+         #:precidence-greater-than (or/c any/c (listof any/c))
          #:associativity (or/c 'left 'right #f)
          ;#:symbol-blacklist (listof (or/c symbol? string?))
          )
@@ -45,8 +45,8 @@ This is an implementation of the same idea, but also adding support for operator
   [chido-readtable-add-mixfix-operator
    (->* (chido-readtable? (or/c symbol? string?))
         (#:layout (or/c 'required 'optional 'none)
-         #:precidence-greater-than (listof any/c)
-         #:precidence-less-than (listof any/c)
+         #:precidence-greater-than (or/c any/c (listof any/c))
+         #:precidence-less-than (or/c any/c (listof any/c))
          #:associativity (or/c 'left 'right #f))
         any/c)]
   )
@@ -303,6 +303,11 @@ This is an implementation of the same idea, but also adding support for operator
           [(parser? op-or-name) op-or-name]
           [else (err)]))
 
+  (define (precidence->list prec)
+    (cond [(not prec) '()]
+          [(list? prec) prec]
+          [else (list prec)]))
+
   (if operator
       (struct-copy
        chido-readtable
@@ -327,12 +332,12 @@ This is an implementation of the same idea, but also adding support for operator
         (dict-set
          (chido-readtable-precidence-immediate-greater-relations rt)
          parser
-         (map op-resolve precidence-less-than))]
+         (map op-resolve (precidence->list precidence-less-than)))]
        [precidence-immediate-lesser-relations
         (dict-set
          (chido-readtable-precidence-immediate-lesser-relations rt)
          parser
-         (map op-resolve precidence-greater-than))]
+         (map op-resolve (precidence->list precidence-greater-than)))]
        [operator-name->operator
         (dict-set op-name->op (parser-name parser) parser)])
       pre-op))

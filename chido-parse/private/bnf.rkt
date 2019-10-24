@@ -180,18 +180,20 @@
        (for/list ([alt (syntax->list #'(spec ...))])
          (syntax-parse alt
            [s:bnf-arm-alt-spec
-            (define elems
-              (syntax->list #'(~? (s.elem ...) ())))
+            (define parsers
+              (syntax->list (syntax-parse #'(~? (s.elem ...) ())
+                              [(e:binding-sequence-elem ...)
+                               #'(e.parser ...)])))
             (define str-elems/stx
               (filter (syntax-parser [x:str #t]
                                      [else #f])
-                      elems))
+                      parsers))
             (define str-elems (map syntax->datum str-elems/stx))
             (define name (if (null? str-elems)
                              #f
                              (string-join str-elems "_")))
             (define postfix-op?
-              (syntax-parse elems
+              (syntax-parse parsers
                 [(x:id others ...)
                  (datum->syntax #'x
                                 (or (free-identifier=? #'x #'arm-name)
@@ -199,7 +201,7 @@
                                 #'x)]
                 [else #'#f]))
             (define prefix-op?
-              (syntax-parse elems
+              (syntax-parse parsers
                 [(others ... x:id)
                  (datum->syntax #'x
                                 (or (free-identifier=? #'x #'arm-name)
@@ -336,10 +338,10 @@
     #:result/bare #t
     ["n"]
     [test2 "+" test2 #:associativity 'left]
-    [test2 "*" test2 #:associativity 'left #:precidence-greater-than '("+")]
-    [test2 "^" test2 #:associativity 'right #:precidence-greater-than '("*")]
-    [test2 "++" #:precidence-less-than '("*") #:precidence-greater-than '("+")]
-    ["if" test2 "then" test2 "else" test2 #:precidence-less-than '("+")])
+    [test2 "*" test2 #:associativity 'left #:precidence-greater-than "+"]
+    [test2 "^" test2 #:associativity 'right #:precidence-greater-than "*"]
+    [test2 "++" #:precidence-less-than '("*") #:precidence-greater-than "+"]
+    ["if" test2 "then" test2 "else" test2 #:precidence-less-than "+"])
 
   (check-equal? (->results (parse* (open-input-string "n")
                                    (chido-readtable->read1 test2)))
@@ -663,7 +665,7 @@
                 [expression "+" expression & 'left]
                 [expression "*" expression
                             & 'right
-                            > '("+")]]
+                            > "+"]]
     [id ["x"]])
 
   (check se/datum?
