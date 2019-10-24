@@ -86,17 +86,7 @@
                    (~optional (~seq #:result/bare result/bare:expr))
                    )
               ...]
-             #:attr parser #f)
-    ;; TODO - this is a bad pattern!
-    #;(pattern parser:expr
-             #:attr (elem 1) #f
-             #:attr name #f
-             #:attr assoc #f
-             #:attr pgt #f
-             #:attr plt #f
-             #:attr result/stx #f
-             #:attr result/bare #f
-             ))
+             #:attr parser #f))
   )
 
 (define-syntax (result/bare-inherit stx)
@@ -576,53 +566,54 @@
 
 
 (begin-for-syntax
+  (define-syntax-class ats
+    (pattern x:id
+             #:when (regexp-match "@+" (symbol->string (syntax->datum #'x)))
+             #:attr number (datum->syntax #'here
+                                          (string-length
+                                           (symbol->string (syntax->datum #'x))))))
   (define-splicing-syntax-class binding-sequence-elem/quick
     (pattern (~seq
               (~or (~optional (~seq name:id (~datum =)))
                    (~optional (~and ignore-given (~datum /)))
-                   (~optional (~and splice-given
-                                    ;; TODO - maybe make a syntax class that generalizes this...
-                                    (~or (~datum @)
-                                         (~datum @@)
-                                         (~datum @@@)
-                                         (~datum @@@@)))))
+                   (~optional splice-given:ats))
               ...
               (~and (~not (~or (~datum =)
                                (~datum /)
                                (~datum *)
                                (~datum +)
-                               (~datum @)
-                               (~datum @@)
-                               (~datum @@@)
-                               (~datum @@@@)))
+                               (~datum &)
+                               (~datum <)
+                               (~datum >)
+                               at-seq:ats))
                     parser-given:expr)
               (~or (~optional (~and star (~datum *)))
                    (~optional (~and plus (~datum +)))
                    ))
-             #:attr nonquick #'[parser-given
-                                (~@ (~? (#:bind name)))
-                                (~@ (~? (#:ignore ignore-given)))
-                                #:splice (~? (string-length
-                                              (symbol->string 'splice-given))
-                                             #f)
+             #:attr ignore (if (attribute ignore-given)
+                               #'#t
+                               #'#f)
+             #:attr nonquick #'[:
+                                parser-given
+                                (~? (~@ #:bind name))
+                                #:ignore ignore
+                                #:splice (~? splice-given.number #f)
                                 #:repeat-min (cond [(~? star #f) 0]
                                                    [(~? plus #f) 1]
                                                    [else #f])]))
   (define-syntax-class bnf-arm-alt-spec/quick
     (pattern [elem:binding-sequence-elem/quick
               ...+
-              (~or (~optional (~seq (~datum assoc) assoc:expr))
+              (~or (~optional (~seq (~datum &) assoc:expr))
                    (~optional (~seq (~datum >) pgt:expr))
                    (~optional (~seq (~datum <) plt:expr))
                    )
               ...]
              #:attr nonquick #'[elem.nonquick
                                 ...
-                                (~@ (~? (#:associativity assoc)))
-                                (~@ (~? (#:precidence-greater-than pgt)))
-                                (~@ (~? (#:precidence-less-than plt)))])
-    (pattern parser:expr
-             #:attr nonquick #'parser))
+                                (~? (~@ #:associativity assoc))
+                                (~? (~@ #:precidence-greater-than pgt))
+                                (~? (~@ #:precidence-less-than plt))]))
   )
 
 (define-syntax (define-bnf/quick stx)
@@ -638,16 +629,16 @@
         [arm-name:id arm-spec:bnf-arm-alt-spec/quick ...]
         ...)
      #'(define-bnf name
-         (~@ (~? (#:layout-parsers layout-parsers)))
-         (~@ (~? (#:layout layout-arg)))
+         (~? (~@ #:layout-parsers layout-parsers))
+         (~? (~@ #:layout layout-arg))
          [arm-name arm-spec.nonquick ...] ...)]))
 
 (module+ test
 
   (define-bnf/quick quick-simple
-    [thing ["a"]
+    [thing [(as-syntax "a")]
            [(as-syntax "b")]
-           ["(" thing ")"]])
+           [/ "(" @ thing * / ")"]])
 
   (check se/datum?
          (->results (whole-parse* (open-input-string "a")
@@ -657,28 +648,44 @@
          (->results (whole-parse* (open-input-string "b")
                                   quick-simple))
          (list #'"b"))
+  (check se/datum?
+         (->results (whole-parse* (open-input-string "(aa(ba)ba)")
+                                  quick-simple))
+         (list #'("a" "a" ("b" "a") "b" "a")))
 
-  #;(define-bnf/quick bnf-test-1/quick
+  (define-bnf/quick bnf-test-1/quick
     [statement ["pass"]
                ["for" id "in" expression "do" statement]
                ["{" @ statement * "}"]
-               expression]
-    [expression number-parser
-                id
-                [expression "+" expression assoc 'left]
+               [expression]]
+    [expression [number-parser]
+                [id]
+                [expression "+" expression & 'left]
                 [expression "*" expression
-                            assoc 'right
+                            & 'right
                             > '("+")]]
-    [id "x"])
+    [id ["x"]])
 
-  #;(check-equal? (->results (whole-parse*
-                            (open-input-string "pass")
-                            bnf-test-1/quick))
-                '(("pass")))
+  (check se/datum?
+         (->results (whole-parse* (open-input-string "pass")
+                     bnf-test-1/quick))
+         (list #'"pass"))
 
-  #;(check-equal? (->results (whole-parse*
-                            (open-input-string "5 + 67 * 3")
-                            bnf-test-1/quick))
-                '((5 "+" (67 "*" 3))))
+  (check se/datum?
+         (->results (whole-parse*
+                     (open-input-string "53")
+                     bnf-test-1/quick))
+         (list #'53))
+  (check se/datum?
+         (->results (whole-parse*
+                     (open-input-string "53 + 27")
+                     bnf-test-1/quick))
+         (list #'(53 "+" 27)))
+
+  (check se/datum?
+         (->results (whole-parse*
+                     (open-input-string "5 + 67 * 3")
+                     bnf-test-1/quick))
+         (list #'(5 "+" (67 "*" 3))))
 
   )
