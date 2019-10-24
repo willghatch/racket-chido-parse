@@ -690,4 +690,16 @@
                      bnf-test-1/quick))
          (list #'(5 "+" (67 "*" 3))))
 
+
+  (check se/datum?
+         (->results (whole-parse*
+                     (open-input-string "for x in 27 + 13 do { 555 * x }")
+                     bnf-test-1/quick))
+         (list #'("for" "x" "in" (27 "+" 13) "do" ("{" (555 "*" "x") "}"))))
+  (check se/datum?
+         (->results (whole-parse*
+                     (open-input-string "{ 5 6 7 }")
+                     bnf-test-1/quick))
+         (list #'("{" 5 6 7 "}")))
+
   )
