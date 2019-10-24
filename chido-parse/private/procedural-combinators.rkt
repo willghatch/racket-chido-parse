@@ -57,16 +57,6 @@
   (define-values (line col pos) (port-next-location port))
   pos)
 
-#|
-TODO -
-I need to re-think the derivation result interface for all these combinators.
-
-For sequence/repetition:
-* The “#:result” interface is fairly nice, but lacks info necessary to make syntax objects.
-* The “#:derive” interface is poor.
-* Maybe I need a #:result/stx, #:derive/raw (current #:derive), #:derive (gives the full list of derivations, but also the non-between list separately)...
-|#
-
 
 (define (sequence #:name [name #f]
                   #:derive [derive #f]
@@ -123,8 +113,7 @@ For sequence/repetition:
           [make-result/stx (make-result-wrap make-result/stx #t)]
           [(eq? #t make-result/bare) (make-result-wrap list #f)]
           [make-result/bare (make-result-wrap make-result/bare #f)]
-          ;; TODO - make this default true
-          [else (make-result-wrap list #f)]))
+          [else (make-result-wrap list #t)]))
   (define (proc pb)
     (define (rec parsers derivations in-between?)
       (cond [(null? parsers)
@@ -300,8 +289,7 @@ For sequence/repetition:
                                 (make-result-wrap list #t)]
                                [make-result/stx-arg
                                 (make-result-wrap make-result/stx-arg #t)]
-                               ;; TODO - use #t to default to making syntax objects
-                               [else (make-result-wrap list #f)])])
+                               [else (make-result-wrap list #t)])])
          (apply do-derive (list done-int-names ...)))]))
 (define-syntax (binding-sequence stx)
   (syntax-parse stx
@@ -434,8 +422,7 @@ For sequence/repetition:
           [make-result/stx (make-result-wrap make-result/stx #t)]
           [(eq? #t make-result/bare) (make-result-wrap (λ(x)x) #f)]
           [make-result/bare (make-result-wrap make-result/bare #f)]
-          ;; TODO - make this default true
-          [else (make-result-wrap (λ(x)x) #f)]))
+          [else (make-result-wrap (λ(x)x) #t)]))
   (define (proc pb)
     (define (finalize reversed-derivations)
       (define (real-finalize! reversed-derivations)
@@ -841,7 +828,9 @@ For sequence/repetition:
                                                #:result/bare (λ (ws) #f))
                                   (kleene-star basic-s-exp
                                                #:between (kleene-plus
-                                                          whitespace-char-parser))
+                                                          whitespace-char-parser
+                                                          #:result/bare #t)
+                                               #:result/bare #t)
                                   (kleene-star whitespace-char-parser
                                                #:result/bare (λ (ws) #f))
                                   ")"))
@@ -896,7 +885,8 @@ For sequence/repetition:
       (car
        (stream->list
         (parse* (open-input-string "aaaa")
-                (repetition "a" #:greedy? #t)))))
+                (repetition "a" #:greedy? #t
+                            #:result/bare #t)))))
      (list "a" "a" "a" "a"))
 
 
@@ -919,7 +909,7 @@ For sequence/repetition:
 
 
   (check-equal? (->results (parse* (open-input-string "ab")
-                                   (binding-sequence "a" "b")))
+                                   (binding-sequence "a" "b" #:result/bare #t)))
                 '(("a" "b")))
   (check-equal? (->results (parse* (open-input-string "ab")
                                    (binding-sequence "a" "b"
@@ -937,31 +927,42 @@ For sequence/repetition:
    (list (datum->syntax #f '("a" "b") (list 'string 1 1 1 2))))
 
   (check-equal? (->results (parse* (open-input-string "ab")
-                                   (binding-sequence [#:bind a1 "a"] "b")))
+                                   (binding-sequence [#:bind a1 "a"] "b"
+                                                     #:result/bare #t)))
                 '(("a" "b")))
   (check-equal? (->results (parse* (open-input-string "ab")
-                                   (binding-sequence [#:ignore #t "a"] "b")))
+                                   (binding-sequence [#:ignore #t "a"] "b"
+                                                     #:result/bare #t)))
                 '(("b")))
   (check-equal? (->results (parse* (open-input-string "a_b")
                                    (binding-sequence [#:ignore #t "a"] "b"
-                                                     #:between "_")))
+                                                     #:between "_"
+                                                     #:result/bare #t)))
                 '(("b")))
   (check-equal? (->results (parse* (open-input-string "aaab")
-                                   (binding-sequence [#:splice 1 (kleene-star "a")]
-                                                     "b")))
+                                   (binding-sequence [#:splice 1
+                                                      (kleene-star "a"
+                                                                   #:result/bare #t)]
+                                                     "b"
+                                                     #:result/bare #t)))
                 '(("a" "a" "a" "b")))
   (check-equal? (->results (parse* (open-input-string "aaa_b")
-                                   (binding-sequence [#:splice 1 (kleene-star "a")]
+                                   (binding-sequence [#:splice 1
+                                                      (kleene-star "a"
+                                                                   #:result/bare #t)]
                                                      "b"
-                                                     #:between "_")))
+                                                     #:between "_"
+                                                     #:result/bare #t)))
                 '(("a" "a" "a" "b")))
   (check-equal? (->results
                  (parse* (open-input-string "a-a-a_b")
                          (binding-sequence [#:splice 1 (kleene-star
                                                         "a"
-                                                        #:between "-")]
+                                                        #:between "-"
+                                                        #:result/bare #t)]
                                            "b"
-                                           #:between "_")))
+                                           #:between "_"
+                                           #:result/bare #t)))
                 '(("a" "a" "a" "b")))
 
   (define bseq-a-not-a-parser
@@ -973,7 +974,8 @@ For sequence/repetition:
                                     (λ (port derivation)
                                       (not (equal?
                                             (parse-derivation-result a1)
-                                            (parse-derivation-result derivation)))))))
+                                            (parse-derivation-result derivation)))))
+                      #:result/bare #t))
   (check-equal? (->results (parse* (open-input-string "ab")
                                    bseq-a-not-a-parser))
                 '(("a" "b")))
@@ -985,7 +987,8 @@ For sequence/repetition:
   (check-equal? (->results (parse* (open-input-string "a_a_a_b")
                                    (binding-sequence [#:splice 1 #:repeat-min 0 "a"]
                                                      "b"
-                                                     #:between "_")))
+                                                     #:between "_"
+                                                     #:result/bare #t)))
                 '(("a" "a" "a" "b")))
   ;; check binding-sequence subsequnce inheritance of #:between
   (check-equal?
@@ -993,12 +996,15 @@ For sequence/repetition:
     (parse* (open-input-string "a_1_2_3_7-8-9_b")
             (binding-sequence "a"
                               [#:splice 1 (binding-sequence "1" "2" "3"
-                                                            #:inherit-between #t)]
+                                                            #:inherit-between #t
+                                                            #:result/bare #t)]
                               [#:splice 1 (binding-sequence "7" "8" "9"
                                                             #:inherit-between #t
-                                                            #:between "-")]
+                                                            #:between "-"
+                                                            #:result/bare #t)]
                               "b"
-                              #:between "_")))
+                              #:between "_"
+                              #:result/bare #t)))
    '(("a" "1" "2" "3" "7" "8" "9" "b")))
   (check-equal?
    (->results
@@ -1006,9 +1012,11 @@ For sequence/repetition:
             (binding-sequence "a"
                               [#:splice 2 #:repeat-min 0
                                (binding-sequence "1" "2" "3"
-                                                 #:inherit-between #t)]
+                                                 #:inherit-between #t
+                                                 #:result/bare #t)]
                               "b"
-                              #:between "_")))
+                              #:between "_"
+                              #:result/bare #t)))
    '(("a" "1" "2" "3" "1" "2" "3" "b")))
 
 
@@ -1085,7 +1093,7 @@ TODO - what kind of filters do I need?
       (car
        (stream->list
         (parse* (open-input-string "aaab")
-                (repetition (follow-filter "a" "b") #:greedy? #t)))))
+                (repetition (follow-filter "a" "b") #:greedy? #t #:result/bare #t)))))
      (list "a" "a"))
 
   (c check-equal?
