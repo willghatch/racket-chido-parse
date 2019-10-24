@@ -19,7 +19,8 @@
   (or
    (and (match (list a b)
           [(list (list ai ...) (list bi ...))
-           (andmap rec ai bi)]
+           (and (equal? (length ai) (length bi))
+                (andmap rec ai bi))]
           [(list (? syntax?) b) #f]
           [else (equal? a b)]))
    (and (syntax? a)
