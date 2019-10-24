@@ -144,10 +144,10 @@
          (define inherit-result/stx? (~? result/stx/inherit #f))
          (define use-result/bare? (or given-result/bare?
                                       (and inherit-result/bare?
-                                           (not (given-result/stx?)))))
+                                           (not given-result/stx?))))
          (define use-result/stx? (or given-result/stx?
                                      (and inherit-result/stx?
-                                          (not (given-result/bare?)))))
+                                          (not given-result/bare?))))
          (define rt1
            (dict-set
             (set-chido-readtable-symbol-support empty-chido-readtable #f)
@@ -298,10 +298,12 @@
            (error "not a number")))))
 
   (define-bnf-arm test1
+    #:result/bare #t
     #:layout 'none
     ["a" [#:ignore #t "b"] "c"]
     ["a" "a" "b"])
   (define-bnf-arm test1/layout
+    #:result/bare #t
     #:layout 'required
     ["a" [#:ignore #t "b"] "c" #:name "test-name-1"]
     ["a" "a" "b"])
@@ -341,6 +343,7 @@
 
   (define-bnf-arm test2
     #:layout 'optional
+    #:result/bare #t
     "n"
     [test2 "+" test2 #:associativity 'left]
     [test2 "*" test2 #:associativity 'left #:precidence-greater-than '("+")]
@@ -510,6 +513,7 @@
 
 (module+ test
   (define-bnf bnf-test-1
+    #:result/bare #t
     [statement ["pass"]
                ["for" id "in" expression "do" statement]
                ["{" [#:repeat-min 0 #:splice 1 statement] "}" #:name "block"]
