@@ -585,6 +585,7 @@
                                (~datum /)
                                (~datum *)
                                (~datum +)
+                               (~datum ?)
                                (~datum &)
                                (~datum <)
                                (~datum >)
@@ -592,6 +593,7 @@
                     parser-given:expr)
               (~or (~optional (~and star (~datum *)))
                    (~optional (~and plus (~datum +)))
+                   (~optional (~and question (~datum ?)))
                    ))
              #:attr ignore (if (attribute ignore-given)
                                #'#t
@@ -601,8 +603,10 @@
                                 (~? (~@ #:bind name))
                                 #:ignore ignore
                                 #:splice (~? splice-given.number #f)
-                                #:repeat-min (cond [(~? star #f) 0]
-                                                   [(~? plus #f) 1]
+                                #:repeat-min (cond [(~? 'star #f) 0]
+                                                   [(~? 'plus #f) 1]
+                                                   [else #f])
+                                #:repeat-max (cond [(~? 'question #f) 1]
                                                    [else #f])]))
   (define-syntax-class bnf-arm-alt-spec/quick
     (pattern [elem:binding-sequence-elem/quick
@@ -643,6 +647,8 @@
            [(as-syntax "b")]
            [/ "(" @ thing * / ")"]
            [thing "badmirror" thing]
+           ["q" @ "1" *]
+           ["p" @ "2" ?]
            [first = thing "mirror" (result-filter
                                     thing
                                     (λ (r)
@@ -655,9 +661,21 @@
                                   quick-simple))
          (list #'"a"))
   (check se/datum?
-         (->results (whole-parse* (open-input-string "b")
+         (->results (whole-parse* (open-input-string "q1")
                                   quick-simple))
-         (list #'"b"))
+         (list #'("q" "1")))
+  (check se/datum?
+         (->results (whole-parse* (open-input-string "q")
+                                  quick-simple))
+         (list #'("q")))
+  (check se/datum?
+         (->results (whole-parse* (open-input-string "p2")
+                                  quick-simple))
+         (list #'("p" "2")))
+  (check se/datum?
+         (->results (whole-parse* (open-input-string "p")
+                                  quick-simple))
+         (list #'("p")))
   (check se/datum?
          (->results (whole-parse* (open-input-string "(aa(ba)ba)")
                                   quick-simple))
