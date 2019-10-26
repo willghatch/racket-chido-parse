@@ -401,6 +401,12 @@
                                               key))])
   (hash-ref (bnf-parser-arm-hash bnf-parser) key default))
 
+(define bnf-layout-parser
+  (proc-parser #:name "bnf-layout-parser"
+               (λ (port)
+                 (parse* port
+                         (bnf-parser-layout-alt
+                          (current-bnf))))))
 
 (define-syntax (define-bnf stx)
   (syntax-parse stx
@@ -430,12 +436,6 @@
            (define layout-alt
              (make-alt-parser (format "~a_master-layout-parser" 'name)
                               layout-parsers/use))
-           (define master-layout-parser
-             (proc-parser #:name (format "~a_master-layout-parser" 'name)
-                          (λ (port)
-                            (parse* port
-                                    (bnf-parser-layout-alt
-                                     (current-bnf))))))
 
            ;; to avoid "arm-name used before initialization" errors, do some indirection
            (define-syntax (arm-name stx)
@@ -452,7 +452,7 @@
            (define inner-bnf-name
              (let ([arm-name (let ()
                                (define-bnf-arm arm-name
-                                 layout-parsers-inherit (list master-layout-parser)
+                                 layout-parsers-inherit (list bnf-layout-parser)
                                  layout-inherit layout/inherit
                                  result/bare-inherit result/bare/inherit
                                  result/stx-inherit result/stx/inherit
@@ -567,7 +567,6 @@
   )
 
 
-
 (begin-for-syntax
   (define-syntax-class ats
     (pattern x:id
@@ -575,6 +574,14 @@
              #:attr number (datum->syntax #'here
                                           (string-length
                                            (symbol->string (syntax->datum #'x))))))
+  (define-syntax-class quick-subsequence
+    (pattern #(elem:binding-sequence-elem/quick ...)
+             #:attr nonquick #'(binding-sequence
+                                elem.nonquick ...
+                                ;; TODO - #:result/stx/bare
+                                ;; TODO - #:name
+                                #:between bnf-layout-parser
+                                )))
   (define-splicing-syntax-class binding-sequence-elem/quick
     (pattern (~seq
               (~or (~optional (~seq name:id (~datum =)))
@@ -590,7 +597,8 @@
                                (~datum <)
                                (~datum >)
                                at-seq:ats))
-                    parser-given:expr)
+                    (~or subseq:quick-subsequence
+                         parser-given:expr))
               (~or (~optional (~and star (~datum *)))
                    (~optional (~and plus (~datum +)))
                    (~optional (~and question (~datum ?)))
@@ -599,7 +607,8 @@
                                #'#t
                                #'#f)
              #:attr nonquick #'[:
-                                parser-given
+                                (~? parser-given
+                                    subseq.nonquick)
                                 (~? (~@ #:bind name))
                                 #:ignore ignore
                                 #:splice (~? splice-given.number #f)
@@ -635,10 +644,13 @@
         ...
         [arm-name:id arm-spec:bnf-arm-alt-spec/quick ...]
         ...)
-     #'(define-bnf name
-         (~? (~@ #:layout-parsers layout-parsers))
-         (~? (~@ #:layout layout-arg))
-         [arm-name arm-spec.nonquick ...] ...)]))
+     #'(define name
+         (let ()
+           (define-bnf name
+             (~? (~@ #:layout-parsers layout-parsers))
+             (~? (~@ #:layout layout-arg))
+             [arm-name arm-spec.nonquick ...] ...)
+           name))]))
 
 (module+ test
 
@@ -736,7 +748,14 @@
                      bnf-test-1/quick))
          (list #'("{" 5 6 7 "}")))
 
+  (define-bnf/quick with-subseq
+    [an-arm ["a" @@ #("b" "c") + "d"]])
+
+  (check se/datum?
+         (->results (whole-parse* (open-input-string "a b c b c b c d")
+                                  with-subseq))
+         (list #'("a" "b" "c" "b" "c" "b" "c" "d")))
+
   )
 
 ;; TODO - OR element in bnf
-;; TODO - bnf/quick subsequence
