@@ -188,7 +188,7 @@
        [(? syntax?) (do-full-sequence-splice (syntax-e val) n)]
        [else (error
               'binding-sequence
-              "can't do full-sequence splice of something that is not a list of a single element"
+              "can't do full-sequence splice of something that is not a list of a single element: ~v"
               val)])]))
 
 (begin-for-syntax

@@ -582,23 +582,34 @@
                                 ;; TODO - #:name
                                 #:between bnf-layout-parser
                                 )))
+  (define-syntax-class unspecial-expr
+    (pattern (~and (~not (~or (~datum =)
+                              (~datum /)
+                              (~datum *)
+                              (~datum +)
+                              (~datum ?)
+                              (~datum &)
+                              (~datum <)
+                              (~datum >)
+                              (~datum ||)
+                              at-seq:ats))
+                   parser-given:expr)))
+  (define-syntax-class bnf-inner-elem-alt
+    (pattern ((~datum ||) elem:binding-sequence-elem/quick ...+)
+             #:attr nonquick
+             #'(make-alt-parser
+                "TODO-name_bnf-inner-elem-alt"
+                (list (binding-sequence elem.nonquick)
+                      ...))))
   (define-splicing-syntax-class binding-sequence-elem/quick
     (pattern (~seq
               (~or (~optional (~seq name:id (~datum =)))
                    (~optional (~and ignore-given (~datum /)))
                    (~optional splice-given:ats))
               ...
-              (~and (~not (~or (~datum =)
-                               (~datum /)
-                               (~datum *)
-                               (~datum +)
-                               (~datum ?)
-                               (~datum &)
-                               (~datum <)
-                               (~datum >)
-                               at-seq:ats))
-                    (~or subseq:quick-subsequence
-                         parser-given:expr))
+              (~or subseq:quick-subsequence
+                   inner-alt:bnf-inner-elem-alt
+                   parser-given:unspecial-expr)
               (~or (~optional (~and star (~datum *)))
                    (~optional (~and plus (~datum +)))
                    (~optional (~and question (~datum ?)))
@@ -607,8 +618,9 @@
                                #'#t
                                #'#f)
              #:attr nonquick #'[:
-                                (~? parser-given
-                                    subseq.nonquick)
+                                (~? subseq.nonquick
+                                    (~? inner-alt.nonquick
+                                        parser-given))
                                 (~? (~@ #:bind name))
                                 #:ignore ignore
                                 #:splice (~? splice-given.number #f)
@@ -661,6 +673,7 @@
            [thing "badmirror" thing]
            ["q" @ "1" *]
            ["p" @ "2" ?]
+           [@ (|| "#1" "#2") + "#3"]
            [first = thing "mirror" (result-filter
                                     thing
                                     (λ (r)
@@ -700,6 +713,10 @@
          (->results (whole-parse* (open-input-string "a mirror b")
                                   quick-simple))
          '())
+  (check se/datum?
+         (->results (whole-parse* (open-input-string "#1#2#1#1#3")
+                                  quick-simple))
+         (list #'("#1" "#2" "#1" "#1" "#3")))
 
   (define-bnf/quick bnf-test-1/quick
     [statement ["pass"]
@@ -758,4 +775,3 @@
 
   )
 
-;; TODO - OR element in bnf
