@@ -39,6 +39,7 @@
 
  (struct-out parse-failure)
  make-parse-failure
+ greatest-failure
 
  get-counts!
 
@@ -317,8 +318,12 @@
 (define (make-parse-failure message #:position [pos #f] #:failures [failures '()])
   (define job (current-chido-parse-job))
   (match job
-    [(s/kw parser-job #:parser parser #:start-position start-position)
-     (parse-failure (parser-name parser) start-position (or pos start-position)
+    [(s/kw parser-job #:parser parser #:start-position start-position #:port port)
+     (parse-failure (parser-name parser)
+                    start-position
+                    (or pos
+                        (and port (port->pos port))
+                        start-position)
                     message failures)]))
 
 (define (parse-failure-greater-than? greater lesser)
@@ -329,10 +334,14 @@
       (> (parse-failure-start-position greater)
          (parse-failure-start-position lesser))))
 
-(define (greatest-failure failures)
-  (when (null? failures)
-    (error 'chido-parse "internal error -- failure comparison with no failures"))
-  (car (sort failures parse-failure-greater-than?)))
+(define (greatest-failure failures
+                          #:default [default (λ () (error 'greatest-failure
+                                                          "no default given"))])
+  (if (null? failures)
+      (if (procedure? default)
+          (default)
+          default)
+      (car (sort failures parse-failure-greater-than?))))
 
 (define (make-cycle-failure job job-cycle-list)
   (match job

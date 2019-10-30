@@ -1080,13 +1080,18 @@ TODO - what kind of filters do I need?
      (define (rec results failures had-success?)
        (cond [(and (parse-failure? results) (null? failures)) results]
              [(and (parse-failure? results) had-success?)
-              (make-parse-failure "some results failed filter"
+              empty-stream
+              #;(make-parse-failure "some results failed filter"
                                   #:failures (cons results failures))]
              [(or (parse-failure? results) (stream-empty? results))
-              (make-parse-failure "all results failed filter"
-                                  #:failures (if (parse-failure? results)
-                                                 (cons results failures)
-                                                 failures))]
+              (define all-failures (if (parse-failure? results)
+                                       (cons results failures)
+                                       failures))
+              (define best-failure
+                (greatest-failure
+                 all-failures
+                 #:default (make-parse-failure "no info available")))
+              best-failure]
              [else (define r1 (stream-first results))
                    (define filter-result (filter-func port r1))
                    (define use-result (if (and replace-derivation? filter-result)
@@ -1097,9 +1102,9 @@ TODO - what kind of filters do I need?
                                           (rec (stream-rest results) failures #t))
                        (rec (stream-rest results)
                             (cons (make-parse-failure
-                                   "did not pass filter"
+                                   (format "did not pass filter: ~v" r1)
                                    #:position
-                                   (parse-derivation-start-position r1))
+                                   (parse-derivation-end-position r1))
                                   failures)
                             had-success?))]))
      (rec (parse* port parser) '() #f))

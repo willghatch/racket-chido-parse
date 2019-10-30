@@ -816,8 +816,7 @@ This is an implementation of the same idea, but also adding support for operator
                  (λ (port) (make-parse-failure
                             (format "Trailing right delimiter: ~a"
                                     right)))
-                 #:promise-no-left-recursion? #t
-                 #:use-port? #f))
+                 #:promise-no-left-recursion? #t))
 
   (extend-chido-readtable (extend-chido-readtable rt rt-add-type left-parser)
                           rt-add-type right-parser))
