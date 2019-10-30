@@ -321,6 +321,14 @@
      (parse-failure (parser-name parser) start-position (or pos start-position)
                     message failures)]))
 
+(define (parse-failure-less-than? lesser greater)
+  ;; TODO - is this the best way to decide this?
+  ;;        Should there also be other kinds of scoring?  Eg. attach extra info to failures when creating them to say how much progress they made?
+  (or (< (parse-failure-fail-position lesser)
+         (parse-failure-fail-position greater))
+      (< (parse-failure-start-position lesser)
+         (parse-failure-start-position greater))))
+
 (define (make-cycle-failure job job-cycle-list)
   (match job
     [(s/kw parser-job #:parser parser #:start-position start-position)
@@ -334,9 +342,12 @@
 (define (exn->failure e job)
   (let ([message (format "Exception while parsing: ~a\n" (exn->string e))])
     (match job
-      [(s/kw parser-job #:parser parser #:start-position start-position)
+      [(s/kw parser-job #:parser parser
+             #:start-position start-position
+             #:port port)
+       (define fail-pos (if port (port->pos port) start-position))
        (parse-failure (parser-name parser)
-                      start-position start-position message '())])))
+                      start-position fail-pos message '())])))
 
 (define (alt-worker->failure aw)
   (match aw
@@ -392,6 +403,7 @@ The job->result-cache is a map from parser-job structs -> parser-stream OR parse
    result-index
    ;; gvector of siblings indexed by result-index
    siblings
+   [port #:mutable]
    [continuation/worker #:mutable]
    ;; dependents are scheduled-continuations or alt-workers
    [dependents #:mutable]
@@ -486,7 +498,7 @@ The job cache is a multi-level dictionary with the following keys / implementati
     (define siblings-vec (make-gvector))
     (define job
       (parser-job usable s cp-params start-position
-                  0 siblings-vec #f '() #f #f))
+                  0 siblings-vec #f #f '() #f #f))
     (gvector-add! siblings-vec job)
     job)
   ;; traverse-cache returns the contents if `update` is false.
@@ -540,12 +552,12 @@ The job cache is a multi-level dictionary with the following keys / implementati
   (match job
     [(s/kw parser-job #:parser parser #:scheduler scheduler #:cp-params cp-params
            #:start-position start-position #:result-index result-index
-           #:siblings siblings)
+           #:siblings siblings #:port port)
      (define next-index (add1 result-index))
      (if (< next-index (gvector-count siblings))
          (gvector-ref siblings next-index)
          (let ([new-job (parser-job parser scheduler cp-params start-position
-                                    next-index siblings #f '() #f #f)])
+                                    next-index siblings port #f '() #f #f)])
            (gvector-add! siblings new-job)
            new-job))]))
 
@@ -938,34 +950,15 @@ But I still need to encapsulate the port and give a start position.
                                                             proc-start-position)
                                          (port-broker-wrap port-broker
                                                            proc-start-position)))
-                  (define (port->pos p)
-                    (define-values (line col pos) (port-next-location p))
-                    pos)
+                  (when use-port?
+                    (set-parser-job-port! job proc-input))
                   ;; TODO - optimize this peek for alt parsers, at least...
                   (if (port-broker-substring? port-broker start-position prefix)
                       (do-run! scheduler
                                (λ ()
                                  (parameterize ([current-chido-parse-parameters
                                                  cp-params])
-                                   (let ([result (procedure proc-input)])
-                                     ;; Do auto-conversion to parse-derivation for easy cases.
-                                     (if (and (not (parse-derivation? result))
-                                              (not (stream? result))
-                                              (not (procedure? result))
-                                              use-port?)
-                                         (parse-derivation
-                                          result
-                                          #t ;; forced?
-                                          parser
-                                          (port-broker-source-name port-broker)
-                                          (port-broker-line port-broker
-                                                            start-position)
-                                          (port-broker-column port-broker
-                                                              start-position)
-                                          start-position
-                                          (port->pos proc-input)
-                                          '())
-                                         result))))
+                                   (procedure proc-input)))
                                job
                                #f #f)
                       (begin (prefix-fail! scheduler job)
@@ -1106,10 +1099,10 @@ But I still need to encapsulate the port and give a start position.
                                  "parse returned empty stream" '())]
                  [(list one-fail) one-fail]
                  [(list fail ...)
-                  (define best-fail (car (sort fail <
-                                               #:key parse-failure-fail-position
+                  (define best-fail (car (sort fail parse-failure-less-than?
                                                #:cache-keys? #t)))
-                  (parse-failure name
+                  best-fail
+                  #;(parse-failure name
                                  start-position
                                  (parse-failure-fail-position best-fail)
                                  (format "Multiple failures: best choice: ~a"
@@ -1138,10 +1131,28 @@ But I still need to encapsulate the port and give a start position.
                                                result))]))
 
 (define (reject-raw-results job result)
-  (if (parse-derivation? result)
-      result
-      (error 'chido-parse "job ~a returned non-derivation: ~v"
-             (job->display job) result)))
+  (cond
+    [(parse-derivation? result) result]
+    [(and (not (parse-derivation? result))
+          (not (stream? result))
+          (not (procedure? result))
+          (parser-job-port job))
+     (let ([port-broker (scheduler-port-broker (parser-job-scheduler job))]
+           [start-position (parser-job-start-position job)])
+       (parse-derivation
+        result
+        #t ;; forced?
+        (parser-job-parser job)
+        (port-broker-source-name port-broker)
+        (port-broker-line port-broker
+                          start-position)
+        (port-broker-column port-broker
+                            start-position)
+        start-position
+        (port->pos (parser-job-port job))
+        '()))]
+    [else (error 'chido-parse "job ~a returned non-derivation: ~v"
+                 (job->display job) result)]))
 
 
 
