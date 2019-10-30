@@ -15,6 +15,8 @@ This is an implementation of the same idea, but also adding support for operator
    (->* (chido-readtable?
          (or/c 'terminating 'soft-terminating
                'nonterminating 'layout
+               ;; TODO - I need soft-layout and hard-layout -- like soft-terminating and hard-terminating, one terminates by prefix, the other by successful parse.  Currently layout acts like soft-layout should.
+               ;;   -- probably I should change the names to: hard-terminating, soft-terminating, non-terminating, hard-layout, soft-layout, and left-recursive.
                'left-recursive-nonterminating)
          ;; parser...
          any/c)
