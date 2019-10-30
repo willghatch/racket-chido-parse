@@ -321,13 +321,18 @@
      (parse-failure (parser-name parser) start-position (or pos start-position)
                     message failures)]))
 
-(define (parse-failure-less-than? lesser greater)
+(define (parse-failure-greater-than? greater lesser)
   ;; TODO - is this the best way to decide this?
   ;;        Should there also be other kinds of scoring?  Eg. attach extra info to failures when creating them to say how much progress they made?
-  (or (< (parse-failure-fail-position lesser)
-         (parse-failure-fail-position greater))
-      (< (parse-failure-start-position lesser)
-         (parse-failure-start-position greater))))
+  (or (> (parse-failure-fail-position greater)
+         (parse-failure-fail-position lesser))
+      (> (parse-failure-start-position greater)
+         (parse-failure-start-position lesser))))
+
+(define (greatest-failure failures)
+  (when (null? failures)
+    (error 'chido-parse "internal error -- failure comparison with no failures"))
+  (car (sort failures parse-failure-greater-than?)))
 
 (define (make-cycle-failure job job-cycle-list)
   (match job
@@ -356,11 +361,13 @@
        [(s/kw parser-job #:parser parser #:start-position start-position)
         (match parser
           [(s/kw alt-parser #:name name)
-           ;; TODO - what is the best fail position?
-           ;;        Probably I should analyze the sub-failures...
-           (define fail-position start-position)
-           (parse-failure name start-position fail-position
-                          "TODO - better failure message" failures)])])]))
+           (define best-failure
+             (if (null? failures)
+                 (parse-failure name start-position start-position
+                                "Alt failed with no inner failures.  Probably no prefixes matched."
+                                '())
+                 (greatest-failure failures)))
+           best-failure])])]))
 
 
 
@@ -1099,8 +1106,7 @@ But I still need to encapsulate the port and give a start position.
                                  "parse returned empty stream" '())]
                  [(list one-fail) one-fail]
                  [(list fail ...)
-                  (define best-fail (car (sort fail parse-failure-less-than?
-                                               #:cache-keys? #t)))
+                  (define best-fail (greatest-failure fail))
                   best-fail
                   #;(parse-failure name
                                  start-position
