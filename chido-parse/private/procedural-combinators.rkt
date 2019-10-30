@@ -1072,7 +1072,8 @@ TODO - what kind of filters do I need?
 (define (parse-filter parser
                       ;; filter-func is (-> port derivation bool-or-new-derivation)
                       filter-func
-                      #:replace-derivation? [replace-derivation? #f])
+                      #:replace-derivation? [replace-derivation? #f]
+                      #:include-failures? [include-failures? #t])
   (proc-parser
    #:name (format "~a/filtered" (parser-name parser))
    #:prefix (parser-prefix parser)
@@ -1080,9 +1081,9 @@ TODO - what kind of filters do I need?
      (define (rec results failures had-success?)
        (cond [(and (parse-failure? results) (null? failures)) results]
              [(and (parse-failure? results) had-success?)
-              empty-stream
-              #;(make-parse-failure "some results failed filter"
-                                  #:failures (cons results failures))]
+              (define all-failures (cons results failures))
+              (define best-failure (greatest-failure all-failures))
+              best-failure]
              [(or (parse-failure? results) (stream-empty? results))
               (define all-failures (if (parse-failure? results)
                                        (cons results failures)
@@ -1101,31 +1102,38 @@ TODO - what kind of filters do I need?
                        (parse-stream-cons use-result
                                           (rec (stream-rest results) failures #t))
                        (rec (stream-rest results)
-                            (cons (make-parse-failure
-                                   (format "did not pass filter: ~v" r1)
-                                   #:position
-                                   (parse-derivation-end-position r1))
-                                  failures)
+                            (if include-failures?
+                                (cons (make-parse-failure
+                                       (format "did not pass filter: ~v" r1)
+                                       #:position
+                                       (parse-derivation-end-position r1))
+                                      failures)
+                                failures)
                             had-success?))]))
      (rec (parse* port parser) '() #f))
    #:preserve-prefix? #t
    #:promise-no-left-recursion? (and (not (parser-potentially-left-recursive? parser))
                                      (not (parser-potentially-null? parser)))))
 
-(define (follow-filter main-parser not-follow-parser)
+(define (follow-filter main-parser not-follow-parser
+                       #:include-failures? [include-failures? #t])
   (parse-filter main-parser
                 (λ (port result)
                   (define r-follow (parse* port not-follow-parser #:start result))
-                  (if (parse-failure? r-follow) #t #f))))
+                  (if (parse-failure? r-follow) #t #f))
+                #:include-failures? include-failures?))
 
 (define (derivation-filter parser filter-func
-                           #:replace-derivation? [replace-derivation? #f])
+                           #:replace-derivation? [replace-derivation? #f]
+                           #:include-failures? [include-failures? #t])
   ;; filter-func is of type (-> derivation bool-or-new-derivation)
   (parse-filter parser (λ (port derivation)
                          (filter-func derivation))
-                #:replace-derivation? replace-derivation?))
+                #:replace-derivation? replace-derivation?
+                #:include-failures? include-failures?))
 (define (result-filter parser filter-func
-                       #:replace-result? [replace-result? #f])
+                       #:replace-result? [replace-result? #f]
+                       #:include-failures? [include-failures? #t])
   ;; filter-func is of type (-> result bool-or-new-result)
   (parse-filter parser
                 (λ (port derivation)
@@ -1135,7 +1143,8 @@ TODO - what kind of filters do I need?
                         (make-parse-derivation filter-result
                                                #:derivations (list derivation))
                         filter-result)))
-                #:replace-derivation? replace-result?))
+                #:replace-derivation? replace-result?
+                #:include-failures? include-failures?))
 
 
 (module+ test
@@ -1227,7 +1236,8 @@ TODO - what kind of filters do I need?
 
 (define (whole-parse* port/pbw parser
                       #:start [start #f])
-  (parse* port/pbw (follow-filter parser (not-parser eof-parser))))
+  (parse* port/pbw (follow-filter parser (not-parser eof-parser)
+                                  #:include-failures? #f)))
 
 (module+ test
   (c check-equal?
