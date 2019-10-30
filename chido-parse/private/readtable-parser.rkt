@@ -436,10 +436,7 @@ This is an implementation of the same idea, but also adding support for operator
                [(parse-failure? parsers-result)
                 (let ([symbol-result
                        (parse* port (chido-readtable-symbol-parser rt))])
-                  (if (parse-failure? symbol-result)
-                      ;; TODO - I want a failure that encapsulates the symbol AND parsers results
-                      parsers-result
-                      symbol-result))]
+                  (parse-stream-cons parsers-result symbol-result))]
                [else parsers-result]))
            (parse-stream-cons
                 symbol-result

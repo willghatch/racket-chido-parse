@@ -451,10 +451,13 @@
           [make-result/bare (make-result-wrap make-result/bare #f)]
           [else (make-result-wrap (λ(x)x) #t)]))
   (define (proc pb)
-    (define (finalize reversed-derivations)
+    (define (finalize reversed-derivations end-failure)
       (define (real-finalize! reversed-derivations)
-        (/end (port-broker-start-position pb)
-              (combiner (reverse reversed-derivations))))
+        (let ([derivation (/end (port-broker-start-position pb)
+                                (combiner (reverse reversed-derivations)))])
+          (if end-failure
+              (parse-stream-cons derivation end-failure)
+              derivation)))
       (if after-parser
           (let ([after-stream (parse* pb after-parser
                                       #:start (if (null? reversed-derivations)
@@ -476,7 +479,7 @@
                (not in-between?)
                (stream-empty? next-stream)
                (<= min n-results))
-          (finalize derivations)
+          (finalize derivations next-stream)
           (for/parse ([derivation next-stream])
                      (if in-between?
                          (get-more-streams n-results
@@ -490,7 +493,7 @@
       (cond [(or (< len min)
                  (and greedy? (< len max)))
              (get-more-streams n-results derivations do-between?)]
-            [else (parse-stream-cons (finalize derivations)
+            [else (parse-stream-cons (finalize derivations #f)
                                      (if (>= len max)
                                          empty-stream
                                          (get-more-streams n-results
