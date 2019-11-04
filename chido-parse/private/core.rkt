@@ -76,6 +76,7 @@
  "parse-stream.rkt"
  racket/stream
  racket/match
+ racket/list
  racket/struct
  racket/string
  racket/exn
@@ -315,43 +316,59 @@
                                (parse-stream-next-job s))
          empty-stream))])
 
-(define (make-parse-failure message #:position [pos #f] #:failures [failures '()])
+(define progress-default (gensym))
+(define (make-parse-failure #:message message
+                            #:position [position #f]
+                            #:end [end #f]
+                            #:made-progress? [made-progress?/given progress-default]
+                            #:inner-failure [inner-failure #f]
+                            #:failures [failures #f])
   (define job (current-chido-parse-job))
   (match job
     [(s/kw parser-job #:parser parser #:start-position start-position #:port port)
-     (parse-failure (parser-name parser)
+     (define all-failures (and failures
+                               (remove-duplicates
+                                (if inner-failure
+                                    (cons inner-failure failures)
+                                    failures))))
+     (define best-failure (or inner-failure
+                              (and all-failures
+                                   (not (null? all-failures))
+                                   (greatest-failure all-failures))))
+     (define guess-end (if port (port->pos port) start-position))
+     (define inner-end (if all-failures
+                           (and (not (null? all-failures))
+                                (apply max (map parse-failure-effective-end
+                                                all-failures)))
+                           (and best-failure
+                                (parse-failure-effective-end best-failure))))
+     (define effective-end (max (or end 0) guess-end (or inner-end 0)))
+     (define report-position (or position effective-end))
+     (define made-progress? (cond [(eq? #t made-progress?/given) #t]
+                                  [(eq? #f made-progress?/given) #f]
+                                  [(> (or end guess-end) start-position) #t]
+                                  [else #f]))
+     (parse-failure parser
+                    message
+                    report-position
                     start-position
-                    (or pos
-                        (and port (port->pos port))
-                        start-position)
-                    message failures)]))
-
-(define (parse-failure-greater-than? greater lesser)
-  ;; TODO - is this the best way to decide this?
-  ;;        Should there also be other kinds of scoring?  Eg. attach extra info to failures when creating them to say how much progress they made?
-  (or (> (parse-failure-fail-position greater)
-         (parse-failure-fail-position lesser))
-      (> (parse-failure-start-position greater)
-         (parse-failure-start-position lesser))))
-
-(define (greatest-failure failures
-                          #:default [default (λ () (error 'greatest-failure
-                                                          "no default given"))])
-  (if (null? failures)
-      (if (procedure? default)
-          (default)
-          default)
-      (car (sort failures parse-failure-greater-than?))))
+                    effective-end
+                    made-progress?
+                    best-failure
+                    all-failures)]))
 
 (define (make-cycle-failure job job-cycle-list)
   (match job
     [(s/kw parser-job #:parser parser #:start-position start-position)
-     (parse-failure (parser-name parser)
-                    start-position
-                    start-position
+     (parse-failure parser
                     (format "Cycle failure: ~a" (map job->display
                                                      (reverse job-cycle-list)))
-                    '())]))
+                    start-position
+                    start-position
+                    start-position
+                    #f
+                    #f
+                    #f)]))
 
 (define (exn->failure e job)
   (let ([message (format "Exception while parsing: ~a\n" (exn->string e))])
@@ -360,8 +377,14 @@
              #:start-position start-position
              #:port port)
        (define fail-pos (if port (port->pos port) start-position))
-       (parse-failure (parser-name parser)
-                      start-position fail-pos message '())])))
+       (parse-failure parser
+                      message
+                      fail-pos
+                      start-position
+                      fail-pos
+                      (not (equal? start-position fail-pos))
+                      #f
+                      #f)])))
 
 (define (alt-worker->failure aw)
   (match aw
@@ -372,9 +395,10 @@
           [(s/kw alt-parser #:name name)
            (define best-failure
              (if (null? failures)
-                 (parse-failure name start-position start-position
+                 (parse-failure parser
                                 "Alt failed with no inner failures.  Probably no prefixes matched."
-                                '())
+                                start-position start-position start-position
+                                #f #f #f)
                  (greatest-failure failures)))
            best-failure])])]))
 
@@ -864,7 +888,10 @@ But I still need to encapsulate the port and give a start position.
      (cache-result-and-ready-dependents!
       scheduler
       job
-      (parse-failure (parser-name p) pos pos "prefix didn't match" '()))]
+      (parse-failure p
+                     (format "prefix didn't match: ~v" (parser-prefix p))
+                     pos pos pos
+                     #f #f #f))]
     [else (void)]))
 
 (define (string-job-finalize! scheduler job match?)
@@ -878,7 +905,7 @@ But I still need to encapsulate the port and give a start position.
                                                 (string-length s)))
               #f
               scheduler)
-             (make-parse-failure (format "literal didn't match: ~s" s)
+             (make-parse-failure #:message (format "literal didn't match: ~s" s)
                                  #:position start-position))))
      (cache-result-and-ready-dependents! scheduler job result)]))
 
@@ -1019,11 +1046,14 @@ But I still need to encapsulate the port and give a start position.
                   (run-scheduler scheduler)])]
               [else
                ;; In this case there has been a result stream but it is dried up.
-               (let ([end-failure (parse-failure (job->parser-name job)
-                                                 (parser-job-start-position job)
-                                                 (parser-job-start-position job)
+               (let ([end-failure (parse-failure (parser-job-parser job)
                                                  "No more results"
-                                                 '())])
+                                                 (parser-job-start-position job)
+                                                 (parser-job-start-position job)
+                                                 (parser-job-start-position job)
+                                                 #f
+                                                 #f
+                                                 #f)])
                  (cache-result-and-ready-dependents! scheduler
                                                      job
                                                      end-failure)
@@ -1111,18 +1141,16 @@ But I still need to encapsulate the port and give a start position.
                                         (flattened-stream-failures result))])
                (match inner-failures
                  [(or #f (list))
-                  (parse-failure name start-position start-position
-                                 "parse returned empty stream" '())]
+                  (parse-failure parser
+                                 "parse returned empty stream"
+                                 start-position start-position start-position
+                                 #f
+                                 #f
+                                 #f)]
                  [(list one-fail) one-fail]
                  [(list fail ...)
                   (define best-fail (greatest-failure fail))
-                  best-fail
-                  #;(parse-failure name
-                                 start-position
-                                 (parse-failure-fail-position best-fail)
-                                 (format "Multiple failures: best choice: ~a"
-                                         (parse-failure-message best-fail))
-                                 fail)])))
+                  best-fail])))
            (cache-result-and-ready-dependents!/procedure-job
             scheduler
             job

@@ -579,7 +579,7 @@
                  ;(define-values (line col pos) (port-next-location p))
                  (if (eof-object? c)
                      (make-parse-derivation c #:end pos)
-                     (make-parse-failure "not eof" #:position pos)))
+                     (make-parse-failure #:message "not eof" #:position pos)))
                #:promise-no-left-recursion? #t
                #:use-port? #f))
 
@@ -592,7 +592,7 @@
                  (define-values (line col pos) (port-next-location p))
                  (if (parse-failure? inner-result)
                      (make-parse-derivation result #:end pos)
-                     (make-parse-failure "succeeded parsing in not parser"
+                     (make-parse-failure #:message "succeeded parsing in not parser"
                                          #:position pos)))))
 
 
@@ -640,7 +640,7 @@
     (define-values (end-line end-col end-pos) (port-next-location port))
     (if m
         (make-parse-derivation m #:end end-pos)
-        (make-parse-failure failure-message #:position pos)))
+        (make-parse-failure #:message failure-message #:position pos)))
   (define failure-message (format "Didn't match regexp: ~a" (or name rx)))
   (proc-parser #:name (or name (format "~a" rx))
                (λ (p) (parse-regexp p rx failure-message))
@@ -826,7 +826,7 @@
                (begin
                  (read-char port)
                  (make-parse-derivation c #:end (port->pos port))))
-          (make-parse-failure "not whitespace"))))
+          (make-parse-failure #:message "not whitespace"))))
   (define whitespace-char-parser
     (proc-parser #:name "whitespace-char" whitespace-char-func))
 
@@ -837,7 +837,7 @@
                (begin
                  (read-char port)
                  (make-parse-derivation c #:end (port->pos port))))
-          (make-parse-failure "not symbol char"))))
+          (make-parse-failure #:message "not symbol char"))))
 
   (define symbol-char-parser (proc-parser #:name "symbol-char"
                                           symbol-char-func))
@@ -923,7 +923,7 @@
                    (define s (read-string 1 port))
                    (if (equal? s "a")
                        (make-parse-derivation s #:end (port->pos port))
-                       (make-parse-failure "didn't match «a»")))))
+                       (make-parse-failure #:message "didn't match «a»")))))
   (define two-a-parser
     (make-alt-parser "two-a" (list (make-a-parser) (make-a-parser))))
   (c check-equal?
@@ -1094,7 +1094,7 @@ TODO - what kind of filters do I need?
               (define best-failure
                 (greatest-failure
                  all-failures
-                 #:default (make-parse-failure "no info available")))
+                 #:default (make-parse-failure #:message "no info available")))
               best-failure]
              [else (define r1 (stream-first results))
                    (define filter-result (filter-func port r1))
@@ -1107,7 +1107,7 @@ TODO - what kind of filters do I need?
                        (rec (stream-rest results)
                             (if include-failures?
                                 (cons (make-parse-failure
-                                       (format "did not pass filter: ~v" r1)
+                                       #:message (format "did not pass filter: ~v" r1)
                                        #:position
                                        (parse-derivation-end-position r1))
                                       failures)

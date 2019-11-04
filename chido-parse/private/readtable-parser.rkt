@@ -592,10 +592,11 @@ This is an implementation of the same idea, but also adding support for operator
   (define str (port-broker-substring pb start-pos sym/num-length))
   (cond
     [(equal? 0 sym/num-length)
-     (make-parse-failure "Can't parse symbol because delimiter succeeded parsing."
-                         #:position start-pos)]
+     (make-parse-failure
+      #:message "Can't parse symbol because delimiter succeeded parsing."
+      #:position start-pos)]
     [(memq (string->symbol str) (chido-readtable-symbol-blacklist rt))
-     (make-parse-failure (format "Symbol blacklisted: ~s" str))]
+     (make-parse-failure #:message (format "Symbol blacklisted: ~s" str))]
     [else
      (let ()
        (define span sym/num-length)
@@ -813,8 +814,8 @@ This is an implementation of the same idea, but also adding support for operator
     (proc-parser #:name (format "trailing-right-delimiter_~a" right)
                  #:prefix right
                  (λ (port) (make-parse-failure
-                            (format "Trailing right delimiter: ~a"
-                                    right)))
+                            #:message (format "Trailing right delimiter: ~a"
+                                              right)))
                  #:promise-no-left-recursion? #t))
 
   (extend-chido-readtable (extend-chido-readtable rt rt-add-type left-parser)
@@ -972,8 +973,8 @@ This is an implementation of the same idea, but also adding support for operator
     (proc-parser #:name (format "trailing-right-delimiter_~a" right)
                  #:prefix right
                  (λ (port) (make-parse-failure
-                            (format "Trailing right delimiter: ~a"
-                                    right)))
+                            #:message (format "Trailing right delimiter: ~a"
+                                              right)))
                  #:promise-no-left-recursion? #t
                  #:use-port? #f))
   (extend-chido-readtable
@@ -1130,7 +1131,7 @@ This is an implementation of the same idea, but also adding support for operator
                    (define-values (line col pos) (port-next-location port))
                    (if (equal? s "<two>")
                        (make-parse-derivation s #:end pos)
-                       (make-parse-failure "didn't match «<two>»")))))
+                       (make-parse-failure #:message "didn't match «<two>»")))))
   (define (make-<two/alt>-parser)
     (proc-parser (λ (port)
                    (define s (read-string 9 port))
@@ -1139,7 +1140,7 @@ This is an implementation of the same idea, but also adding support for operator
                        (stream-cons (make-parse-derivation s #:end pos)
                                     (stream-cons (make-parse-derivation s #:end pos)
                                                  empty-stream))
-                       (make-parse-failure "didn't match «<two>»")))))
+                       (make-parse-failure #:message "didn't match «<two>»")))))
 
   (define my-rt
     (extend-chido-readtable*
