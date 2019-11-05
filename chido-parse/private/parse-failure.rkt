@@ -4,6 +4,8 @@
  (struct-out parse-failure)
  greatest-failure
  parse-failure-greater-than?
+ parse-failure->chain
+ parse-failure->first-message
  )
 (require
  racket/stream
@@ -12,7 +14,7 @@
 (struct parse-failure
   (parser
    ;; message can be #f or a string.  If it's #f, we look to its inner-failure for a message.
-   current-message
+   message
    report-line
    report-column
    report-position
@@ -23,7 +25,7 @@
    ;; (instead of just the best), or #f.
    inner-failure-list
    )
-  #:transparent
+  ;#:transparent
   #:methods gen:stream
   [(define (stream-empty? s) #t)
    ;; TODO - better error messages
@@ -52,10 +54,12 @@
           default)
       (car (sort failures parse-failure-greater-than?))))
 
-#|
-TODO - extra helpers
-failure views
-* parse-failure->string/simple -- gives the location, name of failed parser, and message if not #f
-* parse-failure->string/message -- like simple, but searches the chain for the first message it finds.
-* parse-failure->string/chain -- reports name of failed parser and message for each failure in the chain
-|#
+(define (parse-failure->chain pf)
+  (if (not pf)
+      '()
+      (cons pf (parse-failure->chain (parse-failure-inner-failure pf)))))
+
+(define (parse-failure->first-message pf)
+  (cond [(not pf) #f]
+        [(parse-failure-message pf)]
+        [else (parse-failure->first-message (parse-failure-inner-failure pf))]))

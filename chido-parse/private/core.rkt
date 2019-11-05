@@ -39,6 +39,9 @@
 
  (struct-out parse-failure)
  make-parse-failure
+ parse-failure->string/simple
+ parse-failure->string/message
+ parse-failure->string/chain
  greatest-failure
 
  get-counts!
@@ -361,6 +364,37 @@
                     made-progress?
                     best-failure
                     all-failures)]))
+
+(define (parse-failure->string/location-triple pf)
+  (format "~a:~a:~a"
+          (parse-failure-report-line pf)
+          (parse-failure-report-column pf)
+          (parse-failure-report-position pf)))
+(define (format-parser+message parser message)
+  (if message
+      (format "~a: ~a" (parser-name parser) message)
+      (parser-name parser)))
+
+(define (parse-failure->string/simple pf)
+  (format "Parse failure at ~a. ~a"
+          (parse-failure->string/location-triple pf)
+          (format-parser+message (parse-failure-parser pf)
+                                 (parse-failure-message pf))))
+(define (parse-failure->string/message pf)
+  (format "Parse failure at ~a. ~a"
+          (parse-failure->string/location-triple pf)
+          (format-parser+message (parse-failure-parser pf)
+                                 (parse-failure->first-message pf))))
+
+(define (parse-failure->string/chain pf)
+  (format "Parse failure at ~a.\n~a\n"
+          (parse-failure->string/location-triple pf)
+          (string-join
+           (map (λ (pf) (format-parser+message (parse-failure-parser pf)
+                                               (parse-failure-message pf)))
+                (parse-failure->chain pf))
+           "\n")))
+
 
 (define (make-cycle-failure job job-cycle-list)
   (match job
