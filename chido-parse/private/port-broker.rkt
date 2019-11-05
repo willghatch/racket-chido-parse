@@ -146,7 +146,7 @@
       (add1
        (vector-ref (gvector-ref (port-broker-contents pb)
                                 (sub1 (gvector-count (port-broker-contents pb))))
-                   info-char-offset))))
+                   info-col-offset))))
 
 (define (port-broker-substring? pb position string)
   (define len (string-length string))

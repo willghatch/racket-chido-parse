@@ -834,6 +834,7 @@
     (λ (port)
       (define c (peek-char port))
       (or (and (not (member c '(#\newline #\space #\return #\tab #\( #\))))
+               (not (eof-object? c))
                (begin
                  (read-char port)
                  (make-parse-derivation c #:end (port->pos port))))

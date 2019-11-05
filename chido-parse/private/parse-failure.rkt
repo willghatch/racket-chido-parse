@@ -13,6 +13,8 @@
   (parser
    ;; message can be #f or a string.  If it's #f, we look to its inner-failure for a message.
    current-message
+   report-line
+   report-column
    report-position
    effective-start effective-end
    made-progress?

@@ -344,12 +344,17 @@
                                 (parse-failure-effective-end best-failure))))
      (define effective-end (max (or end 0) guess-end (or inner-end 0)))
      (define report-position (or position effective-end))
+     (define pb (scheduler-port-broker (parser-job-scheduler job)))
+     (define report-line (port-broker-line pb report-position))
+     (define report-column (port-broker-column pb report-position))
      (define made-progress? (cond [(eq? #t made-progress?/given) #t]
                                   [(eq? #f made-progress?/given) #f]
                                   [(> (or end guess-end) start-position) #t]
                                   [else #f]))
      (parse-failure parser
                     message
+                    report-line
+                    report-column
                     report-position
                     start-position
                     effective-end
@@ -359,10 +364,14 @@
 
 (define (make-cycle-failure job job-cycle-list)
   (match job
-    [(s/kw parser-job #:parser parser #:start-position start-position)
+    [(s/kw parser-job #:parser parser #:start-position start-position
+           #:scheduler scheduler)
+     (define pb (scheduler-port-broker scheduler))
      (parse-failure parser
                     (format "Cycle failure: ~a" (map job->display
                                                      (reverse job-cycle-list)))
+                    (port-broker-line pb start-position)
+                    (port-broker-column pb start-position)
                     start-position
                     start-position
                     start-position
@@ -375,10 +384,14 @@
     (match job
       [(s/kw parser-job #:parser parser
              #:start-position start-position
-             #:port port)
+             #:port port
+             #:scheduler scheduler)
+       (define pb (scheduler-port-broker scheduler))
        (define fail-pos (if port (port->pos port) start-position))
        (parse-failure parser
                       message
+                      (port-broker-line pb fail-pos)
+                      (port-broker-column pb fail-pos)
                       fail-pos
                       start-position
                       fail-pos
@@ -390,13 +403,17 @@
   (match aw
     [(s/kw alt-worker #:job job #:failures failures)
      (match job
-       [(s/kw parser-job #:parser parser #:start-position start-position)
+       [(s/kw parser-job #:parser parser #:start-position start-position
+              #:scheduler scheduler)
+        (define pb (scheduler-port-broker scheduler))
         (match parser
           [(s/kw alt-parser #:name name)
            (define best-failure
              (if (null? failures)
                  (parse-failure parser
                                 "Alt failed with no inner failures.  Probably no prefixes matched."
+                                (port-broker-line pb start-position)
+                                (port-broker-column pb start-position)
                                 start-position start-position start-position
                                 #f #f #f)
                  (greatest-failure failures)))
@@ -885,11 +902,14 @@ But I still need to encapsulate the port and give a start position.
 (define (prefix-fail! scheduler job)
   (match job
     [(s/kw parser-job #:parser p #:start-position pos #:result #f)
+     (define pb (scheduler-port-broker scheduler))
      (cache-result-and-ready-dependents!
       scheduler
       job
       (parse-failure p
                      (format "prefix didn't match: ~v" (parser-prefix p))
+                     (port-broker-line pb pos)
+                     (port-broker-column pb pos)
                      pos pos pos
                      #f #f #f))]
     [else (void)]))
@@ -1046,14 +1066,14 @@ But I still need to encapsulate the port and give a start position.
                   (run-scheduler scheduler)])]
               [else
                ;; In this case there has been a result stream but it is dried up.
+               (define pb (scheduler-port-broker scheduler))
+               (define pos (parser-job-start-position job))
                (let ([end-failure (parse-failure (parser-job-parser job)
                                                  "No more results"
-                                                 (parser-job-start-position job)
-                                                 (parser-job-start-position job)
-                                                 (parser-job-start-position job)
-                                                 #f
-                                                 #f
-                                                 #f)])
+                                                 (port-broker-line pb pos)
+                                                 (port-broker-column pb pos)
+                                                 pos pos pos
+                                                 #f #f #f)])
                  (cache-result-and-ready-dependents! scheduler
                                                      job
                                                      end-failure)
@@ -1141,12 +1161,13 @@ But I still need to encapsulate the port and give a start position.
                                         (flattened-stream-failures result))])
                (match inner-failures
                  [(or #f (list))
+                  (define pb (scheduler-port-broker scheduler))
                   (parse-failure parser
                                  "parse returned empty stream"
+                                 (port-broker-line pb start-position)
+                                 (port-broker-column pb start-position)
                                  start-position start-position start-position
-                                 #f
-                                 #f
-                                 #f)]
+                                 #f #f #f)]
                  [(list one-fail) one-fail]
                  [(list fail ...)
                   (define best-fail (greatest-failure fail))
