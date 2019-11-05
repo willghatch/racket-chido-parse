@@ -2,12 +2,13 @@
 
 (provide
  parse-stream-cons
- for/parse
+ for/parse-proc
  )
 
 (require
  racket/stream
  "parameters.rkt"
+ "parse-failure.rkt"
  (for-syntax
   racket/base
   syntax/parse
@@ -41,16 +42,10 @@ later elements in the streams will get different parameterizations.
                  (parameterize ([current-chido-parse-parameters cp-params])
                    tail)))]))
 
-(define (for/parse-proc body-proc arg-stream-thunk)
+(define (for/parse-proc body-proc arg-stream-thunk failure-proc)
   (let loop ([stream (arg-stream-thunk)])
-    (if (stream-empty? stream)
-        stream
-        (let ([v1 (stream-first stream)])
-          (parse-stream-cons (body-proc v1)
-                             (loop (stream-rest stream)))))))
-(define-syntax (for/parse stx)
-  (syntax-parse stx
-    [(_ ([arg-name input-stream])
-        body ...+)
-     #'(for/parse-proc (λ (arg-name) body ...)
-                       (λ () input-stream))]))
+    (cond [(parse-failure? stream) (failure-proc stream)]
+          [(stream-empty? stream) stream]
+          [else (let ([v1 (stream-first stream)])
+                  (parse-stream-cons (body-proc v1)
+                                     (loop (stream-rest stream))))])))

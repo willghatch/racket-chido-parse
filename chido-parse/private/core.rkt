@@ -49,6 +49,7 @@
 
  parse*
  parse-direct
+ for/parse
  #;(contract-out
   [parse* (->* (input-port? parser?)
                (#:args (listof any/c)
@@ -331,6 +332,8 @@
                             #:failures [failures #f])
   (define job (current-chido-parse-job))
   (match job
+    [#f (error 'make-parse-failure
+               "Called outside of the dynamic extent of a chido-parse parser.")]
     [(s/kw parser-job #:parser parser #:start-position start-position #:port port)
      (define all-failures (and failures
                                (remove-duplicates
@@ -1280,21 +1283,42 @@ But I still need to encapsulate the port and give a start position.
                 #:start [start #f])
   (parse-inner enter-the-parser port/pbw parser start))
 
+(define-syntax (for/parse stx)
+  (syntax-parse stx
+    [(_ ([arg-name input-stream]
+         (~optional (~seq #:failure failure-arg:expr)))
+        body ...+)
+     #'(for/parse-proc (λ (arg-name) body ...)
+                       (λ () input-stream)
+                       (~? failure-arg
+                           (λ (f) f (make-parse-failure #:inner-failure f))))]))
+
 (define (parse-direct port parser
-                      #:start [start #f])
+                      #:start [start #f]
+                      #:failure [failure-arg #f])
   (when (not (input-port? port))
     (error 'parse-direct "parse-direct requires a port as an argument, given: ~v"
            port))
   (define start-use (or start (port->pos port)))
   ;; This one lets the user get a single result back, but the return is actually a stream.
   (define (direct-recursive-parse-core pb parser core-start)
+    (define job (current-chido-parse-job))
+    (define params (current-chido-parse-parameters))
     (define new-derivation
       (call-with-composable-continuation
        (λ (k)
          (abort-current-continuation
           chido-parse-prompt
           ;; TODO - better failure handling and propagation
-          (λ () (for/parse ([d (parse* port parser #:start core-start)])
+          (λ () (for/parse ([d (parse* port parser #:start core-start)]
+                            #:failure (λ (f)
+                                        (parameterize
+                                            ([current-chido-parse-job job]
+                                             [current-chido-parse-parameters params])
+                                          (or (and failure-arg
+                                                   (failure-arg f))
+                                              (make-parse-failure
+                                               #:inner-failure f)))))
                            (k d)))))
        chido-parse-prompt))
     (define new-pos (parse-derivation-end-position new-derivation))
