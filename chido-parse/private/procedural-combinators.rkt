@@ -1092,11 +1092,7 @@ TODO - what kind of filters do I need?
               (define all-failures (if (parse-failure? results)
                                        (cons results failures)
                                        failures))
-              (define best-failure
-                (greatest-failure
-                 all-failures
-                 #:default (make-parse-failure #:message "no info available")))
-              best-failure]
+              (make-parse-failure #:all-failures all-failures)]
              [else (define r1 (stream-first results))
                    (define filter-result (filter-func port r1))
                    (define use-result (if (and replace-derivation? filter-result)
@@ -1108,7 +1104,8 @@ TODO - what kind of filters do I need?
                        (rec (stream-rest results)
                             (if include-failures?
                                 (cons (make-parse-failure
-                                       #:message (format "did not pass filter: ~v" r1)
+                                       #:message
+                                       (format "did not pass filter: ~v" r1)
                                        #:position
                                        (parse-derivation-end-position r1))
                                       failures)

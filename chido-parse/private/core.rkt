@@ -43,6 +43,7 @@
  parse-failure->string/message
  parse-failure->string/chain
  greatest-failure
+ chido-parse-keep-multiple-failures?
 
  get-counts!
 
@@ -320,7 +321,8 @@
          empty-stream))])
 
 (define progress-default (gensym))
-(define (make-parse-failure #:message message
+(define chido-parse-keep-multiple-failures? (make-parameter #f))
+(define (make-parse-failure #:message [message #f]
                             #:position [position #f]
                             #:end [end #f]
                             #:made-progress? [made-progress?/given progress-default]
@@ -338,21 +340,24 @@
                               (and all-failures
                                    (not (null? all-failures))
                                    (greatest-failure all-failures))))
-     (define guess-end (if port (port->pos port) start-position))
+     (define guess-end (if port
+                           (port->pos port)
+                           start-position))
      (define inner-end (if all-failures
                            (and (not (null? all-failures))
                                 (apply max (map parse-failure-effective-end
                                                 all-failures)))
                            (and best-failure
                                 (parse-failure-effective-end best-failure))))
-     (define effective-end (max (or end 0) guess-end (or inner-end 0)))
+     (define effective-end (max (or end 0) (or position 0)
+                                guess-end (or inner-end 0)))
      (define report-position (or position effective-end))
      (define pb (scheduler-port-broker (parser-job-scheduler job)))
      (define report-line (port-broker-line pb report-position))
      (define report-column (port-broker-column pb report-position))
      (define made-progress? (cond [(eq? #t made-progress?/given) #t]
                                   [(eq? #f made-progress?/given) #f]
-                                  [(> (or end guess-end) start-position) #t]
+                                  [(> (or end position guess-end) start-position) #t]
                                   [else #f]))
      (parse-failure parser
                     message
@@ -363,7 +368,8 @@
                     effective-end
                     made-progress?
                     best-failure
-                    all-failures)]))
+                    (and (chido-parse-keep-multiple-failures?)
+                         all-failures))]))
 
 (define (parse-failure->string/location-triple pf)
   (format "~a:~a:~a"
@@ -442,16 +448,13 @@
         (define pb (scheduler-port-broker scheduler))
         (match parser
           [(s/kw alt-parser #:name name)
-           (define best-failure
-             (if (null? failures)
-                 (parse-failure parser
-                                "Alt failed with no inner failures.  Probably no prefixes matched."
-                                (port-broker-line pb start-position)
-                                (port-broker-column pb start-position)
-                                start-position start-position start-position
-                                #f #f #f)
-                 (greatest-failure failures)))
-           best-failure])])]))
+           (parameterize ([current-chido-parse-job job])
+             (make-parse-failure
+              #:message
+              (if (null? failures)
+                  "Alt failed with no inner failures.  Probably no prefixes matched."
+                  #f)
+              #:failures failures))])])]))
 
 
 
@@ -1204,8 +1207,8 @@ But I still need to encapsulate the port and give a start position.
                                  #f #f #f)]
                  [(list one-fail) one-fail]
                  [(list fail ...)
-                  (define best-fail (greatest-failure fail))
-                  best-fail])))
+                  (parameterize ([current-chido-parse-job job])
+                    (make-parse-failure #:failures fail))])))
            (cache-result-and-ready-dependents!/procedure-job
             scheduler
             job
