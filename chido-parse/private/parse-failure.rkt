@@ -9,6 +9,7 @@
  )
 (require
  racket/stream
+ ;racket/list
  )
 
 (struct parse-failure
@@ -38,12 +39,21 @@
 (define (parse-failure-greater-than? greater lesser)
   ;; TODO - is this the best way to decide this?
   ;;        Should there also be other kinds of scoring?  Eg. attach extra info to failures when creating them to say how much progress they made?
-  (or (and (parse-failure-made-progress? greater)
-           (not (parse-failure-made-progress? lesser)))
-      (> (parse-failure-effective-end greater)
-         (parse-failure-effective-end lesser))
-      (> (parse-failure-effective-start greater)
-         (parse-failure-effective-start lesser))))
+  (define (greater-for-progress? g l)
+    (and (parse-failure-made-progress? greater)
+         (not (parse-failure-made-progress? lesser))))
+  (define (greater-for-end? g l)
+    (> (parse-failure-effective-end g)
+       (parse-failure-effective-end l)))
+  (define (greater-for-start? g l)
+    (> (parse-failure-effective-start g)
+       (parse-failure-effective-start l)))
+
+  (or (greater-for-progress? greater lesser)
+      (and (not (greater-for-progress? lesser greater))
+           (or (greater-for-end? greater lesser)
+               (and (not (greater-for-end? lesser greater))
+                    #;(greater-for-start? greater lesser))))))
 
 (define (greatest-failure failures
                           #:default [default (λ () (error 'greatest-failure
@@ -52,7 +62,14 @@
       (if (procedure? default)
           (default)
           default)
-      (car (sort failures parse-failure-greater-than?))))
+      (let* ([sorted (sort failures parse-failure-greater-than?)]
+             #;[greatest-ties (takef sorted (λ (x) (not (parse-failure-greater-than?
+                                                       (car sorted)
+                                                       x))))])
+        #;(when (not (null? (cdr greatest-ties)))
+          (eprintf "failure sort ties: ~v\n" (map parse-failure->first-message
+                                                  greatest-ties)))
+        (car sorted))))
 
 (define (parse-failure->chain pf)
   (if (not pf)

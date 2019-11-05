@@ -321,6 +321,7 @@
          empty-stream))])
 
 (define progress-default (gensym))
+;; TODO - Maybe I should have a `keep-all?` parameter and a `keep-ties?` parameter to keep multiple failures when they tie for greatest.
 (define chido-parse-keep-multiple-failures? (make-parameter #f))
 (define (make-parse-failure #:message [message #f]
                             #:position [position #f]
