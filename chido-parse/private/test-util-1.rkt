@@ -1,9 +1,6 @@
 #lang racket/base
 
-(provide
- se?
- se/datum?
- )
+(provide (all-defined-out))
 
 (require
  racket/match
@@ -21,7 +18,6 @@
           [(list (list ai ...) (list bi ...))
            (and (equal? (length ai) (length bi))
                 (andmap rec ai bi))]
-          [(list (? syntax?) b) #f]
           [else (equal? a b)]))
    (and (syntax? a)
         (syntax? b)

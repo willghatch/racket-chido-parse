@@ -654,7 +654,7 @@
                       (syntax-e #'(check-not-exn (λ () (check-name arg ...))))
                       stx)]))
 
-  (require "test-util.rkt")
+  (require "test-util-2.rkt")
 
   (define ap "a")
   (define bp "b")
@@ -681,138 +681,111 @@
 
   (define str2 "bbbabbbbbbbbbbbc")
   (c check-equal?
-     (parse-derivation-result
-      (car (stream->list
-            (parse* (open-input-string str2) BaBcp))))
-     str2)
-
-  (define (->results ds)
-    (map parse-derivation-result (stream->list ds)))
+     (p*/r str2 BaBcp)
+     (list str2))
 
   (c check-equal?
-     (map parse-derivation-result
-          (stream->list
-           (parse* (open-input-string "qqq")
-                   (kleene-star "q"
-                                #:result/bare (λ (elems) (string-join elems ""))))))
+     (p*/r "qqq"
+           (kleene-star "q"
+                        #:result/bare (λ (elems) (string-join elems ""))))
      (list "" "q" "qq" "qqq"))
   (c check-equal?
-     (map parse-derivation-result
-          (stream->list
-           (parse* (open-input-string "qqq")
-                   (kleene-plus "q"
-                                #:result/bare (λ (elems) (string-join elems ""))))))
+     (p*/r "qqq"
+           (kleene-plus "q"
+                        #:result/bare (λ (elems) (string-join elems ""))))
      (list "q" "qq" "qqq"))
   (c check-equal?
-     (map parse-derivation-result
-          (stream->list
-           (parse* (open-input-string "qqqqqqqqqqqqqqqqqqqqqqq")
-                   (repetition "q" #:result/bare (λ (elems) (string-join elems ""))
-                               #:min 3 #:max 5))))
+     (p*/r "qqqqqqqqqqqqqqqqqqqqqqq"
+           (repetition "q" #:result/bare (λ (elems) (string-join elems ""))
+                       #:min 3 #:max 5))
      (list "qqq" "qqqq" "qqqqq"))
 
   ;;; repetition with between parsers
   (c check-equal?
-     (->results (parse* (open-input-string "qaqaq")
-                        (repetition "q"
-                                    #:result/bare (λ (elems) (string-join elems ""))
-                                    #:between "a")))
+     (p*/r "qaqaq"
+           (repetition "q"
+                       #:result/bare (λ (elems) (string-join elems ""))
+                       #:between "a"))
      (list "" "q" "qq" "qqq"))
   (c check-equal?
-     (->results
-      (parse* (open-input-string "bqaqaq")
-              (repetition "q" #:result/bare (λ (elems) (string-join elems ""))
-                          #:before "b"
-                          #:between "a")))
+     (p*/r "bqaqaq"
+           (repetition "q" #:result/bare (λ (elems) (string-join elems ""))
+                       #:before "b"
+                       #:between "a"))
      (list "" "q" "qq" "qqq"))
   (c check-equal?
-     (->results
-      (parse* (open-input-string "bqaqaq")
-              (repetition "q" #:result/bare (λ (elems) (string-join elems ""))
-                          #:before "b"
-                          #:between "a")))
+     (p*/r "bqaqaq"
+           (repetition "q" #:result/bare (λ (elems) (string-join elems ""))
+                       #:before "b"
+                       #:between "a"))
      (list "" "q" "qq" "qqq"))
   (c check-equal?
-     (->results
-      (parse* (open-input-string "bqaqaqz")
-              (repetition "q" #:result/bare (λ (elems) (string-join elems ""))
-                          #:before "b"
-                          #:after "z"
-                          #:between "a")))
+     (p*/r "bqaqaqz"
+           (repetition "q" #:result/bare (λ (elems) (string-join elems ""))
+                       #:before "b"
+                       #:after "z"
+                       #:between "a"))
      (list "qqq"))
   (c check-equal?
-     (->results
-      (parse* (open-input-string "aqaqaqa")
-              (repetition "q" #:result/bare (λ (elems) (string-join elems ""))
-                          #:before #t
-                          #:after #t
-                          #:between "a")))
+     (p*/r "aqaqaqa"
+           (repetition "q" #:result/bare (λ (elems) (string-join elems ""))
+                       #:before #t
+                       #:after #t
+                       #:between "a"))
      ;; no empty string, because it must parse before AND after...
      (list "q" "qq" "qqq"))
   (c check-equal?
-     (->results
-      (parse* (open-input-string "bqqq")
-              (repetition "q" #:result/bare (λ (elems) (string-join elems ""))
-                          #:before "b")))
+     (p*/r "bqqq"
+           (repetition "q" #:result/bare (λ (elems) (string-join elems ""))
+                       #:before "b"))
      (list "" "q" "qq" "qqq"))
   (c check se?
-     (->results
-      (parse* (open-input-string "qqqz")
-              (repetition "q" #:result/stx (λ (elems) (string-join elems ""))
-                          #:after "z")))
+     (p*/r "qqqz"
+           (repetition "q" #:result/stx (λ (elems) (string-join elems ""))
+                       #:after "z"))
      (list (datum->syntax #f "qqq" (list 'string 1 1 1 4))))
 
   ;;; sequence with begin/before/after
   (c check se?
-     (->results
-      (parse* (open-input-string "a_b_c")
-              (sequence "a" "b" "c" #:result/stx (λ elems (string-join elems ""))
-                        #:between "_")))
+     (p*/r "a_b_c"
+           (sequence "a" "b" "c" #:result/stx (λ elems (string-join elems ""))
+                     #:between "_"))
      (list (datum->syntax #f "abc" (list 'string 1 1 1 5))))
   (c check-equal?
-     (->results
-      (parse* (open-input-string "_a_b_c_")
-              (sequence "a" "b" "c" #:result/bare (λ elems (string-join elems ""))
-                        #:before #t
-                        #:after #t
-                        #:between "_")))
+     (p*/r "_a_b_c_"
+           (sequence "a" "b" "c" #:result/bare (λ elems (string-join elems ""))
+                     #:before #t
+                     #:after #t
+                     #:between "_"))
      (list "abc"))
   (c check-equal?
-     (->results
-      (parse* (open-input-string "^a_b_c$")
-              (sequence "a" "b" "c" #:result/bare (λ elems (string-join elems ""))
-                        #:before "^"
-                        #:after "$"
-                        #:between "_")))
+     (p*/r "^a_b_c$"
+           (sequence "a" "b" "c" #:result/bare (λ elems (string-join elems ""))
+                     #:before "^"
+                     #:after "$"
+                     #:between "_"))
      (list "abc"))
   (c check-equal?
-     (->results
-      (parse* (open-input-string "^abc$")
-              (sequence "a" "b" "c" #:result/bare (λ elems (string-join elems ""))
-                        #:before "^"
-                        #:after "$")))
+     (p*/r "^abc$"
+           (sequence "a" "b" "c" #:result/bare (λ elems (string-join elems ""))
+                     #:before "^"
+                     #:after "$"))
      (list "abc"))
 
 
   (c check-equal?
-     (map parse-derivation-result
-          (stream->list
-           (parse* (open-input-string "a")
-                   (sequence (epsilon-parser) "a" #:result/bare (λ (a b) b)))))
+     (p*/r "a"
+           (sequence (epsilon-parser) "a" #:result/bare (λ (a b) b)))
      (list "a"))
 
   (c check-equal?
-     (map parse-derivation-result
-          (stream->list
-           (parse* (open-input-string "")
-                   eof-parser)))
+     (p*/r ""
+           eof-parser)
      (list eof))
 
   (c check-equal?
-     (map parse-derivation-result
-          (stream->list
-           (parse* (open-input-string "abc")
-                   (not-parser eof-parser #:result 'foo))))
+     (p*/r "abc"
+           (not-parser eof-parser #:result 'foo))
      (list 'foo))
 
 
@@ -869,15 +842,11 @@
                            list-parser)))
 
   (c check-equal?
-     (map parse-derivation-result
-          (stream->list
-           (parse* (open-input-string "()") basic-s-exp)))
+     (p*/r "()" basic-s-exp)
      (list '()))
 
   (c check-equal?
-     (map parse-derivation-result
-          (stream->list
-           (parse* (open-input-string "test") basic-s-exp)))
+     (p*/r "test" basic-s-exp)
      '(t te tes test))
 
   (define s-exp-str-1 "(test test (test test) test (hello foo (bar aoeu)
@@ -890,32 +859,25 @@
       anoteunthun aoentu oeau)")
 
   (c check-equal?
-     (map parse-derivation-result
-          (stream->list
-           (parse* (open-input-string s-exp-str-1) basic-s-exp)))
+     (p*/r s-exp-str-1 basic-s-exp)
      (list (read (open-input-string s-exp-str-1))))
 
   (c check-equal?
      (length
-      (stream->list
-       (parse* (open-input-string "aaaa")
-               (regexp->parser #px"a*"))))
+      (p*/r "aaaa"
+            (regexp->parser #px"a*")))
      1)
 
   (c check-equal?
      (length
-      (stream->list
-       (parse* (open-input-string "aaaa")
-               (repetition "a" #:greedy? #t))))
+      (p*/r "aaaa"
+            (repetition "a" #:greedy? #t)))
      1)
   (c check-equal?
-     (parse-derivation-result
-      (car
-       (stream->list
-        (parse* (open-input-string "aaaa")
-                (repetition "a" #:greedy? #t
-                            #:result/bare #t)))))
-     (list "a" "a" "a" "a"))
+     (p*/r "aaaa"
+           (repetition "a" #:greedy? #t
+                       #:result/bare #t))
+     (list (list "a" "a" "a" "a")))
 
 
   ;; check that sequences handle internal ambiguity properly
@@ -928,69 +890,66 @@
   (define two-a-parser
     (make-alt-parser "two-a" (list (make-a-parser) (make-a-parser))))
   (c check-equal?
-     (map parse-derivation-result
-          (stream->list
-           (parse* (open-input-string "ab")
-                   (sequence two-a-parser "b"
-                             #:result/bare (λ (r1 r2) (string-append r1 r2))))))
+     (p*/r "ab"
+           (sequence two-a-parser "b"
+                     #:result/bare (λ (r1 r2) (string-append r1 r2))))
      '("ab" "ab"))
 
 
-  (check-equal? (->results (parse* (open-input-string "ab")
-                                   (binding-sequence "a" "b" #:result/bare #t)))
+  (check-equal? (p*/r "ab"
+                      (binding-sequence "a" "b" #:result/bare #t))
                 '(("a" "b")))
-  (check-equal? (->results (parse* (open-input-string "ab")
-                                   (binding-sequence "a" "b"
-                                                     #:result/bare #t)))
+  (check-equal? (p*/r "ab"
+                      (binding-sequence "a" "b"
+                                        #:result/bare #t))
                 '(("a" "b")))
   (check se?
-   (->results (parse* (open-input-string "ab")
-                      (binding-sequence "a" "b"
-                                        #:result/stx list)))
-   (list (datum->syntax #f '("a" "b") (list 'string 1 1 1 2))))
+         (p*/r "ab"
+               (binding-sequence "a" "b"
+                                 #:result/stx list))
+         (list (datum->syntax #f '("a" "b") (list 'string 1 1 1 2))))
   (check se?
-   (->results (parse* (open-input-string "ab")
-                      (binding-sequence "a" "b"
-                                        #:result/stx #t)))
-   (list (datum->syntax #f '("a" "b") (list 'string 1 1 1 2))))
+         (p*/r "ab"
+               (binding-sequence "a" "b"
+                                 #:result/stx #t))
+         (list (datum->syntax #f '("a" "b") (list 'string 1 1 1 2))))
 
-  (check-equal? (->results (parse* (open-input-string "ab")
-                                   (binding-sequence [: #:bind a1 "a"] "b"
-                                                     #:result/bare #t)))
+  (check-equal? (p*/r "ab"
+                      (binding-sequence [: #:bind a1 "a"] "b"
+                                        #:result/bare #t))
                 '(("a" "b")))
-  (check-equal? (->results (parse* (open-input-string "ab")
-                                   (binding-sequence [: #:ignore #t "a"] "b"
-                                                     #:result/bare #t)))
+  (check-equal? (p*/r "ab"
+                      (binding-sequence [: #:ignore #t "a"] "b"
+                                        #:result/bare #t))
                 '(("b")))
-  (check-equal? (->results (parse* (open-input-string "a_b")
-                                   (binding-sequence [: #:ignore #t "a"] "b"
-                                                     #:between "_"
-                                                     #:result/bare #t)))
+  (check-equal? (p*/r "a_b"
+                      (binding-sequence [: #:ignore #t "a"] "b"
+                                        #:between "_"
+                                        #:result/bare #t))
                 '(("b")))
-  (check-equal? (->results (parse* (open-input-string "aaab")
-                                   (binding-sequence [: #:splice 1
-                                                        (kleene-star "a"
-                                                                     #:result/bare #t)]
-                                                     "b"
-                                                     #:result/bare #t)))
+  (check-equal? (p*/r "aaab"
+                      (binding-sequence [: #:splice 1
+                                           (kleene-star "a"
+                                                        #:result/bare #t)]
+                                        "b"
+                                        #:result/bare #t))
                 '(("a" "a" "a" "b")))
-  (check-equal? (->results (parse* (open-input-string "aaa_b")
-                                   (binding-sequence [: #:splice 1
-                                                        (kleene-star "a"
-                                                                     #:result/bare #t)]
-                                                     "b"
-                                                     #:between "_"
-                                                     #:result/bare #t)))
+  (check-equal? (p*/r "aaa_b"
+                      (binding-sequence [: #:splice 1
+                                           (kleene-star "a"
+                                                        #:result/bare #t)]
+                                        "b"
+                                        #:between "_"
+                                        #:result/bare #t))
                 '(("a" "a" "a" "b")))
-  (check-equal? (->results
-                 (parse* (open-input-string "a-a-a_b")
-                         (binding-sequence [: #:splice 1 (kleene-star
-                                                          "a"
-                                                          #:between "-"
-                                                          #:result/bare #t)]
-                                           "b"
-                                           #:between "_"
-                                           #:result/bare #t)))
+  (check-equal? (p*/r "a-a-a_b"
+                      (binding-sequence [: #:splice 1 (kleene-star
+                                                       "a"
+                                                       #:between "-"
+                                                       #:result/bare #t)]
+                                        "b"
+                                        #:between "_"
+                                        #:result/bare #t))
                 '(("a" "a" "a" "b")))
 
   (define bseq-a-not-a-parser
@@ -1004,52 +963,50 @@
                                             (parse-derivation-result a1)
                                             (parse-derivation-result derivation)))))
                       #:result/bare #t))
-  (check-equal? (->results (parse* (open-input-string "ab")
-                                   bseq-a-not-a-parser))
+  (check-equal? (p*/r "ab"
+                      bseq-a-not-a-parser)
                 '(("a" "b")))
-  (check-equal? (->results (parse* (open-input-string "aa")
-                                   bseq-a-not-a-parser))
+  (check-equal? (p*/r "aa"
+                      bseq-a-not-a-parser)
                 '())
 
   ;; check binding-sequence repeat
-  (check-equal? (->results (parse* (open-input-string "a_a_a_b")
-                                   (binding-sequence [: #:splice 1 #:repeat-min 0 "a"]
-                                                     "b"
-                                                     #:between "_"
-                                                     #:result/bare #t)))
+  (check-equal? (p*/r "a_a_a_b"
+                      (binding-sequence [: #:splice 1 #:repeat-min 0 "a"]
+                                        "b"
+                                        #:between "_"
+                                        #:result/bare #t))
                 '(("a" "a" "a" "b")))
   ;; check binding-sequence subsequnce inheritance of #:between
   (check-equal?
-   (->results
-    (parse* (open-input-string "a_1_2_3_7-8-9_b")
-            (binding-sequence "a"
-                              [: #:splice 1 (binding-sequence "1" "2" "3"
-                                                              #:inherit-between #t
-                                                              #:result/bare #t)]
-                              [: #:splice 1 (binding-sequence "7" "8" "9"
-                                                              #:inherit-between #t
-                                                              #:between "-"
-                                                              #:result/bare #t)]
-                              "b"
-                              #:between "_"
-                              #:result/bare #t)))
+   (p*/r "a_1_2_3_7-8-9_b"
+         (binding-sequence "a"
+                           [: #:splice 1 (binding-sequence "1" "2" "3"
+                                                           #:inherit-between #t
+                                                           #:result/bare #t)]
+                           [: #:splice 1 (binding-sequence "7" "8" "9"
+                                                           #:inherit-between #t
+                                                           #:between "-"
+                                                           #:result/bare #t)]
+                           "b"
+                           #:between "_"
+                           #:result/bare #t))
    '(("a" "1" "2" "3" "7" "8" "9" "b")))
   (check-equal?
-   (->results
-    (parse* (open-input-string "a_1_2_3_1_2_3_b")
-            (binding-sequence "a"
-                              [: #:splice 2 #:repeat-min 0
-                                 (binding-sequence "1" "2" "3"
-                                                   #:inherit-between #t
-                                                   #:result/bare #t)]
-                              "b"
-                              #:between "_"
-                              #:result/bare #t)))
+   (p*/r "a_1_2_3_1_2_3_b"
+         (binding-sequence "a"
+                           [: #:splice 2 #:repeat-min 0
+                              (binding-sequence "1" "2" "3"
+                                                #:inherit-between #t
+                                                #:result/bare #t)]
+                           "b"
+                           #:between "_"
+                           #:result/bare #t))
    '(("a" "1" "2" "3" "1" "2" "3" "b")))
 
   (check se/datum?
-         (->results (parse* (open-input-string "foo")
-                            (as-syntax "foo")))
+         (p*/r "foo"
+               (as-syntax "foo"))
          (list #'"foo"))
 
 
@@ -1151,36 +1108,26 @@ TODO - what kind of filters do I need?
 (module+ test
 
   (c check-equal?
-     (parse-derivation-result
-      (car
-       (stream->list
-        (parse* (open-input-string "aaab")
-                (repetition (follow-filter "a" "b") #:greedy? #t #:result/bare #t)))))
-     (list "a" "a"))
+     (p*/r "aaab"
+           (repetition (follow-filter "a" "b") #:greedy? #t #:result/bare #t))
+     (list (list "a" "a")))
 
   (c check-equal?
-     (parse-derivation-result
-      (car
-       (stream->list
-        (parse* (open-input-string "testing")
-                (parse-filter "testing" (λ (port derivation) #t))))))
-     "testing")
+     (p*/r "testing"
+           (parse-filter "testing" (λ (port derivation) #t)))
+     (list "testing"))
   (c check-equal?
-     (parse-derivation-result
-      (car
-       (stream->list
-        (parse* (open-input-string "testing")
-                (parse-filter #:replace-derivation? #t
-                              "testing"
-                              (λ (port derivation)
-                                (make-parse-derivation
-                                 "a dog, a frog, a log"
-                                 #:derivations (list derivation))))))))
-     "a dog, a frog, a log")
+     (p*/r "testing"
+           (parse-filter #:replace-derivation? #t
+                         "testing"
+                         (λ (port derivation)
+                           (make-parse-derivation
+                            "a dog, a frog, a log"
+                            #:derivations (list derivation)))))
+     (list "a dog, a frog, a log"))
   (c check-equal?
-     (stream->list
-      (parse* (open-input-string "testing")
-              (parse-filter "testing" (λ (port result) #f))))
+     (p*/r "testing"
+           (parse-filter "testing" (λ (port result) #f)))
      '())
 
   (check se/datum?
@@ -1242,15 +1189,13 @@ TODO - what kind of filters do I need?
 
 (module+ test
   (c check-equal?
-     (map parse-derivation-result
-          (stream->list
-           (whole-parse* (open-input-string "abcd")
-                         "abcd")))
+     (->results
+      (whole-parse* (open-input-string "abcd")
+                    "abcd"))
      (list "abcd"))
   (c check-equal?
-     (map parse-derivation-result
-          (stream->list
-           (whole-parse* (open-input-string "abcdefg")
-                         "abcd")))
+     (->results
+      (whole-parse* (open-input-string "abcdefg")
+                    "abcd"))
      (list))
   )

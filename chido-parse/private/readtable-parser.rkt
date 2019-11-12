@@ -799,12 +799,15 @@ This is an implementation of the same idea, but also adding support for operator
                                     (list src line col pos span)))
                    (match wrapper
                      [(? procedure?) (wrapper (->stx pre-result))]
-                     [(? symbol?) (->stx (cons (datum->syntax
-                                                #f wrapper
-                                                (list src
-                                                      line col pos
-                                                      (string-length left)))
-                                               pre-result))]
+                     [(? symbol?) (datum->syntax
+                                   #f
+                                   (cons (datum->syntax
+                                          #f wrapper
+                                          (list src
+                                                line col pos
+                                                (string-length left)))
+                                         (syntax->list pre-result))
+                                   pre-result)]
                      [#f (->stx pre-result)]))
                  #:derivations derivations))
      ;#:result (λ (l inner right) inner)
@@ -1125,6 +1128,7 @@ This is an implementation of the same idea, but also adding support for operator
 (module+ test
   (require rackunit)
   (require racket/stream)
+  (require "test-util-3.rkt")
   (define (make-<two>-parser)
     (proc-parser (λ (port)
                    (define s (read-string 5 port))
@@ -1189,7 +1193,7 @@ This is an implementation of the same idea, but also adding support for operator
      )
     )
 
-  (define (p* string parser)
+  (define (p*/d string parser)
     (define r (with-handlers ([(λ(e)#t)(λ(e)e)])
                 (parse* (open-input-string string) parser)))
     (if (or (parse-failure? r)
@@ -1210,131 +1214,156 @@ This is an implementation of the same idea, but also adding support for operator
    (check-pred (λ(x) (and (not (parse-failure? x))
                           (list? x)
                           (< 0 (length x))))
-               (p* "   \t\n  " (chido-readtable-layout*-parser my-rt)))
-   (check-equal? (p* "()" r1)
-                 '(()))
-   (check-equal? (p* "( )" r1)
-                 '(()))
-   (check-equal? (p* "( ( ))" r1)
-                 '((())))
-   (check-equal? (p* "( ( ) )" r1)
-                 '((())))
-   (check-equal? (p* "( ( ) )" r1)
-                 '((())))
-   (check-equal? (p* "(()()()()())" r1)
-                 '((()()()()())))
-   (check-pred parse-failure? (p* ")" r1))
-   (check-equal? (p* "testing" r1)
-                 '(testing))
-   (check-equal? (p* "(testing)" r1)
-                 '((testing)))
-   (check-equal? (p* "( testing)" r1)
-                 '((testing)))
-   (check-equal? (p* "(testing )" r1)
-                 '((testing)))
-   (check-equal? (p* "( testing )" r1)
-                 '((testing)))
+               (p*/d "   \t\n  " (chido-readtable-layout*-parser my-rt)))
+   (check se/datum?
+          (p*/r "()" r1)
+          (list #'()))
+   (check se/datum? (p*/r "( )" r1) (list #'()))
+   (check se/datum? (p*/r "( ( ))" r1) (list #'(())))
+   (check se/datum? (p*/r "( ( ) )" r1) (list #'(())))
+   (check se/datum? (p*/r "( ( ) )" r1) (list #'(())))
+   (check se/datum? (p*/r "(()()()()())" r1) (list #'(()()()()())))
+   (check-pred parse-failure? (p*/d ")" r1))
+   (check se/datum? (p*/r "testing" r1) (list #'testing))
+   (check se/datum? (p*/r "(testing)" r1) (list #'(testing)))
+   (check se/datum? (p*/r "( testing)" r1) (list #'(testing)))
+   (check se/datum? (p*/r "(testing )" r1) (list #'(testing)))
+   (check se/datum? (p*/r "( testing )" r1) (list #'(testing)))
    (define s1 "(hello ( goodbye () ( ( ) ) ) bandicoot kangaroo ( aardvark   ))")
-   (check-equal? (p* s1 r1)
-                 (list (read (open-input-string s1))))
+   (check se/datum?
+          (p*/r s1 r1)
+          (list (read-syntax 'foo (open-input-string s1))))
    ;; Check that using the readtable directly is the same as ->read1
-   (check-equal? (p* s1 my-rt)
-                 (list (read (open-input-string s1))))
-   (check-equal? (p* "\"testing 123\"" r1)
-                 '("testing 123"))
-   (check-equal? (p* "(this is \"a test\" of string reading)" r1)
-                 '((this is "a test" of string reading)))
+   (check se/datum?
+          (p*/r s1 my-rt)
+          (list (read-syntax 'foo (open-input-string s1))))
+   (check se/datum?
+          (p*/r "\"testing 123\"" r1)
+          (list #'"testing 123"))
+   (check se/datum?
+          (p*/r "(this is \"a test\" of string reading)" r1)
+          (list #'(this is "a test" of string reading)))
 
-   (check-equal? (p* "(this (is \"a test\") of string reading)" r1)
-                 '((this (is "a test") of string reading)))
+   (check se/datum?
+          (p*/r "(this (is \"a test\") of string reading)" r1)
+          (list #'(this (is "a test") of string reading)))
 
-   (check-equal? (p* "(this (is <<a test <<of raw>> string>>) reading)" r1)
-                 '((this (is "a test <<of raw>> string") reading)))
+   (check se/datum?
+          (p*/r "(this (is <<a test <<of raw>> string>>) reading)" r1)
+          (list #'(this (is "a test <<of raw>> string") reading)))
    ;; If the left and right delimiters are the same, a raw string is not nestable.
-   (check-equal? (p* "(this (is !!a test !!of raw!! string!!) reading)" r1)
-                 '((this (is "a test " of raw " string") reading)))
+   (check se/datum?
+          (p*/r "(this (is !!a test !!of raw!! string!!) reading)" r1)
+          (list #'(this (is "a test " of raw " string") reading)))
    ;; this one had a weird error at one point.  I'm not sure what it was, but I'm leaving this here.
-   (check-not-exn (λ () (p* "   \n   " (chido-readtable-layout*-parser my-rt))))
+   (check-not-exn (λ () (p*/d "   \n   " (chido-readtable-layout*-parser my-rt))))
 
-   (check-equal? (p* "(hello `(foo ,bar ,(#:testing #t #f #;(quoted #t))))" r1)
-                 '((hello `(foo ,bar ,(#:testing #t #f)))))
+   (check se/datum?
+          (p*/r "(hello `(foo ,bar ,(#:testing #t #f #;(quoted #t))))" r1)
+          (list #'(hello `(foo ,bar ,(#:testing #t #f)))))
 
    ;; TODO - I need to add a follow filter or something here...
-   (check-equal? (p* "`(hello ,@foo)" r1)
-                 '(`(hello ,@foo)))
+   (check se/datum?
+          (p*/r "`(hello ,@foo)" r1)
+          (list #'`(hello ,@foo)))
 
-   (check-equal? (p* "$(test foo (bar $(qwer)))" r1)
-                 '((#%dollar-paren test foo (bar (#%dollar-paren qwer)))))
-   (check-equal? (p* "[a b]" r1)
-                 '[(a b)])
+   (check se/datum?
+          (p*/r "$(test)" r1)
+          (list #'(#%dollar-paren test)))
+   (check se/datum?
+          (p*/r "$(test foo (bar $(qwer)))" r1)
+          (list #'(#%dollar-paren test foo (bar (#%dollar-paren qwer)))))
+   (check se/datum?
+          (p*/r "[a b]" r1)
+          [list #'(a b)])
 
-   (check-equal? (p* "(a <two> b)" r1)
-                 '[(a "<two>" b) (a "<two>" b)])
-   (check-equal? (p* "(a <two/alt> b)" r1)
-                 '[(a "<two/alt>" b) (a "<two/alt>" b)])
+   (check se/datum?
+          (p*/r "(a <two> b)" r1)
+          [list #'(a "<two>" b) #'(a "<two>" b)])
+   (check se/datum?
+          (p*/r "(a <two/alt> b)" r1)
+          [list #'(a "<two/alt>" b) #'(a "<two/alt>" b)])
 
    ;;; operators
-   (check-equal? (p* "[() <+> ()]" r1)
-                 '[((#%chido-readtable-infix-operator <+> () ()))])
-   (check-equal? (p* "[() <+> () <+> ()]" r1)
-                 '[((#%chido-readtable-infix-operator
-                     <+> (#%chido-readtable-infix-operator <+> () ())
-                     ()))])
-   (check-equal? (p* "[() <^> () <^> ()]" r1)
-                 '[((#%chido-readtable-infix-operator <^> () (#%chido-readtable-infix-operator <^> () ())))])
-   (check-equal? (p* "[() <+> () <*> ()]" r1)
-                 '[((#%chido-readtable-infix-operator <+> () (#%chido-readtable-infix-operator <*> () ())))])
-   (check-equal? (p* "[() <*> () <+> ()]" r1)
-                 '[((#%chido-readtable-infix-operator <+> (#%chido-readtable-infix-operator <*> () ()) ()))])
-   (check-equal? (p* "[() <+> () <^> ()]" r1)
-                 '[((#%chido-readtable-infix-operator <+> () (#%chido-readtable-infix-operator <^> () ())))])
-   (check-equal? (p* "[() <^> () <+> ()]" r1)
-                 '[((#%chido-readtable-infix-operator <+> (#%chido-readtable-infix-operator <^> () ()) ()))])
+   (check se/datum?
+          (p*/r "[() <+> ()]" r1)
+          [list #'((#%chido-readtable-infix-operator <+> () ()))])
+   (check se/datum?
+          (p*/r "[() <+> () <+> ()]" r1)
+          [list #'((#%chido-readtable-infix-operator
+                    <+> (#%chido-readtable-infix-operator <+> () ())
+                    ()))])
+   (check se/datum?
+          (p*/r "[() <^> () <^> ()]" r1)
+          [list #'((#%chido-readtable-infix-operator
+                    <^> () (#%chido-readtable-infix-operator <^> () ())))])
+   (check se/datum?
+          (p*/r "[() <+> () <*> ()]" r1)
+          [list #'((#%chido-readtable-infix-operator <+> () (#%chido-readtable-infix-operator <*> () ())))])
+   (check se/datum?
+          (p*/r "[() <*> () <+> ()]" r1)
+          [list #'((#%chido-readtable-infix-operator <+> (#%chido-readtable-infix-operator <*> () ()) ()))])
+   (check se/datum?
+          (p*/r "[() <+> () <^> ()]" r1)
+          [list #'((#%chido-readtable-infix-operator <+> () (#%chido-readtable-infix-operator <^> () ())))])
+   (check se/datum?
+          (p*/r "[() <^> () <+> ()]" r1)
+          [list #'((#%chido-readtable-infix-operator <+> (#%chido-readtable-infix-operator <^> () ()) ()))])
 
 
-   (check-equal? (p* "[<low-prefix> a 1 2 3]" r1)
-                 '[((#%chido-readtable-prefix-operator <low-prefix> a) 1 2 3)])
-   (check-equal? (p* "[(testing 123) <+> (foo (bar))]" r1)
-                 '[((#%chido-readtable-infix-operator <+> (testing 123) (foo (bar))))])
+   (check se/datum?
+          (p*/r "[<low-prefix> a 1 2 3]" r1)
+          [list #'((#%chido-readtable-prefix-operator <low-prefix> a) 1 2 3)])
+   (check se/datum?
+          (p*/r "[(testing 123) <+> (foo (bar))]" r1)
+          [list #'((#%chido-readtable-infix-operator <+> (testing 123) (foo (bar))))])
 
-   (check-equal? (p* "[a <+> b 1 2 3]" r1)
-                 '[((#%chido-readtable-infix-operator <+> a b) 1 2 3)])
-   (check-equal? (p* "[a <low-postfix>]" r1)
-                 '[((#%chido-readtable-postfix-operator <low-postfix> a))])
-   (check-equal? (p* "[1 <+> 2 <+> 3 <+> 4]" r1)
-                 '[((#%chido-readtable-infix-operator
-                     <+>
-                     (#%chido-readtable-infix-operator <+>
-                                                       (#%chido-readtable-infix-operator <+> 1 2)
-                                                       3)
-                     4))])
-   (check-equal? (p* "[1 <+> 2 <*> 3]" r1)
-                 '[((#%chido-readtable-infix-operator <+> 1 (#%chido-readtable-infix-operator <*> 2 3)))])
-   (check-equal? (p* "[1 <*> 2 <+> 3]" r1)
-                 '[((#%chido-readtable-infix-operator <+> (#%chido-readtable-infix-operator <*> 1 2) 3))])
+   (check se/datum?
+          (p*/r "[a <+> b 1 2 3]" r1)
+          [list #'((#%chido-readtable-infix-operator <+> a b) 1 2 3)])
+   (check se/datum?
+          (p*/r "[a <low-postfix>]" r1)
+          [list #'((#%chido-readtable-postfix-operator <low-postfix> a))])
+   (check se/datum?
+          (p*/r "[1 <+> 2 <+> 3 <+> 4]" r1)
+          [list #'((#%chido-readtable-infix-operator
+                    <+>
+                    (#%chido-readtable-infix-operator <+>
+                                                      (#%chido-readtable-infix-operator <+> 1 2)
+                                                      3)
+                    4))])
+   (check se/datum?
+          (p*/r "[1 <+> 2 <*> 3]" r1)
+          [list #'((#%chido-readtable-infix-operator <+> 1 (#%chido-readtable-infix-operator <*> 2 3)))])
+   (check se/datum?
+          (p*/r "[1 <*> 2 <+> 3]" r1)
+          [list #'((#%chido-readtable-infix-operator <+> (#%chido-readtable-infix-operator <*> 1 2) 3))])
 
    ;;; operator deep precidence issue
-   (check-equal? (p* "[#t <+> <low-prefix> #f <+> #t]" r1)
-                 '[((#%chido-readtable-infix-operator
-                     <+>
-                     #t
-                     (#%chido-readtable-prefix-operator
-                      <low-prefix> (#%chido-readtable-infix-operator <+> #f #t))))])
-   (check-equal? (p* "[#f <+> #t <low-postfix> <+> #f]" r1)
-                 '[((#%chido-readtable-infix-operator
-                     <+>
-                     (#%chido-readtable-postfix-operator
-                      <low-postfix> (#%chido-readtable-infix-operator <+> #f #t))
-                     #f))])
+   (check se/datum?
+          (p*/r "[#t <+> <low-prefix> #f <+> #t]" r1)
+          [list #'((#%chido-readtable-infix-operator
+                    <+>
+                    #t
+                    (#%chido-readtable-prefix-operator
+                     <low-prefix> (#%chido-readtable-infix-operator <+> #f #t))))])
+   (check se/datum?
+          (p*/r "[#f <+> #t <low-postfix> <+> #f]" r1)
+          [list #'((#%chido-readtable-infix-operator
+                    <+>
+                    (#%chido-readtable-postfix-operator
+                     <low-postfix> (#%chido-readtable-infix-operator <+> #f #t))
+                    #f))])
 
    ;; check symbol blacklist that operators were added to
    (check-pred parse-failure?
-               (p* "<+>" r1))
+               (p*/d "<+>" r1))
 
-   (check-equal? (p* "some-symbol" r1)
-                 '[some-symbol])
+   (check se/datum?
+          (p*/r "some-symbol" r1)
+          [list #'some-symbol])
    (check-pred parse-failure?
-               (p* "some-symbol" r1/no-symbol))
+               (p*/d "some-symbol" r1/no-symbol))
 
 
 
@@ -1397,7 +1426,7 @@ This is an implementation of the same idea, but also adding support for operator
                ;(eprintf "out: ~a\n" out)
                (port->string port)
                #;(datum->syntax #f (cons '#%module-begin out)
-                              (list src-name #f #f #f #f))
+                                (list src-name #f #f #f #f))
                ;; consume the port -- not doing so seems to cause issues.
                out]
               [else

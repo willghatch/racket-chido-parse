@@ -8,7 +8,7 @@
   (require
    rackunit
    racket/stream
-   "private/test-util.rkt"
+   "private/test-util-2.rkt"
    ))
 
 #|

@@ -27,7 +27,7 @@
 (module+ test
   (require
    rackunit
-   "test-util.rkt"
+   "test-util-3.rkt"
    ))
 
 
@@ -278,9 +278,6 @@
 
 
 (module+ test
-  (define (->results ds)
-    (map parse-derivation-result (stream->list ds)))
-
   (define number-parser
     (proc-parser
      (λ (port)
@@ -300,24 +297,24 @@
     #:layout 'required
     ["a" [: #:ignore #t "b"] "c" #:name "test-name-1"]
     ["a" "a" "b"])
-  (check-equal? (->results (parse* (open-input-string "abc")
-                                   (chido-readtable->read1 test1)))
+  (check-equal? (p*/r "abc"
+                      (chido-readtable->read1 test1))
                 '(("a" "c")))
-  (check-equal? (->results (parse* (open-input-string "aab")
-                                   (chido-readtable->read1 test1)))
+  (check-equal? (p*/r  "aab"
+                       (chido-readtable->read1 test1))
                 '(("a" "a" "b")))
-  (check-equal? (->results (parse* (open-input-string "abbc")
-                                   (chido-readtable->read1 test1)))
+  (check-equal? (p*/r "abbc"
+                      (chido-readtable->read1 test1))
                 '())
 
-  (check-equal? (->results (parse* (open-input-string "a b c")
-                                   (chido-readtable->read1 test1/layout)))
+  (check-equal? (p*/r "a b c"
+                      (chido-readtable->read1 test1/layout))
                 '(("a" "c")))
-  (check-equal? (->results (parse* (open-input-string "a a b")
-                                   (chido-readtable->read1 test1/layout)))
+  (check-equal? (p*/r "a a b"
+                      (chido-readtable->read1 test1/layout))
                 '(("a" "a" "b")))
-  (check-equal? (->results (parse* (open-input-string "a b b c")
-                                   (chido-readtable->read1 test1/layout)))
+  (check-equal? (p*/r "a b b c"
+                      (chido-readtable->read1 test1/layout))
                 '())
 
   ;; check that naming works
@@ -344,41 +341,26 @@
     [test2 "++" #:precidence-less-than '("*") #:precidence-greater-than "+"]
     ["if" test2 "then" test2 "else" test2 #:precidence-less-than "+"])
 
-  (check-equal? (->results (parse* (open-input-string "n")
-                                   (chido-readtable->read1 test2)))
+  (check-equal? (p*/r "n"
+                      (chido-readtable->read1 test2))
                 '("n"))
-  (check-equal? (->results (whole-parse*
-                            (open-input-string "n+n+n")
-                            test2))
+  (check-equal? (wp*/r "n+n+n" test2)
                 '((("n" "+" "n") "+" "n")))
-  (check-equal? (->results (whole-parse*
-                            (open-input-string "n ++")
-                            test2))
+  (check-equal? (wp*/r "n ++" test2)
                 '(("n" "++")))
-  (check-equal? (->results (whole-parse*
-                            (open-input-string "n + n ++")
-                            test2))
+  (check-equal? (wp*/r "n + n ++" test2)
                 '(("n" "+" ("n" "++"))))
-  (check-equal? (->results (whole-parse*
-                            (open-input-string "n * n ++")
-                            test2))
+  (check-equal? (wp*/r "n * n ++" test2)
                 '((("n" "*" "n") "++")))
-  (check-equal? (->results (whole-parse* (open-input-string "n + n * n * n + n")
-                                         test2))
+  (check-equal? (wp*/r "n + n * n * n + n" test2)
                 '((("n" "+" (("n" "*" "n") "*" "n")) "+" "n")))
 
-  (check-equal? (->results (whole-parse*
-                            (open-input-string "if n then n else n")
-                            test2))
+  (check-equal? (wp*/r "if n then n else n" test2)
                 '(("if" "n" "then" "n" "else" "n")))
   ;; Optional space around operators is not as nice as required space.
-  (check-equal? (->results (whole-parse*
-                            (open-input-string "ifnthennelsen")
-                            test2))
+  (check-equal? (wp*/r "ifnthennelsen" test2)
                 '(("if" "n" "then" "n" "else" "n")))
-  (check-equal? (->results (whole-parse*
-                            (open-input-string "n + if n then n else n + n")
-                            test2))
+  (check-equal? (wp*/r "n + if n then n else n + n" test2)
                 '(("n" "+" ("if" "n" "then" "n" "else" ("n" "+" "n")))))
 
   )
@@ -532,21 +514,13 @@
                             #:precidence-greater-than '("+")]]
     [id ["x"]])
 
-  (check-equal? (->results (whole-parse*
-                            (open-input-string "pass")
-                            bnf-test-1))
+  (check-equal? (wp*/r "pass" bnf-test-1)
                 '("pass"))
-  (check-equal? (->results (whole-parse*
-                            (open-input-string "5 + 67 * 3")
-                            bnf-test-1))
+  (check-equal? (wp*/r "5 + 67 * 3" bnf-test-1)
                 '((5 "+" (67 "*" 3))))
-  (check-equal? (->results (whole-parse*
-                            (open-input-string "for x in 27 + 13 do { 555 * x }")
-                            bnf-test-1))
+  (check-equal? (wp*/r "for x in 27 + 13 do { 555 * x }" bnf-test-1)
                 '(("for" "x" "in" (27 "+" 13) "do" ("{" (555 "*" "x") "}"))))
-  (check-equal? (->results (whole-parse*
-                            (open-input-string "{ 5 6 7 }")
-                            bnf-test-1))
+  (check-equal? (wp*/r "{ 5 6 7 }" bnf-test-1)
                 '(("{" 5 6 7 "}")))
 
   (define bnf-test-2
@@ -559,9 +533,7 @@
                         #:precidence-greater-than '("*")]]
      [id]))
 
-  (check-equal? (->results (whole-parse*
-                            (open-input-string "{ pass break 2 + let x = 5 in 2 + 2 }")
-                            bnf-test-2))
+  (check-equal? (wp*/r "{ pass break 2 + let x = 5 in 2 + 2 }" bnf-test-2)
                 '(("{" "pass" "break" ((2 "+" ("let" "x" "=" 5 "in" 2)) "+" 2) "}")))
 
   )
@@ -682,40 +654,31 @@
                                                (parse-derivation-result first))))) ]])
 
   (check se/datum?
-         (->results (whole-parse* (open-input-string "a")
-                                  quick-simple))
+         (wp*/r "a" quick-simple)
          (list #'"a"))
   (check se/datum?
-         (->results (whole-parse* (open-input-string "q1")
-                                  quick-simple))
+         (wp*/r "q1" quick-simple)
          (list #'("q" "1")))
   (check se/datum?
-         (->results (whole-parse* (open-input-string "q")
-                                  quick-simple))
+         (wp*/r "q" quick-simple)
          (list #'("q")))
   (check se/datum?
-         (->results (whole-parse* (open-input-string "p2")
-                                  quick-simple))
+         (wp*/r "p2" quick-simple)
          (list #'("p" "2")))
   (check se/datum?
-         (->results (whole-parse* (open-input-string "p")
-                                  quick-simple))
+         (wp*/r "p" quick-simple)
          (list #'("p")))
   (check se/datum?
-         (->results (whole-parse* (open-input-string "(aa(ba)ba)")
-                                  quick-simple))
+         (wp*/r "(aa(ba)ba)" quick-simple)
          (list #'("a" "a" ("b" "a") "b" "a")))
   (check se/datum?
-         (->results (whole-parse* (open-input-string "a mirror a")
-                                  quick-simple))
+         (wp*/r "a mirror a" quick-simple)
          (list #'("a" "mirror" "a")))
   (check se/datum?
-         (->results (whole-parse* (open-input-string "a mirror b")
-                                  quick-simple))
+         (wp*/r "a mirror b" quick-simple)
          '())
   (check se/datum?
-         (->results (whole-parse* (open-input-string "#1#2#1#1#3")
-                                  quick-simple))
+         (wp*/r "#1#2#1#1#3" quick-simple)
          (list #'("#1" "#2" "#1" "#1" "#3")))
 
   (define-bnf/quick bnf-test-1/quick
@@ -732,45 +695,33 @@
     [id ["x"]])
 
   (check se/datum?
-         (->results (whole-parse* (open-input-string "pass")
-                     bnf-test-1/quick))
+         (wp*/r "pass" bnf-test-1/quick)
          (list #'"pass"))
 
   (check se/datum?
-         (->results (whole-parse*
-                     (open-input-string "53")
-                     bnf-test-1/quick))
+         (wp*/r "53" bnf-test-1/quick)
          (list #'53))
   (check se/datum?
-         (->results (whole-parse*
-                     (open-input-string "53 + 27")
-                     bnf-test-1/quick))
+         (wp*/r "53 + 27" bnf-test-1/quick)
          (list #'(53 "+" 27)))
 
   (check se/datum?
-         (->results (whole-parse*
-                     (open-input-string "5 + 67 * 3")
-                     bnf-test-1/quick))
+         (wp*/r "5 + 67 * 3" bnf-test-1/quick)
          (list #'(5 "+" (67 "*" 3))))
 
 
   (check se/datum?
-         (->results (whole-parse*
-                     (open-input-string "for x in 27 + 13 do { 555 * x }")
-                     bnf-test-1/quick))
+         (wp*/r "for x in 27 + 13 do { 555 * x }" bnf-test-1/quick)
          (list #'("for" "x" "in" (27 "+" 13) "do" ("{" (555 "*" "x") "}"))))
   (check se/datum?
-         (->results (whole-parse*
-                     (open-input-string "{ 5 6 7 }")
-                     bnf-test-1/quick))
+         (wp*/r "{ 5 6 7 }" bnf-test-1/quick)
          (list #'("{" 5 6 7 "}")))
 
   (define-bnf/quick with-subseq
     [an-arm ["a" @@ #("b" "c") + "d"]])
 
   (check se/datum?
-         (->results (whole-parse* (open-input-string "a b c b c b c d")
-                                  with-subseq))
+         (wp*/r "a b c b c b c d" with-subseq)
          (list #'("a" "b" "c" "b" "c" "b" "c" "d")))
 
   )

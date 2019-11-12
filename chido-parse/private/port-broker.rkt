@@ -378,7 +378,7 @@ A wrapped port should be able to give a handle to the broker it is wrapping.
 
 (module+ test
   (require rackunit)
-  (require "test-util.rkt")
+  (require "test-util-1.rkt")
 
 
   (define test-str
