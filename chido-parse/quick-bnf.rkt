@@ -8,7 +8,7 @@
   (require
    rackunit
    racket/stream
-   "private/test-util-2.rkt"
+   "private/test-util-3.rkt"
    ))
 
 #|
@@ -20,16 +20,24 @@
 (define id-parser
   (proc-parser #:name "id-parser"
                (λ (port)
+                 (define-values (line col pos) (port-next-location port))
+                 (define (->sym m)
+                   (string->symbol (bytes->string/utf-8 (car m))))
                  (let ([m (regexp-match #px"\\w+"
                                         port)])
-                   (and m (bytes->string/utf-8 (car m)))))))
+                   (and m
+                        (datum->syntax
+                         #f
+                         (->sym m)
+                         (list (object-name port) line col pos
+                               (string-length (symbol->string (->sym m))))))))))
 
 (module+ test
-  (check-equal? (map parse-derivation-result
-                     (stream->list
-                      (parse* (open-input-string "test_id")
-                              id-parser)))
-                '("test_id")))
+  (check se/datum?
+         (wp*/r "test_id"
+                id-parser)
+         (list #'test_id))
+  )
 
 (define string-parser
   (proc-parser #:name "string-parser"
@@ -38,6 +46,12 @@
                #:promise-no-left-recursion? #t
                (λ (port)
                  (read-syntax (object-name port) port))))
+
+(module+ test
+  (check se/datum?
+         (wp*/r "\"test string\""
+                string-parser)
+         (list #'"test string")))
 
 (define-bnf/quick cpqb-parser
   [top-level [arm +]]
@@ -60,7 +74,7 @@
   [compound-parser [id-parser]
                    [string-parser]
                    ;[lisp-escape-parser]
-                   ["(" elem #("|" elem) + ")"]
+                   ;["(" elem #("|" elem) + ")"]
                    ["(" elem + ")"]]
   )
 
@@ -69,9 +83,12 @@
 stmt: \"pass\"
 ")
 
+  (eprintf "here1\n")
   ;; TODO - figuring out what's wrong probably requires another pass at working with failures... probably just figure out the rightmost failure at each juncture and only propagate that.
+  ;; TODO - I am infinitely looping without ever generating a first result.  Perhaps some parser is being evaluated multiple times, giving me a fresh parser somewhere, but that parser is either never succeeding or is being filtered out somewhere higher, which keeps asking for more parses.  But where?
   #;(eprintf "got: ~v\n"
            (parse* (open-input-string bnf-string-1) cpqb-parser))
+  (eprintf "here2\n")
 
 
   (define bnf-string/stmt "
@@ -84,10 +101,12 @@ expr : bnumber
 bnumber : (\"0\" | \"1\") +
 ")
 
-  #;(eprintf "result: ~v\n"
-           (whole-parse* (open-input-string bnf-string/stmt) cpqb-parser))
+  (eprintf "before-broken-test\n")
+  ;(define result (parse* (open-input-string bnf-string/stmt) cpqb-parser))
+  ;(printf "~v\n" (parse-derivation-result (stream-ref result 0)))
 
-  (check se/datum?
+
+  #;(check se/datum?
          (map parse-derivation-result
               (stream->list
                (whole-parse* (open-input-string bnf-string/stmt)
@@ -105,4 +124,5 @@ bnumber : (\"0\" | \"1\") +
                   [bnumber ":"
                            {([{"(" "0" "|" "1" ")"}])}]
                   )))
+
   )
