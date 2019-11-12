@@ -639,19 +639,21 @@
 (module+ test
 
   (define-bnf/quick quick-simple
-    [thing [(as-syntax "a")]
-           [(as-syntax "b")]
-           [/ "(" @ thing * / ")"]
-           [thing "badmirror" thing]
-           ["q" @ "1" *]
-           ["p" @ "2" ?]
-           [@ (|| "#1" "#2") + "#3"]
-           [first = thing "mirror" (result-filter
-                                    thing
-                                    (λ (r)
-                                      (equal? (syntax->datum r)
-                                              (syntax->datum
-                                               (parse-derivation-result first))))) ]])
+    [stmt [expr]
+          ["FOR" "foo" "in" expr "do" stmt]]
+    [expr [(as-syntax "a")]
+          [(as-syntax "b")]
+          [/ "(" @ expr * / ")"]
+          [expr "badmirror" expr]
+          ["q" @ "1" *]
+          ["p" @ "2" ?]
+          [@ (|| "#1" "#2") + "#3"]
+          [first = expr "mirror" (result-filter
+                                  expr
+                                  (λ (r)
+                                    (equal? (syntax->datum r)
+                                            (syntax->datum
+                                             (parse-derivation-result first))))) ]])
 
   (check se/datum?
          (wp*/r "a" quick-simple)
@@ -680,6 +682,10 @@
   (check se/datum?
          (wp*/r "#1#2#1#1#3" quick-simple)
          (list #'("#1" "#2" "#1" "#1" "#3")))
+  (check se/datum?
+         (wp*/r "FOR foo in q1111 do FOR foo in #1#1#3 do (a b)" quick-simple)
+         (list #'("FOR" "foo" "in" ("q" "1" "1" "1" "1") "do"
+                        ("FOR" "foo" "in" ("#1" "#1" "#3") "do" ("a" "b")))))
 
   (define-bnf/quick bnf-test-1/quick
     [statement ["pass"]
