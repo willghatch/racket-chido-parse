@@ -56,7 +56,11 @@
 (define-bnf/quick cpqb-parser
   [top-level [arm +]]
   [arm [id-parser ":" alt-sequence]]
-  [alt-sequence [alt @ #(/ "|" alt) +]]
+  [alt-sequence [alt @ #(/ "|" alt)
+                       ;+
+                       ;; * is correct, but + is making it do an infinite loop, and I want to know why.
+                       *
+                       ]]
   [alt [elem + alt-flag *]]
   [alt-flag ["&" (|| "left" "right")]
             ;; TODO - associativity groups
@@ -86,7 +90,7 @@ stmt: \"pass\"
   (eprintf "here1\n")
   ;; TODO - figuring out what's wrong probably requires another pass at working with failures... probably just figure out the rightmost failure at each juncture and only propagate that.
   ;; TODO - I am infinitely looping without ever generating a first result.  Perhaps some parser is being evaluated multiple times, giving me a fresh parser somewhere, but that parser is either never succeeding or is being filtered out somewhere higher, which keeps asking for more parses.  But where?
-  #;(eprintf "got: ~v\n"
+  (eprintf "got: ~v\n"
            (parse* (open-input-string bnf-string-1) cpqb-parser))
   (eprintf "here2\n")
 
@@ -102,8 +106,8 @@ bnumber : (\"0\" | \"1\") +
 ")
 
   (eprintf "before-broken-test\n")
-  ;(define result (parse* (open-input-string bnf-string/stmt) cpqb-parser))
-  ;(printf "~v\n" (parse-derivation-result (stream-ref result 0)))
+  (define result (whole-parse* (open-input-string bnf-string/stmt) cpqb-parser))
+  (printf "~v\n" (parse-derivation-result (stream-ref result 0)))
 
 
   #;(check se/datum?
