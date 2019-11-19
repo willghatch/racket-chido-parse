@@ -148,7 +148,7 @@
          (define rt2
            (for/fold ([rt rt1])
                      ([parser (~? layout-parsers bnf-default-layout-parsers)])
-             (extend-chido-readtable rt 'layout parser)))
+             (extend-chido-readtable rt 'terminating-layout parser)))
 
          (define rt3 (readtable-extend-as-bnf-arm rt2
                                                   #:result/stx use-result/stx?

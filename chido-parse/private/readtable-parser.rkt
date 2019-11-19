@@ -13,10 +13,8 @@ This is an implementation of the same idea, but also adding support for operator
   [empty-chido-readtable chido-readtable?]
   [extend-chido-readtable
    (->* (chido-readtable?
-         (or/c 'terminating 'soft-terminating
-               'nonterminating 'layout
-               ;; TODO - I need soft-layout and hard-layout -- like soft-terminating and hard-terminating, one terminates by prefix, the other by successful parse.  Currently layout acts like soft-layout should.
-               ;;   -- probably I should change the names to: hard-terminating, soft-terminating, non-terminating, hard-layout, soft-layout, and left-recursive.
+         (or/c 'terminating 'soft-terminating 'nonterminating
+               'terminating-layout 'soft-terminating-layout 'nonterminating-layout
                'left-recursive-nonterminating)
          ;; parser...
          any/c)
@@ -90,8 +88,12 @@ This is an implementation of the same idea, but also adding support for operator
    terminating-parsers
    soft-terminating-parsers
    nonterminating-parsers
+
    left-recursive-nonterminating-parsers
-   layout-parsers
+
+   terminating-layout-parsers
+   soft-terminating-layout-parsers
+   nonterminating-layout-parsers
 
    ;;; Options
 
@@ -137,7 +139,9 @@ This is an implementation of the same idea, but also adding support for operator
    [terminating-trie #:mutable]
    [soft-terminating-trie #:mutable]
    [nonterminating-trie #:mutable]
-   [layout-trie #:mutable]
+   [terminating-layout-trie #:mutable]
+   [soft-terminating-layout-trie #:mutable]
+   [nonterminating-layout-trie #:mutable]
 
    ;; These exist to ensure parsers created with chido-readtable are always eq?
    [symbol-parser #:mutable]
@@ -168,7 +172,7 @@ This is an implementation of the same idea, but also adding support for operator
 (define empty-chido-readtable
   (chido-readtable
    ;; core parsers
-   '() '() '() '() '()
+   '() '() '() '() '() '() '()
 
    ;;; options
 
@@ -215,6 +219,8 @@ This is an implementation of the same idea, but also adding support for operator
    empty-trie
    empty-trie
    empty-trie
+   empty-trie
+   empty-trie
    ;; parsers
    #f #f #f #f #f #f #f #f
    ;; precidence-transitive-greater-relations
@@ -236,7 +242,7 @@ This is an implementation of the same idea, but also adding support for operator
                                 #:associativity [associativity #f]
                                 #:symbol-blacklist [symbol-blacklist #f]
                                 )
-  ;; extension-type is 'terminating, 'soft-terminating, 'nonterminating, 'left-recursive-nonterminating,  or 'layout
+  ;; extension-type is 'terminating, 'soft-terminating, 'nonterminating, 'left-recursive-nonterminating,  'terminating-layout, 'soft-terminating-layout, or 'nonterminating-layout
   ;; operator is #f, 'infix, 'prefix, or 'postfix
   ;; associativity is #f, 'left, or 'right
   ;; precidence lists are for names of other operators that are immediately greater or lesser in the precidence lattice.
@@ -244,7 +250,9 @@ This is an implementation of the same idea, but also adding support for operator
   ;; TODO - maybe symbol-blacklist doesn't belong here, but its primary motivation is to blacklist operator names...
 
   #| TODO - make extension-type a keyword argument, make the default nonterminating? |#
-  (when (and (eq? 'layout extension-type)
+  (when (and (member extension-type '(terminating-layout
+                                      soft-terminating-layout
+                                      nonterminating-layout))
              operator)
     (error 'extend-chido-readtable
            "can't add operator parsers to layout parsers"))
@@ -283,12 +291,26 @@ This is an implementation of the same idea, but also adding support for operator
         [left-recursive-nonterminating-parsers
          (cons parser (chido-readtable-left-recursive-nonterminating-parsers rt))]
         [flush-state? #t])]
-      ['layout
+      ['terminating-layout
        (struct-copy
         chido-readtable
         rt
-        [layout-parsers
-         (cons parser (chido-readtable-layout-parsers rt))]
+        [terminating-layout-parsers
+         (cons parser (chido-readtable-terminating-layout-parsers rt))]
+        [flush-state? #t])]
+      ['soft-terminating-layout
+       (struct-copy
+        chido-readtable
+        rt
+        [soft-terminating-layout-parsers
+         (cons parser (chido-readtable-soft-terminating-layout-parsers rt))]
+        [flush-state? #t])]
+      ['nonterminating-layout
+       (struct-copy
+        chido-readtable
+        rt
+        [nonterminating-layout-parsers
+         (cons parser (chido-readtable-nonterminating-layout-parsers rt))]
         [flush-state? #t])]))
   (define pre-op
     (match symbol-blacklist
@@ -403,13 +425,22 @@ This is an implementation of the same idea, but also adding support for operator
     (set-chido-readtable-nonterminating-trie!
      rt
      (parser-list->trie nonterminating/wrap))
-    (set-chido-readtable-symbol-parser! rt (symbol/number-parser rt))
-    (set-chido-readtable-layout-trie!
+    (set-chido-readtable-terminating-layout-trie!
      rt
-     (parser-list->trie (chido-readtable-layout-parsers rt)))
+     (parser-list->trie (chido-readtable-terminating-layout-parsers rt)))
+    (set-chido-readtable-soft-terminating-layout-trie!
+     rt
+     (parser-list->trie (chido-readtable-soft-terminating-layout-parsers rt)))
+    (set-chido-readtable-nonterminating-layout-trie!
+     rt
+     (parser-list->trie (chido-readtable-nonterminating-layout-parsers rt)))
+    (set-chido-readtable-symbol-parser! rt (symbol/number-parser rt))
     (set-chido-readtable-layout1-parser!
      rt (make-alt-parser "chido-readtable-layout1"
-                         (chido-readtable-layout-parsers rt)))
+                         (append
+                          (chido-readtable-terminating-layout-parsers rt)
+                          (chido-readtable-soft-terminating-layout-parsers rt)
+                          (chido-readtable-nonterminating-layout-parsers rt))))
     (set-chido-readtable-layout*-parser!
      rt (kleene-star (chido-readtable-layout1-parser rt)
                      #:derive (λ (elems) (make-parse-derivation
@@ -455,7 +486,10 @@ This is an implementation of the same idea, but also adding support for operator
                           soft-terminating/wrap
                           terminating/wrap
                           left-recursive-nonterminating/wrap
-                          (chido-readtable-layout-parsers rt))))))
+                          (chido-readtable-terminating-layout-parsers rt)
+                          (chido-readtable-soft-terminating-layout-parsers rt)
+                          (chido-readtable-nonterminating-layout-parsers rt)
+                          )))))
     (set-chido-readtable-layout*+read1-parser!
      rt
      (sequence
@@ -535,8 +569,10 @@ This is an implementation of the same idea, but also adding support for operator
   ;; where n is the prefix length of trie that has matched so far.
   (define (rec/main len hard-trie-pairs soft-trie-pairs)
     ;; The trie pairs always come in sorted by prefix length matched, small to large.
-    (define new-hard-tries (cons (cons (chido-readtable-terminating-trie rt) 0)
-                                 hard-trie-pairs))
+    (define new-hard-tries (list*
+                            (cons (chido-readtable-terminating-trie rt) 0)
+                            (cons (chido-readtable-terminating-layout-trie rt) 0)
+                            hard-trie-pairs))
     (define hard-delimited-lengths
       (filter-map (λ (tp) (and (not (trie-bare? (car tp)))
                                (cdr tp)))
@@ -548,7 +584,7 @@ This is an implementation of the same idea, but also adding support for operator
                                      (car (reverse hard-delimited-lengths))))
     (define new-soft-tries
       (append (list (cons (chido-readtable-soft-terminating-trie rt) 0)
-                    (cons (chido-readtable-layout-trie rt) 0))
+                    (cons (chido-readtable-soft-terminating-layout-trie rt) 0))
               soft-trie-pairs))
     (define soft-delimit-pairs-to-try
       (reverse
@@ -1157,13 +1193,15 @@ This is an implementation of the same idea, but also adding support for operator
       (chido-readtable-add-mixfix-operator
        (chido-readtable-add-raw-string-parser
         (chido-readtable-add-raw-string-parser
-         (chido-readtable-add-raw-string-parser
-          (chido-readtable-add-list-parser
+         (chido-readtable-add-list-parser
+          (chido-readtable-add-raw-string-parser
            (chido-readtable-add-list-parser
-            (chido-readtable-add-list-parser empty-chido-readtable "(" ")")
-            "[" "]")
-           "$(" ")" #:wrapper '#%dollar-paren)
-          "#|" "|#" #:readtable-add-type 'layout)
+            (chido-readtable-add-list-parser
+             (chido-readtable-add-list-parser empty-chido-readtable "(" ")")
+             "[" "]")
+            "$(" ")" #:wrapper '#%dollar-paren)
+           "#|" "|#" #:readtable-add-type 'terminating-layout)
+          "##{" "}##" #:readtable-add-type 'terminating-layout)
          "<<" ">>")
         "!!" "!!")
        "_<+>_" #:associativity 'left)
@@ -1190,11 +1228,12 @@ This is an implementation of the same idea, but also adding support for operator
      'nonterminating (make-<two>-parser)
      'nonterminating (make-<two>-parser)
      'nonterminating (make-<two/alt>-parser)
-     'layout " "
-     'layout "\n"
-     'layout "\t"
-     'layout (make-quote-parser "#;" 'quote)
-     'layout (make-line-comment-parser ";")
+     'terminating-layout " "
+     'terminating-layout "\n"
+     'terminating-layout "\t"
+     ;; creative use of string-append to get emacs to color properly...
+     'nonterminating-layout (make-quote-parser (string-append "#" ";")'comment-quote)
+     'terminating-layout (make-line-comment-parser ";")
      )
     )
 
@@ -1234,6 +1273,13 @@ This is an implementation of the same idea, but also adding support for operator
    (check se/datum? (p*/r "( testing)" r1) (list #'(testing)))
    (check se/datum? (p*/r "(testing )" r1) (list #'(testing)))
    (check se/datum? (p*/r "( testing )" r1) (list #'(testing)))
+   (check se/datum? (p*/r "( testing #|in comment here|# foo)" r1)
+          (list #'(testing foo)))
+   (check se/datum? (p*/r "( testing ##{testing (a b c) foo}## foo)" r1)
+          (list #'(testing foo)))
+   (check-pred parse-failure?
+               (parse* (open-input-string "(here ##{w/ unbalanced (parens}## after)")
+                       r1))
    (define s1 "(hello ( goodbye () ( ( ) ) ) bandicoot kangaroo ( aardvark   ))")
    (check se/datum?
           (p*/r s1 r1)
@@ -1267,7 +1313,6 @@ This is an implementation of the same idea, but also adding support for operator
           (p*/r "(hello `(foo ,bar ,(#:testing #t #f #;(quoted #t))))" r1)
           (list #'(hello `(foo ,bar ,(#:testing #t #f)))))
 
-   ;; TODO - I need to add a follow filter or something here...
    (check se/datum?
           (p*/r "`(hello ,@foo)" r1)
           (list #'`(hello ,@foo)))
@@ -1389,8 +1434,8 @@ This is an implementation of the same idea, but also adding support for operator
           "[" "]")
          "{" "}")
         "«" "»")
-       "#|" "|#" #:readtable-add-type 'layout)
-      "##{" "}##" #:readtable-add-type 'layout
+       "#|" "|#" #:readtable-add-type 'terminating-layout)
+      "##{" "}##" #:readtable-add-type 'terminating-layout
       )
      'nonterminating hash-t-parser
      'nonterminating hash-f-parser
@@ -1404,12 +1449,12 @@ This is an implementation of the same idea, but also adding support for operator
      'terminating (make-quote-parser (follow-filter "#," "@") 'unsyntax)
      'terminating (make-quote-parser "#,@" 'unsyntax-splicing)
      'terminating (make-keyword-parser "#:")
-     'layout " "
-     'layout "\n"
-     'layout "\t"
+     'terminating-layout " "
+     'terminating-layout "\n"
+     'terminating-layout "\t"
      ;; creative use of string-append to get emacs to color properly...
-     'layout (make-quote-parser (string-append "#" ";")'comment-quote)
-     'layout (make-line-comment-parser ";")
+     'nonterminating-layout (make-quote-parser (string-append "#" ";")'comment-quote)
+     'terminating-layout (make-line-comment-parser ";")
      ))
 
   (module+ read-syntax-proc
