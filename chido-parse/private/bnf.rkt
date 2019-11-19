@@ -563,6 +563,7 @@
                               (~datum &)
                               (~datum <)
                               (~datum >)
+                              (~datum ::)
                               (~datum ||)
                               at-seq:ats))
                    parser-given:expr)))
@@ -607,13 +608,15 @@
               (~or (~optional (~seq (~datum &) assoc:expr))
                    (~optional (~seq (~datum >) pgt:expr))
                    (~optional (~seq (~datum <) plt:expr))
+                   (~optional (~seq (~datum ::) result:expr))
                    )
               ...]
              #:attr nonquick #'[elem.nonquick
                                 ...
                                 (~? (~@ #:associativity assoc))
                                 (~? (~@ #:precidence-greater-than pgt))
-                                (~? (~@ #:precidence-less-than plt))]))
+                                (~? (~@ #:precidence-less-than plt))
+                                (~? (~@ #:result/stx result))]))
   )
 
 (define-syntax (define-bnf/quick stx)
@@ -643,7 +646,7 @@
           ["FOR" "foo" "in" expr "do" stmt]]
     [expr [(as-syntax "a")]
           [(as-syntax "b")]
-          [/ "(" @ expr * / ")"]
+          [/ "(" @ expr * / ")" :: (λ args (cons 'LIST args))]
           [expr "badmirror" expr]
           ["q" @ "1" *]
           ["p" @ "2" ?]
@@ -676,7 +679,7 @@
          (list #'("r")))
   (check se/datum?
          (wp*/r "r3(p)" quick-simple)
-         (list #'("r" (("p")))))
+         (list #'("r" ((LIST "p")))))
   (check se/datum?
          (wp*/r "r3p" quick-simple)
          (list #'("r" ("p"))))
@@ -685,7 +688,7 @@
          (list #'("r" ("p" "2") ("p") ("p" "2"))))
   (check se/datum?
          (wp*/r "(aa(ba)ba)" quick-simple)
-         (list #'("a" "a" ("b" "a") "b" "a")))
+         (list #'(LIST "a" "a" (LIST "b" "a") "b" "a")))
   (check se/datum?
          (wp*/r "a mirror a" quick-simple)
          (list #'("a" "mirror" "a")))
@@ -701,7 +704,7 @@
   (check se/datum?
          (wp*/r "FOR foo in q1111 do FOR foo in #1#1#3 do (a b)" quick-simple)
          (list #'("FOR" "foo" "in" ("q" "1" "1" "1" "1") "do"
-                        ("FOR" "foo" "in" ("#1" "#1" "#3") "do" ("a" "b")))))
+                        ("FOR" "foo" "in" ("#1" "#1" "#3") "do" (LIST "a" "b")))))
 
   (define-bnf/quick bnf-test-1/quick
     [statement ["pass"]
