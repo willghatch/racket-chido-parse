@@ -2,6 +2,7 @@
 (require
  "private/core.rkt"
  "private/procedural-combinators.rkt"
+ "private/readtable-parser.rkt"
  "private/bnf.rkt"
  )
 (module+ test
@@ -23,20 +24,24 @@
                  (define-values (line col pos) (port-next-location port))
                  (define (->sym m)
                    (string->symbol (bytes->string/utf-8 (car m))))
-                 (let ([m (regexp-match #px"\\w+"
+                 (let ([m (regexp-match #px"^\\w+"
                                         port)])
-                   (and m
-                        (datum->syntax
-                         #f
-                         (->sym m)
-                         (list (object-name port) line col pos
-                               (string-length (symbol->string (->sym m))))))))))
+                   (if m
+                       (datum->syntax
+                        #f
+                        (->sym m)
+                        (list (object-name port) line col pos
+                              (string-length (symbol->string (->sym m)))))
+                       (make-parse-failure))))))
 
 (module+ test
   (check se/datum?
          (wp*/r "test_id"
                 id-parser)
          (list #'test_id))
+  ;; I originally forgot to put the ^ on the regexp...
+  (check-pred parse-failure?
+              (parse* (open-input-string "\"stringtest\"") id-parser))
   )
 
 (define string-parser
@@ -54,13 +59,10 @@
          (list #'"test string")))
 
 (define-bnf/quick cpqb-parser
+  [top-level-with-layout [/ current-chido-readtable-layout*-parser @ top-level / current-chido-readtable-layout*-parser]]
   [top-level [arm +]]
   [arm [id-parser ":" alt-sequence]]
-  [alt-sequence [alt @ #(/ "|" alt)
-                       ;+
-                       ;; * is correct, but + is making it do an infinite loop, and I want to know why.
-                       *
-                       ]]
+  [alt-sequence [alt @ #(/ "|" alt) *]]
   [alt [elem + alt-flag *]]
   [alt-flag ["&" (|| "left" "right")]
             ;; TODO - associativity groups
@@ -86,13 +88,10 @@
   (define bnf-string-1 "
 stmt: \"pass\"
 ")
+  (check se/datum?
+         (wp*/r bnf-string-1 cpqb-parser)
+         (list #'([stmt ":" (( (("pass")) ()))])))
 
-  (eprintf "here1\n")
-  ;; TODO - figuring out what's wrong probably requires another pass at working with failures... probably just figure out the rightmost failure at each juncture and only propagate that.
-  ;; TODO - I am infinitely looping without ever generating a first result.  Perhaps some parser is being evaluated multiple times, giving me a fresh parser somewhere, but that parser is either never succeeding or is being filtered out somewhere higher, which keeps asking for more parses.  But where?
-  (eprintf "got: ~v\n"
-           (parse* (open-input-string bnf-string-1) cpqb-parser))
-  (eprintf "here2\n")
 
 
   (define bnf-string/stmt "
@@ -101,16 +100,14 @@ stmt : \"pass\"
      | \"{\" stmt + \"}\"
 expr : bnumber
      | expr \"+\" expr & left
-     | expr \"*\" expr & left > +
+     | expr \"*\" expr & left > \"+\"
 bnumber : (\"0\" | \"1\") +
 ")
 
-  (eprintf "before-broken-test\n")
   (define result (whole-parse* (open-input-string bnf-string/stmt) cpqb-parser))
-  (printf "~v\n" (parse-derivation-result (stream-ref result 0)))
 
 
-  #;(check se/datum?
+  (check se/datum?
          (map parse-derivation-result
               (stream->list
                (whole-parse* (open-input-string bnf-string/stmt)
