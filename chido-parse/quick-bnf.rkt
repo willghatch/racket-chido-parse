@@ -58,11 +58,17 @@
                 string-parser)
          (list #'"test string")))
 
+#|
+TODO - I want a way to add symbols to the RESULT without having them in the PARSE.
+Eg. [/"(" % ELEM-LIST @ elem + /")"]
+-- after % it reads an item to be included verbatim in the list.
+|#
+
 (define-bnf/quick cpqb-parser
   [top-level-with-layout [/ current-chido-readtable-layout*-parser @ top-level / current-chido-readtable-layout*-parser]]
   [top-level [arm +]]
-  [arm [id-parser ":" alt-sequence]]
-  [alt-sequence [alt @ #(/ "|" alt) *]]
+  [arm [id-parser ":" @ alt-sequence]]
+  [alt-sequence [alt @@ #(/ "|" alt) *]]
   [alt [elem + alt-flag *]]
   [alt-flag ["&" (|| "left" "right")]
             ;; TODO - associativity groups
@@ -80,8 +86,8 @@
   [compound-parser [id-parser]
                    [string-parser]
                    ;[lisp-escape-parser]
-                   ;["(" elem #("|" elem) + ")"]
-                   ["(" elem + ")"]]
+                   ["(" @ elem @@@ #(/ "|" elem) + ")"]
+                   [/ "(" @ elem + / ")"]]
   )
 
 (module+ test
@@ -90,7 +96,7 @@ stmt: \"pass\"
 ")
   (check se/datum?
          (wp*/r bnf-string-1 cpqb-parser)
-         (list #'([stmt ":" (( (("pass")) ()))])))
+         (list #'([stmt ":" [(("pass")) ()]])))
 
 
 
@@ -110,20 +116,19 @@ bnumber : (\"0\" | \"1\") +
   (check se/datum?
          (map parse-derivation-result
               (stream->list
-               (whole-parse* (open-input-string bnf-string/stmt)
+               (whole-parse* (open-input-string bnf-string/stmt   "aaaaaaaaaaaaaaaA")
                              cpqb-parser)))
          (list #'([stmt ":"
                         {(["pass"]) ()}
                         {([expression]) ()}
-                        {(["{"] [stmt "+"] ["}"]) ()}
-                        ]
+                        {(["{"] [stmt "+"] ["}"]) ()}]
                   [expr ":"
                         {([bnumber]) ()}
                         {([expr] ["+"] [expr]) (["&" "left"])}
                         {([expr] ["*"] [expr]) (["&" "left"] [">" "+"])}
                         ]
                   [bnumber ":"
-                           {([{"(" "0" "|" "1" ")"}])}]
+                           {([("(" "0" "1" ")") "+"]) ()}]
                   )))
 
   )
