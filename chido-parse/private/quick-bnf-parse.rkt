@@ -1,17 +1,22 @@
 #lang racket/base
+
+(provide
+ (rename-out [cpqb-parser quick-bnf-parser]))
+
+
 (require
- "private/core.rkt"
- "private/procedural-combinators.rkt"
- "private/bnf.rkt"
- "private/readtable-parser.rkt"
+ "core.rkt"
+ "procedural-combinators.rkt"
+ "bnf.rkt"
+ "readtable-parser.rkt"
  ;; TODO - use the “default” chido-parse s-exp readtable, which I should make...
- (submod "private/readtable-parser.rkt" an-s-exp-readtable)
+ (submod "readtable-parser.rkt" an-s-exp-readtable)
  )
 (module+ test
   (require
    rackunit
    racket/stream
-   "private/test-util-3.rkt"
+   "test-util-3.rkt"
    ))
 
 #|
@@ -78,17 +83,17 @@
             [">" (|| string-parser
                      #(/"(" string-parser + /")"))]
             ["::" default-s-exp-parser]]
-  [elem [@ #(id-parser "=") ?
-         @ "/" ?
-         @ "@" *
+  [elem [#(id-parser "=") ?
+         "/" ?
+         "@" *
          compound-parser
-         @ "?" ?
-         @ "*" ?
-         @ "+" ?]]
+         "?" ?
+         "*" ?
+         "+" ?]]
   [compound-parser [id-parser]
                    [string-parser]
                    [lisp-escape-parser]
-                   [/ "(" @ elem @@@ #(/ "|" elem) + / ")"
+                   [/ "(" elem @@ #(/ "|" elem) + / ")"
                       :: (λ elems (cons 'ELEM-ALT elems))]
                    [/ "(" @ elem + / ")"
                       :: (λ elems (cons 'ELEM-LIST elems))]]
@@ -100,13 +105,13 @@ stmt: \"pass\"
 ")
   (check se/datum?
          (wp*/r bnf-string-1 cpqb-parser)
-         (list #'([stmt ":" [(("pass")) ()]])))
+         (list #'([stmt ":" [((() () () "pass" () () ())) ()]])))
 
 
 
   (define bnf-string/stmt "
 stmt : \"pass\"
-     | expression
+     | expr
      | \"{\" stmt + \"}\"
 expr : bnumber
      | expr \"+\" expr & left
@@ -120,19 +125,34 @@ bnumber : (\"0\" | \"1\") +
   (check se/datum?
          (map parse-derivation-result
               (stream->list
-               (whole-parse* (open-input-string bnf-string/stmt   "aaaaaaaaaaaaaaaA")
+               (whole-parse* (open-input-string bnf-string/stmt
+                                                ;; use this name to make it easy to compare syntax output when they differ -- it's the same length
+                                                "aaaaaaaaaaaaaaaaaaaaaA")
                              cpqb-parser)))
          (list #'([stmt ":"
-                        {(["pass"]) ()}
-                        {([expression]) ()}
-                        {(["{"] [stmt "+"] ["}"]) ()}]
+                        {([() () () "pass" () () ()]) ()}
+                        {([() () () expr () () ()]) ()}
+                        {([() () () "{" () () ()]
+                          [() () () stmt () () ("+")]
+                          [() () () "}" () () ()])
+                         ()}]
                   [expr ":"
-                        {([bnumber]) ()}
-                        {([expr] ["+"] [expr]) (["&" "left"])}
-                        {([expr] ["*"] [expr]) (["&" "left"] [">" "+"])}
+                        {([() () ()  bnumber () () ()]) ()}
+                        {([() () () expr () () ()]
+                          [() () () "+" () () ()]
+                          [() () () expr () () ()])
+                         (["&" "left"])}
+                        {([() () () expr () () ()]
+                          [() () () "*" () () ()]
+                          [() () () expr () () ()])
+                         (["&" "left"] [">" "+"])}
                         ]
                   [bnumber ":"
-                           {([(ELEM-ALT "0" "1") "+"]) ()}]
+                           {([() () () (ELEM-ALT [() () () "0" () () ()]
+                                                 [() () () "1" () () ()]
+                                                 )
+                                 () () ("+")]) ()}]
                   )))
 
   )
+
