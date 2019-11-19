@@ -56,6 +56,11 @@ This is an implementation of the same idea, but also adding support for operator
  chido-readtable-add-mixfix-operators
  current-chido-readtable
 
+ current-chido-readtable-read1-parser
+ current-chido-readtable-layout*-parser
+ current-chido-readtable-layout+-parser
+ current-chido-readtable-symbol-parser
+
  ;; TODO - maybe not these?
  hash-t-parser
  hash-f-parser
@@ -637,18 +642,18 @@ This is an implementation of the same idea, but also adding support for operator
   (proc-parser
    #:name name
    (λ (port) (parse* port (extractor (current-chido-readtable))))))
-(define current-readtable-read1-parser
+(define current-chido-readtable-read1-parser
   (make-current-readtable-x-parser chido-readtable->read1
-                                   "current-readtable-read1-parser"))
-(define current-readtable-symbol-parser
+                                   "current-chido-readtable-read1-parser"))
+(define current-chido-readtable-symbol-parser
   (make-current-readtable-x-parser chido-readtable->symbol
-                                   "current-readtable-symbol-parser"))
-(define current-readtable-layout*-parser
+                                   "current-chido-readtable-symbol-parser"))
+(define current-chido-readtable-layout*-parser
   (make-current-readtable-x-parser chido-readtable->layout*
-                                   "current-readtable-layout*-parser"))
-(define current-readtable-layout+-parser
+                                   "current-chido-readtable-layout*-parser"))
+(define current-chido-readtable-layout+-parser
   (make-current-readtable-x-parser chido-readtable->layout+
-                                   "current-readtable-layout+-parser"))
+                                   "current-chido-readtable-layout+-parser"))
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -845,11 +850,11 @@ This is an implementation of the same idea, but also adding support for operator
 
 (define hash-t-parser
   (wrap-derivation (follow-filter "#t"
-                                  current-readtable-symbol-parser)
+                                  current-chido-readtable-symbol-parser)
                    (λ(x)(mk-stx #t x))))
 (define hash-f-parser
   (wrap-derivation (follow-filter "#f"
-                                  current-readtable-symbol-parser)
+                                  current-chido-readtable-symbol-parser)
                    (λ(x)(mk-stx #f x))))
 
 (define post-quote-read-1
@@ -1010,18 +1015,18 @@ This is an implementation of the same idea, but also adding support for operator
            name-str))
 
   (define parsers/no-layout (map (λ (s) (if (equal? "" s)
-                                            current-readtable-read1-parser
+                                            current-chido-readtable-read1-parser
                                             s))
                                  name-split))
   (define parsers
     (match layout
       ['required (flatten
                   (cons (car parsers/no-layout)
-                        (map (λ (p) (list current-readtable-layout+-parser p))
+                        (map (λ (p) (list current-chido-readtable-layout+-parser p))
                              (cdr parsers/no-layout))))]
       ['optional (flatten
                   (cons (car parsers/no-layout)
-                        (map (λ (p) (list current-readtable-layout*-parser p))
+                        (map (λ (p) (list current-chido-readtable-layout*-parser p))
                              (cdr parsers/no-layout))))]
       ['none parsers/no-layout]))
 
