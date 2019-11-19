@@ -647,7 +647,8 @@
           [expr "badmirror" expr]
           ["q" @ "1" *]
           ["p" @ "2" ?]
-          [@ (|| "#1" "#2") + "#3"]
+          ["r" @ #(/ "3" expr +) ?]
+          [@ (|| "#1" "#2" #("one" "two")) + "#3"]
           [first = expr "mirror" (result-filter
                                   expr
                                   (λ (r)
@@ -671,6 +672,18 @@
          (wp*/r "p" quick-simple)
          (list #'("p")))
   (check se/datum?
+         (wp*/r "r" quick-simple)
+         (list #'("r")))
+  (check se/datum?
+         (wp*/r "r3(p)" quick-simple)
+         (list #'("r" (("p")))))
+  (check se/datum?
+         (wp*/r "r3p" quick-simple)
+         (list #'("r" ("p"))))
+  (check se/datum?
+         (wp*/r "r3p2pp2" quick-simple)
+         (list #'("r" ("p" "2") ("p") ("p" "2"))))
+  (check se/datum?
          (wp*/r "(aa(ba)ba)" quick-simple)
          (list #'("a" "a" ("b" "a") "b" "a")))
   (check se/datum?
@@ -680,8 +693,11 @@
          (wp*/r "a mirror b" quick-simple)
          '())
   (check se/datum?
-         (wp*/r "#1#2#1#1#3" quick-simple)
+         (wp*/r "#1#2#1 #1#3" quick-simple)
          (list #'("#1" "#2" "#1" "#1" "#3")))
+  (check se/datum?
+         (wp*/r "#1 one two#1 #3" quick-simple)
+         (list #'("#1" ("one" "two") "#1" "#3")))
   (check se/datum?
          (wp*/r "FOR foo in q1111 do FOR foo in #1#1#3 do (a b)" quick-simple)
          (list #'("FOR" "foo" "in" ("q" "1" "1" "1" "1") "do"
