@@ -2,8 +2,10 @@
 (require
  "private/core.rkt"
  "private/procedural-combinators.rkt"
- "private/readtable-parser.rkt"
  "private/bnf.rkt"
+ "private/readtable-parser.rkt"
+ ;; TODO - use the “default” chido-parse s-exp readtable, which I should make...
+ (submod "private/readtable-parser.rkt" an-s-exp-readtable)
  )
 (module+ test
   (require
@@ -41,8 +43,7 @@
          (list #'test_id))
   ;; I originally forgot to put the ^ on the regexp...
   (check-pred parse-failure?
-              (parse* (open-input-string "\"stringtest\"") id-parser))
-  )
+              (parse* (open-input-string "\"stringtest\"") id-parser)))
 
 (define string-parser
   (proc-parser #:name "string-parser"
@@ -58,11 +59,11 @@
                 string-parser)
          (list #'"test string")))
 
-#|
-TODO - I want a way to add symbols to the RESULT without having them in the PARSE.
-Eg. [/"(" % ELEM-LIST @ elem + /")"]
--- after % it reads an item to be included verbatim in the list.
-|#
+(define default-s-exp-parser an-s-exp-readtable)
+(define lisp-escape-parser
+  (proc-parser
+   #:prefix "$"
+   default-s-exp-parser))
 
 (define-bnf/quick cpqb-parser
   [top-level-with-layout [/ current-chido-readtable-layout*-parser @ top-level / current-chido-readtable-layout*-parser]]
@@ -75,7 +76,8 @@ Eg. [/"(" % ELEM-LIST @ elem + /")"]
             ["<" (|| string-parser
                      #(/"(" string-parser + /")"))]
             [">" (|| string-parser
-                     #(/"(" string-parser + /")"))]]
+                     #(/"(" string-parser + /")"))]
+            ["::" default-s-exp-parser]]
   [elem [@ #(id-parser "=") ?
          @ "/" ?
          @ "@" *
@@ -85,9 +87,11 @@ Eg. [/"(" % ELEM-LIST @ elem + /")"]
          @ "+" ?]]
   [compound-parser [id-parser]
                    [string-parser]
-                   ;[lisp-escape-parser]
-                   ["(" @ elem @@@ #(/ "|" elem) + ")"]
-                   [/ "(" @ elem + / ")"]]
+                   [lisp-escape-parser]
+                   [/ "(" @ elem @@@ #(/ "|" elem) + / ")"
+                      :: (λ elems (cons 'ELEM-ALT elems))]
+                   [/ "(" @ elem + / ")"
+                      :: (λ elems (cons 'ELEM-LIST elems))]]
   )
 
 (module+ test
@@ -128,7 +132,7 @@ bnumber : (\"0\" | \"1\") +
                         {([expr] ["*"] [expr]) (["&" "left"] [">" "+"])}
                         ]
                   [bnumber ":"
-                           {([("(" "0" "1" ")") "+"]) ()}]
+                           {([(ELEM-ALT "0" "1") "+"]) ()}]
                   )))
 
   )
