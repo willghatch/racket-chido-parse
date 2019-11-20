@@ -1,11 +1,21 @@
 #lang racket/base
+(provide
+ define-bnf/syntactic
+ #|
+ TODO
+ define-bnf-arm/syntactic
+ readtable-extend-as-bnf-arm/syntactic
+ extend-bnf/syntactic
+ |#
+ )
+
 (require
- "bnf.rkt"
+ "bnf-s-exp.rkt"
  "procedural-combinators.rkt"
  (for-syntax
   "core.rkt"
   "procedural-combinators.rkt"
-  "quick-bnf-parse.rkt"
+  "bnf-parse.rkt"
   racket/base
   syntax/parse
   syntax/strip-context
@@ -18,7 +28,7 @@
    ))
 
 (begin-for-syntax
- (define-syntax-class quick-bnf-alt-flag
+ (define-syntax-class syntactic-bnf-alt-flag
    (pattern ("&" flag-arg:str)
             #:attr transformed #`(& '#,(datum->syntax #f (string->symbol
                                                           (syntax-e #'flag-arg)))))
@@ -27,13 +37,13 @@
                                                        (syntax-e #'flag-name)))
                                   flag-arg)))
  (define-syntax-class compound-parser
-   (pattern (~or ((~datum ELEM-ALT) alt-member:quick-bnf-elem ...)
-                 ((~datum ELEM-LIST) seq-member:quick-bnf-elem ...)
+   (pattern (~or ((~datum ELEM-ALT) alt-member:syntactic-bnf-elem ...)
+                 ((~datum ELEM-LIST) seq-member:syntactic-bnf-elem ...)
                  simple-elem)
             #:attr transformed #'(~? (|| (~@ . alt-member.transformed) ...)
                                      (~? #((~@ . seq-member.transformed) ...)
                                          simple-elem))))
- (define-syntax-class quick-bnf-elem
+ (define-syntax-class syntactic-bnf-elem
    (pattern (bind-list
              ignore-list
              splice-list
@@ -68,23 +78,23 @@
                                   (~@ . star)
                                   (~@ . plus)))
    )
- (define-syntax-class quick-bnf-arm-alt
-   (pattern ((elem:quick-bnf-elem ...) (flag:quick-bnf-alt-flag ...))
+ (define-syntax-class syntactic-bnf-arm-alt
+   (pattern ((elem:syntactic-bnf-elem ...) (flag:syntactic-bnf-alt-flag ...))
             #:attr transformed #'((~@ . elem.transformed)
                                   ...
                                   (~@ . flag.transformed)
                                   ...)))
  )
 
-(define-syntax (quick-bnf-definition/parsed stx)
+(define-syntax (syntactic-bnf-definition/parsed stx)
   (syntax-parse stx
     [(_ name
-        (arm-name:id ":" arm-alt:quick-bnf-arm-alt ...)
+        (arm-name:id ":" arm-alt:syntactic-bnf-arm-alt ...)
         ...)
      #'(define-bnf/quick name
          [arm-name arm-alt.transformed ...] ...)]))
 
-(define-syntax (define-quick-bnf stx)
+(define-syntax (define-bnf/syntactic stx)
   (syntax-parse stx
     [(_ name:id src:string)
      (define parse-result
@@ -92,13 +102,13 @@
         #'src
         (parse-derivation-result
          (whole-parse (open-input-string (syntax->datum #'src))
-                      quick-bnf-parser))))
-     #`(quick-bnf-definition/parsed name #,@parse-result)]))
+                      syntactic-bnf-parser))))
+     #`(syntactic-bnf-definition/parsed name #,@parse-result)]))
 
 
 (module+ test
 
-  (define-quick-bnf stmt-test "
+  (define-bnf/syntactic stmt-test "
 stmt : \"pass\"
      | expr
      | \"{\" @ stmt + \"}\"

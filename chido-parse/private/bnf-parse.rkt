@@ -1,13 +1,14 @@
 #lang racket/base
 
 (provide
- (rename-out [cpqb-parser quick-bnf-parser]))
+ syntactic-bnf-parser
+ )
 
 
 (require
  "core.rkt"
  "procedural-combinators.rkt"
- "bnf.rkt"
+ "bnf-s-exp.rkt"
  "readtable-parser.rkt"
  ;; TODO - use the “default” chido-parse s-exp readtable, which I should make...
  (submod "readtable-parser.rkt" an-s-exp-readtable)
@@ -65,7 +66,7 @@
    #:prefix "$"
    (λ (port) (parse* port default-s-exp-parser))))
 
-(define-bnf/quick cpqb-parser
+(define-bnf/quick syntactic-bnf-parser
   [top-level-with-layout [/ current-chido-readtable-layout*-parser @ top-level / current-chido-readtable-layout*-parser]]
   [top-level [arm +]]
   [arm [id-parser ":" @ alt-sequence]]
@@ -99,11 +100,11 @@
 stmt: \"pass\"
 ")
   (check se/datum?
-         (wp*/r bnf-string-1 cpqb-parser)
+         (wp*/r bnf-string-1 syntactic-bnf-parser)
          (list #'([stmt ":" [((() () () "pass" () () ())) ()]])))
 
   (check se/datum?
-         (wp*/r "something: $(in lisp escape)" cpqb-parser)
+         (wp*/r "something: $(in lisp escape)" syntactic-bnf-parser)
          (list #'([something ":" [((() () () (in lisp escape) () () ())) ()]])))
 
 
@@ -119,7 +120,8 @@ bnumber : (\"0\" | \"1\") +
           :: (λ (elems) (list (apply string-append (syntax->datum elems))))
 ")
 
-  (define result (whole-parse* (open-input-string bnf-string/stmt) cpqb-parser))
+  (define result (whole-parse* (open-input-string bnf-string/stmt)
+                               syntactic-bnf-parser))
 
 
   (check se/datum?
@@ -128,7 +130,7 @@ bnumber : (\"0\" | \"1\") +
                (whole-parse* (open-input-string bnf-string/stmt
                                                 ;; use this name to make it easy to compare syntax output when they differ -- it's the same length
                                                 "aaaaaaaaaaaaaaaaaaaaaA")
-                             cpqb-parser)))
+                             syntactic-bnf-parser)))
          (list #'([stmt ":"
                         {([() () () "pass" () () ()]) ()}
                         {([() () () expr () () ()]) ()}

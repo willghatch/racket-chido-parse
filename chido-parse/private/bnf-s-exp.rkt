@@ -7,6 +7,14 @@
 
  readtable-extend-as-bnf-arm
  extend-bnf
+
+ #|
+ TODO
+ define-bnf-arm/quick
+ readtable-extend-as-bnf-arm/quick
+ extend-bnf/quick
+ |#
+
  )
 
 (require
