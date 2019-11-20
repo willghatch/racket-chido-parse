@@ -19,11 +19,6 @@
    "test-util-3.rkt"
    ))
 
-#|
-* Make a reader module
-* Make macros to desugar to define-bnf/quick
-
-|#
 
 (define id-parser
   (proc-parser #:name "id-parser"
