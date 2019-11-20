@@ -1,6 +1,7 @@
 #lang racket/base
 (require
  "bnf.rkt"
+ "procedural-combinators.rkt"
  (for-syntax
   "core.rkt"
   "procedural-combinators.rkt"
@@ -29,8 +30,8 @@
    (pattern (~or ((~datum ELEM-ALT) alt-member:quick-bnf-elem ...)
                  ((~datum ELEM-LIST) seq-member:quick-bnf-elem ...)
                  simple-elem)
-            #:attr transformed #'(~? (|| alt-member.transformed ...)
-                                     (~? #(seq-member.transformed ...)
+            #:attr transformed #'(~? (|| (~@ . alt-member.transformed) ...)
+                                     (~? #((~@ . seq-member.transformed) ...)
                                          simple-elem))))
  (define-syntax-class quick-bnf-elem
    (pattern (bind-list
@@ -50,13 +51,13 @@
                                        #f
                                        (list
                                         (string->symbol
-                                         (build-string (length
-                                                        (syntax->list #'(x ...)))
-                                                       "@"))))]
+                                         (make-string (length
+                                                       (syntax->list #'(x ...)))
+                                                      #\@))))]
                             [else #'()])
             #:attr question (syntax-parse #'question-list [(x) #'(?)] [else #'()])
-            #:attr star (syntax-parse #'question-list [(x) #'(*)] [else #'()])
-            #:attr plus (syntax-parse #'question-list [(x) #'(+)] [else #'()])
+            #:attr star (syntax-parse #'star-list [(x) #'(*)] [else #'()])
+            #:attr plus (syntax-parse #'plus-list [(x) #'(+)] [else #'()])
             #:attr transformed #'((~@ . bind)
                                   (~@ . ignore)
                                   (~@ . splice)
@@ -100,11 +101,12 @@
   (define-quick-bnf stmt-test "
 stmt : \"pass\"
      | expr
-     | \"{\" stmt + \"}\"
-expr : bnumber
+     | \"{\" @ stmt + \"}\"
+expr : $(follow-filter bnumber bnumber)
      | expr \"+\" expr & left
      | expr \"*\" expr & left > \"+\"
 bnumber : (\"0\" | \"1\") +
+          :: (λ (elems) (list (apply string-append (syntax->datum elems))))
 ")
 
 
@@ -112,14 +114,22 @@ bnumber : (\"0\" | \"1\") +
          (wp*/r "pass" stmt-test)
          (list #'"pass"))
   (check se/datum?
+         (wp*/r "0" stmt-test)
+         (list #'"0"))
+  (check se/datum?
          (wp*/r "{pass}" stmt-test)
          (list #'("{" "pass" "}")))
   (check se/datum?
          (wp*/r "{ 1 }" stmt-test)
-         (list #'("{" ("1") "}")))
+         (list #'("{" "1" "}")))
+  (check se/datum?
+         (wp*/r "{ 101 }" stmt-test)
+         (list #'("{" "101" "}")))
 
-  #;(check se/datum?
+  (check se/datum?
          (wp*/r "{ 10 + 11 pass 11 * 11 + 110}" stmt-test)
-         aoeu)
+         (list #'("{" ("10" "+" "11")
+                      "pass"
+                      (("11" "*" "11") "+" "110")  "}")))
 
   )

@@ -68,7 +68,7 @@
 (define lisp-escape-parser
   (proc-parser
    #:prefix "$"
-   default-s-exp-parser))
+   (λ (port) (parse* port default-s-exp-parser))))
 
 (define-bnf/quick cpqb-parser
   [top-level-with-layout [/ current-chido-readtable-layout*-parser @ top-level / current-chido-readtable-layout*-parser]]
@@ -107,16 +107,21 @@ stmt: \"pass\"
          (wp*/r bnf-string-1 cpqb-parser)
          (list #'([stmt ":" [((() () () "pass" () () ())) ()]])))
 
+  (check se/datum?
+         (wp*/r "something: $(in lisp escape)" cpqb-parser)
+         (list #'([something ":" [((() () () (in lisp escape) () () ())) ()]])))
+
 
 
   (define bnf-string/stmt "
 stmt : \"pass\"
      | expr
      | \"{\" stmt + \"}\"
-expr : bnumber
+expr : $(follow-filter bnumber bnumber)
      | expr \"+\" expr & left
      | expr \"*\" expr & left > \"+\"
 bnumber : (\"0\" | \"1\") +
+          :: (λ (elems) (list (apply string-append (syntax->datum elems))))
 ")
 
   (define result (whole-parse* (open-input-string bnf-string/stmt) cpqb-parser))
@@ -137,7 +142,7 @@ bnumber : (\"0\" | \"1\") +
                           [() () () "}" () () ()])
                          ()}]
                   [expr ":"
-                        {([() () ()  bnumber () () ()]) ()}
+                        {([() () ()  (follow-filter bnumber bnumber) () () ()]) ()}
                         {([() () () expr () () ()]
                           [() () () "+" () () ()]
                           [() () () expr () () ()])
@@ -151,7 +156,10 @@ bnumber : (\"0\" | \"1\") +
                            {([() () () (ELEM-ALT [() () () "0" () () ()]
                                                  [() () () "1" () () ()]
                                                  )
-                                 () () ("+")]) ()}]
+                                 () () ("+")])
+                            (("::" (λ (elems)
+                                     (list (apply string-append
+                                                  (syntax->datum elems))))))}]
                   )))
 
   )
