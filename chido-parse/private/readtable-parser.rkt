@@ -912,6 +912,62 @@ This is an implementation of the same idea, but also adding support for operator
                            (list src line col pos span)))
                         #:derivations derivations))))
 
+(define (add-quasi-expression-comment rt prefix uncomment-prefix)
+  (define current-quasi-expression-comment-active (chido-parse-parameter #f))
+  (define uncomment-parser
+    (proc-parser
+     #:prefix uncomment-prefix
+     (λ (port)
+       (if (current-quasi-expression-comment-active)
+           (chido-parse-parameterize
+            ([current-quasi-expression-comment-active #f])
+            (define d (parse-direct port (current-chido-readtable)))
+            (make-parse-derivation (λ args (parse-derivation-result d))
+                                   #:derivations d))
+           (make-parse-failure
+            "uncomment parser is only valid inside a quasi-expression-comment")))))
+  (define inner-parser
+    (proc-parser
+     #:prefix prefix
+     (λ (port)
+       (chido-parse-parameterize ([current-quasi-expression-comment-active #t])
+                                 (parse* port (current-chido-readtable))))))
+  (define (find-uncomments derivation)
+    (cond [(eq? (parse-derivation-parser derivation) uncomment-parser)
+           (list derivation)]
+          [else (apply append (map find-uncomments
+                                   (parse-derivation-derivation-list derivation)))]))
+  (define (make-quasicomment-parser all-layout?)
+    (proc-parser
+     #:prefix prefix
+     #:preserve-prefix? #t
+     #:promise-no-left-recursion? (not (equal? "" prefix))
+     (λ (port)
+       (define d (parse-direct port inner-parser))
+       (define uncomments (find-uncomments d))
+       (cond [(null? uncomments)
+              (if all-layout?
+                  d
+                  (make-parse-failure
+                   "quasicomment had no uncomment, so it is entirely layout."))]
+             [(null? (cdr uncomments))
+              (define uncomment (car uncomments))
+              (if all-layout?
+                  (make-parse-failure
+                   "quasicomment contains uncomment, so it is not entirely layout.")
+                  (make-parse-derivation (λ args (parse-derivation-result uncomment))
+                                         #:derivations (list d uncomment)))]
+             [else (make-parse-failure
+                    "quasicomment contained multiple uncomments")]))))
+  (define all-layout-parser (make-quasicomment-parser #t))
+  (define with-uncomment-parser (make-quasicomment-parser #f))
+
+  (extend-chido-readtable*
+   rt
+   'nonterminating-layout all-layout-parser
+   'nonterminating with-uncomment-parser
+   'nonterminating uncomment-parser))
+
 (define (make-line-comment-parser prefix)
   (proc-parser
    #:prefix prefix
@@ -1189,28 +1245,30 @@ This is an implementation of the same idea, but also adding support for operator
 
   (define my-rt
     (extend-chido-readtable*
-     (chido-readtable-add-mixfix-operators
-      (chido-readtable-add-mixfix-operator
-       (chido-readtable-add-raw-string-parser
+     (add-quasi-expression-comment
+      (chido-readtable-add-mixfix-operators
+       (chido-readtable-add-mixfix-operator
         (chido-readtable-add-raw-string-parser
-         (chido-readtable-add-list-parser
-          (chido-readtable-add-raw-string-parser
-           (chido-readtable-add-list-parser
+         (chido-readtable-add-raw-string-parser
+          (chido-readtable-add-list-parser
+           (chido-readtable-add-raw-string-parser
             (chido-readtable-add-list-parser
-             (chido-readtable-add-list-parser empty-chido-readtable "(" ")")
-             "[" "]")
-            "$(" ")" #:wrapper '#%dollar-paren)
-           "#|" "|#" #:readtable-add-type 'terminating-layout)
-          "##{" "}##" #:readtable-add-type 'terminating-layout)
-         "<<" ">>")
-        "!!" "!!")
-       "_<+>_" #:associativity 'left)
-      [_<^>_ #:associativity right]
-      [_<*>_ #:associativity left
-             #:precidence-greater-than [<+>]
-             #:precidence-less-than [<^>]]
-      [<low-prefix>_ #:precidence-less-than [<+>]]
-      [_<low-postfix> #:precidence-less-than [<+>]])
+             (chido-readtable-add-list-parser
+              (chido-readtable-add-list-parser empty-chido-readtable "(" ")")
+              "[" "]")
+             "$(" ")" #:wrapper '#%dollar-paren)
+            "#|" "|#" #:readtable-add-type 'terminating-layout)
+           "##{" "}##" #:readtable-add-type 'terminating-layout)
+          "<<" ">>")
+         "!!" "!!")
+        "_<+>_" #:associativity 'left)
+       [_<^>_ #:associativity right]
+       [_<*>_ #:associativity left
+              #:precidence-greater-than [<+>]
+              #:precidence-less-than [<^>]]
+       [<low-prefix>_ #:precidence-less-than [<+>]]
+       [_<low-postfix> #:precidence-less-than [<+>]])
+      "##`;" "##,;")
      'terminating "##"
      'terminating racket-style-string-parser
      'nonterminating hash-t-parser
@@ -1232,7 +1290,7 @@ This is an implementation of the same idea, but also adding support for operator
      'terminating-layout "\n"
      'terminating-layout "\t"
      ;; creative use of string-append to get emacs to color properly...
-     'nonterminating-layout (make-quote-parser (string-append "#" ";")'comment-quote)
+     'nonterminating-layout (make-quote-parser (string-append "#" ";") 'comment-quote)
      'terminating-layout (make-line-comment-parser ";")
      )
     )
@@ -1277,6 +1335,8 @@ This is an implementation of the same idea, but also adding support for operator
           (list #'(testing foo)))
    (check se/datum? (p*/r "( testing ##{testing (a b c) foo}## foo)" r1)
           (list #'(testing foo)))
+   (check se/datum? (p*/r "( testing ##`;(testing a quasicomment with ##,;(uncommenting) capabilities) foo)" r1)
+          (list #'(testing (uncommenting) foo)))
    (check-pred parse-failure?
                (parse* (open-input-string "(here ##{w/ unbalanced (parens}## after)")
                        r1))
