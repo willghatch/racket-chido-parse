@@ -67,31 +67,33 @@
    (λ (port) (parse* port default-s-exp-parser))))
 
 (define-bnf/quick syntactic-bnf-parser
-  [top-level [arm +]]
+  [top-level [@ arm +]]
   [arm [id-parser ":" @ alt-sequence]]
-  [alt-sequence [alt @@ #(/ "|" alt) *]]
+  [/ alt-sequence [alt @@ #(/ "|" alt) *]]
   [alt [elem + alt-flag *]]
-  [alt-flag ["&" (|| "left" "right")]
-            ;; TODO - associativity groups
-            ["<" (|| string-parser
-                     #(/"(" string-parser + /")"))]
-            [">" (|| string-parser
-                     #(/"(" string-parser + /")"))]
-            ["::" default-s-exp-parser]]
+  [/ alt-flag
+     ["&" (|| "left" "right")]
+     ;; TODO - associativity groups
+     ["<" (|| string-parser
+              #(/"(" string-parser + /")"))]
+     [">" (|| string-parser
+              #(/"(" string-parser + /")"))]
+     ["::" default-s-exp-parser]]
   [elem [#(id-parser "=") ?
          "/" ?
          "@" *
-         compound-parser
+         @ compound-parser
          "?" ?
          "*" ?
          "+" ?]]
-  [compound-parser [id-parser]
-                   [string-parser]
-                   [lisp-escape-parser]
-                   [/ "(" elem @@ #(/ "|" elem) + / ")"
-                      :: (λ elems (cons 'ELEM-ALT elems))]
-                   [/ "(" @ elem + / ")"
-                      :: (λ elems (cons 'ELEM-LIST elems))]]
+  [/ compound-parser
+     [id-parser]
+     [string-parser]
+     [lisp-escape-parser]
+     [/ "(" elem @@ #(/ "|" elem) + / ")"
+        :: (λ elems (list (cons 'ELEM-ALT elems)))]
+     [/ "(" @ elem + / ")"
+        :: (λ elems (list (cons 'ELEM-LIST elems)))]]
   )
 
 (module+ test
@@ -101,12 +103,12 @@ stmt: \"pass\"
   (check se/datum?
          (wp*/r bnf-string-1 (bnf-parser->with-surrounding-layout
                               syntactic-bnf-parser))
-         (list #'([stmt ":" [((() () () "pass" () () ())) ()]])))
+         (list #'(top-level [arm stmt ":" [alt ((elem () () () "pass" () () ())) ()]])))
 
   (check se/datum?
          (wp*/r "something: $(in lisp escape)" (bnf-parser->with-surrounding-layout
                                                 syntactic-bnf-parser))
-         (list #'([something ":" [((() () () (in lisp escape) () () ())) ()]])))
+         (list #'(top-level [arm something ":" [alt ((elem () () () (in lisp escape) () () ())) ()]])))
 
 
 
@@ -131,35 +133,42 @@ bnumber : (\"0\" | \"1\") +
               (stream->list
                (whole-parse* (open-input-string bnf-string/stmt
                                                 ;; use this name to make it easy to compare syntax output when they differ -- it's the same length
-                                                "aaaaaaaaaaaaaaaaaaaaaA")
+                                                "aaaaaaaaaaaaaaaA")
                              (bnf-parser->with-surrounding-layout
                               syntactic-bnf-parser))))
-         (list #'([stmt ":"
-                        {([() () () "pass" () () ()]) ()}
-                        {([() () () expr () () ()]) ()}
-                        {([() () () "{" () () ()]
-                          [() () () stmt () () ("+")]
-                          [() () () "}" () () ()])
-                         ()}]
-                  [expr ":"
-                        {([() () ()  (follow-filter bnumber bnumber) () () ()]) ()}
-                        {([() () () expr () () ()]
-                          [() () () "+" () () ()]
-                          [() () () expr () () ()])
-                         (["&" "left"])}
-                        {([() () () expr () () ()]
-                          [() () () "*" () () ()]
-                          [() () () expr () () ()])
-                         (["&" "left"] [">" "+"])}
-                        ]
-                  [bnumber ":"
-                           {([() () () (ELEM-ALT [() () () "0" () () ()]
-                                                 [() () () "1" () () ()]
-                                                 )
-                                 () () ("+")])
-                            (("::" (λ (elems)
-                                     (list (apply string-append
-                                                  (syntax->datum elems))))))}]
+         (list #'(top-level
+                  [arm stmt ":"
+                       {alt ([elem () () () "pass" () () ()]) ()}
+                       {alt ([elem () () () expr () () ()]) ()}
+                       {alt
+                        ([elem () () () "{" () () ()]
+                         [elem () () () stmt () () ("+")]
+                         [elem () () () "}" () () ()])
+                        ()}]
+                  [arm expr ":"
+                       {alt ([elem () () ()
+                                   (follow-filter bnumber bnumber)
+                                   () () ()]) ()}
+                       {alt
+                        ([elem () () () expr () () ()]
+                         [elem () () () "+" () () ()]
+                         [elem () () () expr () () ()])
+                        (["&" "left"])}
+                       {alt
+                        ([elem () () () expr () () ()]
+                         [elem () () () "*" () () ()]
+                         [elem () () () expr () () ()])
+                        (["&" "left"] [">" "+"])}
+                       ]
+                  [arm bnumber ":"
+                       {alt
+                        ([elem () () () (ELEM-ALT [elem () () () "0" () () ()]
+                                                  [elem () () () "1" () () ()]
+                                                  )
+                               () () ("+")])
+                        (("::" (λ (elems)
+                                 (list (apply string-append
+                                              (syntax->datum elems))))))}]
                   )))
 
   )

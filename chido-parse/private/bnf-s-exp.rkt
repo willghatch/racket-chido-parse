@@ -440,7 +440,7 @@
              (~optional (~seq #:main-arm main-arm-arg:id))
              )
         ...
-        [arm-name:id (~optional (~seq #:ignore-arm-name ignore-arm-name?/given:expr))
+        [arm-name:id (~optional (~seq #:ignore-arm-name? ignore-arm-name?/given:expr))
                      arm-spec/kw ...]
         ...)
      (define/syntax-parse main-arm:id
@@ -703,14 +703,18 @@
              ;(~optional (~seq #:main-arm main-arm-arg:id))
              )
         ...
-        [arm-name:id arm-spec:bnf-arm-alt-spec/quick ...]
+        [(~optional (~and (~datum /) ignore-arm-name))
+         (~and arm-name:id unspecial:unspecial-expr)
+         arm-spec:bnf-arm-alt-spec/quick ...]
         ...)
      #'(define name
          (let ()
            (define-bnf name
              (~? (~@ #:layout-parsers layout-parsers))
              (~? (~@ #:layout layout-arg))
-             [arm-name arm-spec.nonquick ...] ...)
+             [arm-name
+              (~? (~@ #:ignore-arm-name? 'ignore-arm-name))
+              arm-spec.nonquick ...] ...)
            name))]))
 
 (module+ test
