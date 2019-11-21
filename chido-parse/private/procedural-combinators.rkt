@@ -365,7 +365,7 @@
            #'(let ([between-propagate/use (~? between-propagate #f)]
                    [make-result/bare (~? make-result-bare-arg #f)]
                    [make-result/stx (~? make-result-stx-arg #f)]
-                   [splice (~? splice-arg (and (equal? sequence-length 1) 1))])
+                   [splice (~? splice-arg #f)])
                (proc-parser #:name (or (~? name #f) "TODO-binding-seq-name")
                             ;; TODO - other optional args
                             (λ (port)

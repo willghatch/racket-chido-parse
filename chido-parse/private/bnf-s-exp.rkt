@@ -170,6 +170,7 @@
   (syntax-parse stx
     [(_ arm:expr
         (~or (~optional (~seq #:arm-name arm-name:id))
+             (~optional (~seq #:ignore-arm-name? ignore-arm-name?/given:expr))
              (~optional (~seq #:result/stx default-result/stx:expr))
              (~optional (~seq #:result/bare default-result/bare:expr))
              )
@@ -234,16 +235,36 @@
          (let* ([rt/start arm]
                 [use-result/stx? (~? default-result/stx #f)]
                 [use-result/bare? (~? default-result/bare #f)]
-                [alts (list (let ([send-result/stx
-                                   (or result/stx (and (not result/bare)
-                                                       use-result/stx?))]
-                                  [send-result/bare
-                                   (or result/bare (and (not result/stx)
-                                                        use-result/bare?))])
+                [default-use-stx? (not use-result/bare?)]
+                [ignore-arm-name? (~? ignore-arm-name?/given #f)]
+                [default-result-form (or use-result/stx?
+                                         use-result/bare?
+                                         (λ elems elems))]
+                ;;;;;;;;;; TODO - aoeu - I need to inject the arm name into the list even when there is a result-specific handler, UNLESS ignore-arm-name is true.
+                [alts (list (let* ([alt-specific-result/stx result/stx]
+                                   [alt-specific-result/bare result/bare]
+                                   [arm-specific-result/pre-name-add
+                                    (or alt-specific-result/stx
+                                        alt-specific-result/bare
+                                        default-result-form)]
+                                   [arm-specific-result
+                                    (if (or alt-specific-result/stx
+                                            alt-specific-result/bare
+                                            ignore-arm-name?)
+                                        arm-specific-result/pre-name-add
+                                        (λ args
+                                          (apply arm-specific-result/pre-name-add
+                                                 (cons 'arm-name args) )))]
+                                   [arm-specific-use-stx?
+                                    (or alt-specific-result/stx
+                                        (and (not alt-specific-result/bare)
+                                             default-use-stx?))])
                               (binding-sequence
                                spec.elem ...
-                               #:result/stx send-result/stx
-                               #:result/bare send-result/bare
+                               #:result/stx (and arm-specific-use-stx?
+                                                 arm-specific-result)
+                               #:result/bare (and (not arm-specific-use-stx?)
+                                                  arm-specific-result)
                                #:between bnf-inserted-layout-parser
                                #:name (or alt-name/direct
                                           alt-name/inferred)))
