@@ -68,7 +68,9 @@
 
 (define-bnf/quick syntactic-bnf-parser
   [top-level [@ arm +]]
-  [arm [id-parser ":" @ alt-sequence]]
+  ;; TODO - I would like to use "/"? here, but it makes the parse ambiguous due to layout parsing differences.  What is the best way to fix that?
+  [arm ["/" id-parser ":" @ alt-sequence]
+       [id-parser ":" @ alt-sequence]]
   [/ alt-sequence [alt @@ #(/ "|" alt) *]]
   [alt [elem + alt-flag *]]
   [/ alt-flag
@@ -116,11 +118,11 @@ stmt: \"pass\"
 stmt : \"pass\"
      | expr
      | \"{\" stmt + \"}\"
-expr : $(follow-filter bnumber bnumber)
+expr : @ $(follow-filter bnumber bnumber)
      | expr \"+\" expr & left
      | expr \"*\" expr & left > \"+\"
-bnumber : (\"0\" | \"1\") +
-          :: (λ (elems) (list (apply string-append (syntax->datum elems))))
+/bnumber : (\"0\" | \"1\") +
+           :: (λ (elems) (list (apply string-append (syntax->datum elems))))
 ")
 
   (define result (whole-parse* (open-input-string bnf-string/stmt)
@@ -146,7 +148,7 @@ bnumber : (\"0\" | \"1\") +
                          [elem () () () "}" () () ()])
                         ()}]
                   [arm expr ":"
-                       {alt ([elem () () ()
+                       {alt ([elem () () ("@")
                                    (follow-filter bnumber bnumber)
                                    () () ()]) ()}
                        {alt
@@ -160,7 +162,7 @@ bnumber : (\"0\" | \"1\") +
                          [elem () () () expr () () ()])
                         (["&" "left"] [">" "+"])}
                        ]
-                  [arm bnumber ":"
+                  [arm "/" bnumber ":"
                        {alt
                         ([elem () () () (ELEM-ALT [elem () () () "0" () () ()]
                                                   [elem () () () "1" () () ()]

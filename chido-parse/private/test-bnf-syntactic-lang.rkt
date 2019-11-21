@@ -3,11 +3,11 @@
 stmt : "pass"
      | expr
      | "{" @ stmt + "}"
-expr : $(follow-filter bnumber bnumber)
+expr : @$(follow-filter bnumber bnumber)
      | expr "+" expr & left
      | expr "*" expr & left > "+"
-bnumber : ($zero-str | "1") +
-          :: (λ (elems) (list (apply my-string-append (syntax->datum elems))))
+/bnumber : ($zero-str | "1") +
+           :: (λ (elems) (list (apply my-string-append (syntax->datum elems))))
 
 #:definitions
 (define my-string-append string-append)
@@ -23,7 +23,10 @@ bnumber : ($zero-str | "1") +
 
   (check se/datum?
          (wp*/r "{ 10 + 11 pass 11 * 11 + 110}" parser)
-         (list #'("{" ("10" "+" "11")
-                      "pass"
-                      (("11" "*" "11") "+" "110")  "}")))
+         (list #'(stmt "{" (stmt (expr (expr "10") "+" (expr "11")))
+                       (stmt "pass")
+                       (stmt (expr (expr (expr "11") "*" (expr "11"))
+                                   "+"
+                                   (expr "110")))
+                       "}")))
   )

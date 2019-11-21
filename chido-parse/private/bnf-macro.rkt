@@ -48,7 +48,8 @@
                                      (~? #((~@ . seq-member.transformed) ...)
                                          simple-elem))))
  (define-syntax-class syntactic-bnf-elem
-   (pattern (bind-list
+   (pattern ((~datum elem)
+             bind-list
              ignore-list
              splice-list
 
@@ -83,7 +84,9 @@
                                   (~@ . plus)))
    )
  (define-syntax-class syntactic-bnf-arm-alt
-   (pattern ((elem:syntactic-bnf-elem ...) (flag:syntactic-bnf-alt-flag ...))
+   (pattern ((~datum alt)
+             (elem:syntactic-bnf-elem ...)
+             (flag:syntactic-bnf-alt-flag ...))
             #:attr transformed #'((~@ . elem.transformed)
                                   ...
                                   (~@ . flag.transformed)
@@ -93,10 +96,16 @@
 (define-syntax (define-bnf/syntactic/parsed stx)
   (syntax-parse stx
     [(_ name
-        (arm-name:id ":" arm-alt:syntactic-bnf-arm-alt ...)
+        (~datum top-level)
+        ([~datum arm]
+         (~optional (~and "/" ignore-arm-name))
+         arm-name:id ":" arm-alt:syntactic-bnf-arm-alt ...)
         ...)
+     (define/syntax-parse (ignore ...)
+       (map (λ (x) (if x #'(/) #'()))
+            (attribute ignore-arm-name)))
      #'(define-bnf/quick name
-         [arm-name arm-alt.transformed ...] ...)]))
+         [(~@ . ignore) arm-name arm-alt.transformed ...] ...)]))
 
 (define-syntax (define-bnf/syntactic stx)
   (syntax-parse stx
@@ -117,34 +126,37 @@
 stmt : \"pass\"
      | expr
      | \"{\" @ stmt + \"}\"
-expr : $(follow-filter bnumber bnumber)
+expr : @ $(follow-filter bnumber bnumber)
      | expr \"+\" expr & left
      | expr \"*\" expr & left > \"+\"
-bnumber : (\"0\" | \"1\") +
-          :: (λ (elems) (list (apply string-append (syntax->datum elems))))
+/bnumber : (\"0\" | \"1\") +
+           :: (λ (elems) (list (apply string-append (syntax->datum elems))))
 ")
 
 
   (check se/datum?
          (wp*/r "pass" stmt-test)
-         (list #'"pass"))
+         (list #'(stmt "pass")))
   (check se/datum?
          (wp*/r "0" stmt-test)
-         (list #'"0"))
+         (list #'(stmt (expr "0"))))
   (check se/datum?
          (wp*/r "{pass}" stmt-test)
-         (list #'("{" "pass" "}")))
+         (list #'(stmt "{" (stmt "pass") "}")))
   (check se/datum?
          (wp*/r "{ 1 }" stmt-test)
-         (list #'("{" "1" "}")))
+         (list #'(stmt "{" (stmt (expr "1")) "}")))
   (check se/datum?
          (wp*/r "{ 101 }" stmt-test)
-         (list #'("{" "101" "}")))
+         (list #'(stmt "{" (stmt (expr "101")) "}")))
 
   (check se/datum?
          (wp*/r "{ 10 + 11 pass 11 * 11 + 110}" stmt-test)
-         (list #'("{" ("10" "+" "11")
-                      "pass"
-                      (("11" "*" "11") "+" "110")  "}")))
+         (list #'(stmt  "{"
+                        (stmt (expr (expr "10") "+" (expr "11")))
+                        (stmt "pass")
+                        (stmt (expr (expr (expr "11") "*" (expr "11"))
+                                    "+" (expr "110")))
+                        "}")))
 
   )
