@@ -110,7 +110,7 @@ Removes all parsers (terminating, nonterminating, or layout) with the prefix (or
 
 @defthing[extend-chido-readtable]{
 TODO --
-(extend-chido-readtable crt 'terminating my-foo-parser)
+(extend-chido-readtable 'terminating my-foo-parser crt)
 
 If optional argument #:replace-prefix is true, any parsers with the same prefix as the new parser are removed from the readtable.  (IE it runs clear-chido-readtable before extending.)
 }

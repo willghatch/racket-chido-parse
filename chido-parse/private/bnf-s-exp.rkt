@@ -156,7 +156,7 @@
          (define rt2
            (for/fold ([rt rt1])
                      ([parser (~? layout-parsers bnf-default-layout-parsers)])
-             (extend-chido-readtable rt 'terminating-layout parser)))
+             (extend-chido-readtable 'terminating-layout parser rt)))
 
          (define rt3 (readtable-extend-as-bnf-arm rt2
                                                   #:result/stx use-result/stx?
@@ -269,15 +269,16 @@
                            'left-recursive-nonterminating
                            'nonterminating))
                    (extend-chido-readtable
-                    rt extension-type parser
+                    extension-type parser
                     #:operator op-type
                     #:associativity a
                     #:precidence-greater-than pgt
-                    #:precidence-less-than plt))]
+                    #:precidence-less-than plt
+                    rt))]
                 [rt/blacklisted (chido-readtable-blacklist-symbols
-                                 rt/extended
                                  (flatten (list (list 'symbol-blacklist ...)
-                                                ...)))])
+                                                ...))
+                                 rt/extended)])
            rt/blacklisted))]))
 
 

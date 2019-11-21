@@ -12,12 +12,12 @@ This is an implementation of the same idea, but also adding support for operator
   ;; TODO - re-think what the empty readtable should be...
   [empty-chido-readtable chido-readtable?]
   [extend-chido-readtable
-   (->* (chido-readtable?
-         (or/c 'terminating 'soft-terminating 'nonterminating
+   (->* ((or/c 'terminating 'soft-terminating 'nonterminating
                'terminating-layout 'soft-terminating-layout 'nonterminating-layout
                'left-recursive-nonterminating)
          ;; parser...
-         any/c)
+         any/c
+         chido-readtable?)
         (#:operator (or/c #f 'infix 'prefix 'postfix)
          #:precidence-less-than (or/c any/c (listof any/c))
          #:precidence-greater-than (or/c any/c (listof any/c))
@@ -25,8 +25,8 @@ This is an implementation of the same idea, but also adding support for operator
          ;#:symbol-blacklist (listof (or/c symbol? string?))
          )
         chido-readtable?)]
-  [chido-readtable-add-list-parser (-> chido-readtable?
-                                       string? string?
+  [chido-readtable-add-list-parser (-> string? string?
+                                       chido-readtable?
                                        chido-readtable?)]
   [chido-readtable->read1 (-> chido-readtable? any/c)]
   [chido-readtable->read1/layout (-> chido-readtable? any/c)]
@@ -37,13 +37,13 @@ This is an implementation of the same idea, but also adding support for operator
   [chido-readtable->layout+ (-> chido-readtable? any/c)]
   [set-chido-readtable-symbol-support (-> chido-readtable? any/c chido-readtable?)]
   [chido-readtable-symbol-support? (-> chido-readtable? boolean?)]
-  [chido-readtable-blacklist-symbols (-> chido-readtable?
-                                         (listof (or/c symbol? string?))
+  [chido-readtable-blacklist-symbols (-> (listof (or/c symbol? string?))
+                                         chido-readtable?
                                          chido-readtable?)]
   [chido-readtable-dict-ref (->* (chido-readtable? any/c) (any/c) any/c)]
   [chido-readtable-dict-set (-> chido-readtable? any/c any/c chido-readtable?)]
   [chido-readtable-add-mixfix-operator
-   (->* (chido-readtable? (or/c symbol? string?))
+   (->* ((or/c symbol? string?) chido-readtable?)
         (#:layout (or/c 'required 'optional 'none)
          #:precidence-greater-than (or/c any/c (listof any/c))
          #:precidence-less-than (or/c any/c (listof any/c))
@@ -234,7 +234,7 @@ This is an implementation of the same idea, but also adding support for operator
 (define (chido-readtable-dict-set rt key val)
   (dict-set rt key val))
 
-(define (extend-chido-readtable rt extension-type parser
+(define (extend-chido-readtable extension-type parser rt
                                 ;; TODO - better name for extension-type, and make it a keyword argument.
                                 #:operator [operator #f]
                                 #:precidence-less-than [precidence-less-than '()]
@@ -316,10 +316,10 @@ This is an implementation of the same idea, but also adding support for operator
     (match symbol-blacklist
       [#f pre-blacklist]
       [#t (chido-readtable-blacklist-symbols
-           pre-blacklist
-           (list (->symbol (parser-name parser))))]
+           (list (->symbol (parser-name parser)))
+           pre-blacklist)]
       [(list strsym ...)
-       (chido-readtable-blacklist-symbols pre-blacklist (map ->symbol strsym))]))
+       (chido-readtable-blacklist-symbols (map ->symbol strsym) pre-blacklist)]))
 
   (define op-name->op
     (chido-readtable-operator-name->operator pre-op))
@@ -375,7 +375,7 @@ This is an implementation of the same idea, but also adding support for operator
   (match args
     [(list type parser rest-args ...)
      (apply extend-chido-readtable*
-            (extend-chido-readtable rt type parser)
+            (extend-chido-readtable type parser rt)
             rest-args)]
     [(list) rt]
     [else (error 'extend-chido-readtable* "bad number of arguments")]))
@@ -385,7 +385,7 @@ This is an implementation of the same idea, but also adding support for operator
                [symbol-support? (not (not bool))]
                [flush-state? #t]))
 
-(define (chido-readtable-blacklist-symbols rt symbols)
+(define (chido-readtable-blacklist-symbols symbols rt)
   (struct-copy chido-readtable rt
                [symbol-blacklist (remove-duplicates
                                   (append (map ->symbol symbols)
@@ -814,7 +814,7 @@ This is an implementation of the same idea, but also adding support for operator
 
 ;; TODO - left and right must be strings
 (define (chido-readtable-add-list-parser
-         rt left right
+         left right rt
          #:wrapper [wrapper #f]
          ;#:inside-readtable
          ;; TODO - what is the right name here?
@@ -862,8 +862,9 @@ This is an implementation of the same idea, but also adding support for operator
                                               right)))
                  #:promise-no-left-recursion? #t))
 
-  (extend-chido-readtable (extend-chido-readtable rt rt-add-type left-parser)
-                          rt-add-type right-parser))
+  (extend-chido-readtable
+   rt-add-type right-parser
+   (extend-chido-readtable rt-add-type left-parser rt)))
 
 
 (define racket-style-string-parser
@@ -912,7 +913,7 @@ This is an implementation of the same idea, but also adding support for operator
                            (list src line col pos span)))
                         #:derivations derivations))))
 
-(define (add-quasi-expression-comment rt prefix uncomment-prefix)
+(define (add-quasi-expression-comment prefix uncomment-prefix rt)
   (define current-quasi-expression-comment-active (chido-parse-parameter #f))
   (define uncomment-parser
     (proc-parser
@@ -1063,7 +1064,7 @@ This is an implementation of the same idea, but also adding support for operator
       #:end pos))))
 
 (define (chido-readtable-add-raw-string-parser
-         rt left right
+         left right rt
          #:wrapper [wrapper #f]
          ;#:inside-readtable
          ;; TODO - what is the right name here?
@@ -1078,13 +1079,14 @@ This is an implementation of the same idea, but also adding support for operator
                  #:promise-no-left-recursion? #t
                  #:use-port? #f))
   (extend-chido-readtable
-   (extend-chido-readtable rt rt-add-type (make-raw-string-parser left right
-                                                                  #:wrapper wrapper))
-   rt-add-type right-parser))
+   rt-add-type right-parser
+   (extend-chido-readtable rt-add-type (make-raw-string-parser left right
+                                                               #:wrapper wrapper)
+                           rt)))
 
 
 (define (chido-readtable-add-mixfix-operator
-         rt name-strsym
+         name-strsym rt
          #:layout [layout 'required]
          #:precidence-greater-than [precidence-greater-than '()]
          #:precidence-less-than [precidence-less-than '()]
@@ -1176,23 +1178,25 @@ This is an implementation of the same idea, but also adding support for operator
                  #:derivations derivations))
      parsers))
 
-  (extend-chido-readtable rt 'left-recursive-nonterminating
+  (extend-chido-readtable 'left-recursive-nonterminating
                           #:precidence-greater-than precidence-greater-than
                           #:precidence-less-than precidence-less-than
                           #:associativity associativity
                           #:symbol-blacklist symbols-to-blacklist
                           #:operator operator-style
-                          sequence-parser))
+                          sequence-parser
+                          rt))
 
 (define-syntax (chido-readtable-add-mixfix-operators stx)
   (syntax-parse stx
-    [(_ start-readtable:expr
-        [name:id (~or (~optional (~seq #:layout layout-arg:id))
-                      (~optional (~seq #:precidence-greater-than [pgt:id ...]))
-                      (~optional (~seq #:precidence-less-than [plt:id ...]))
-                      (~optional (~seq #:associativity (~or assoc-arg:id #f))))
-                 ...]
-        ...)
+    [(_
+      [name:id (~or (~optional (~seq #:layout layout-arg:id))
+                    (~optional (~seq #:precidence-greater-than [pgt:id ...]))
+                    (~optional (~seq #:precidence-less-than [plt:id ...]))
+                    (~optional (~seq #:associativity (~or assoc-arg:id #f))))
+               ...]
+      ...
+      start-readtable:expr)
      #'(let loop ([rt start-readtable]
                   [op-specs (list
                              (list 'name
@@ -1205,8 +1209,8 @@ This is an implementation of the same idea, but also adding support for operator
            ['() rt]
            [(list-rest (list op-name layout gts lts assoc) more)
             (loop (chido-readtable-add-mixfix-operator
-                   rt
                    op-name
+                   rt
                    #:layout layout
                    #:associativity assoc
                    #:precidence-greater-than gts
@@ -1246,29 +1250,29 @@ This is an implementation of the same idea, but also adding support for operator
   (define my-rt
     (extend-chido-readtable*
      (add-quasi-expression-comment
+      "##`;" "##,;"
       (chido-readtable-add-mixfix-operators
-       (chido-readtable-add-mixfix-operator
-        (chido-readtable-add-raw-string-parser
-         (chido-readtable-add-raw-string-parser
-          (chido-readtable-add-list-parser
-           (chido-readtable-add-raw-string-parser
-            (chido-readtable-add-list-parser
-             (chido-readtable-add-list-parser
-              (chido-readtable-add-list-parser empty-chido-readtable "(" ")")
-              "[" "]")
-             "$(" ")" #:wrapper '#%dollar-paren)
-            "#|" "|#" #:readtable-add-type 'terminating-layout)
-           "##{" "}##" #:readtable-add-type 'terminating-layout)
-          "<<" ">>")
-         "!!" "!!")
-        "_<+>_" #:associativity 'left)
        [_<^>_ #:associativity right]
        [_<*>_ #:associativity left
               #:precidence-greater-than [<+>]
               #:precidence-less-than [<^>]]
        [<low-prefix>_ #:precidence-less-than [<+>]]
-       [_<low-postfix> #:precidence-less-than [<+>]])
-      "##`;" "##,;")
+       [_<low-postfix> #:precidence-less-than [<+>]]
+       (chido-readtable-add-mixfix-operator
+        "_<+>_" #:associativity 'left
+        (chido-readtable-add-raw-string-parser
+         "!!" "!!"
+         (chido-readtable-add-raw-string-parser
+          "<<" ">>"
+          (chido-readtable-add-list-parser
+           "##{" "}##" #:readtable-add-type 'terminating-layout
+           (chido-readtable-add-raw-string-parser
+            "#|" "|#" #:readtable-add-type 'terminating-layout
+            (chido-readtable-add-list-parser
+             "$(" ")" #:wrapper '#%dollar-paren
+             (chido-readtable-add-list-parser
+              "[" "]"
+              (chido-readtable-add-list-parser "(" ")" empty-chido-readtable))))))))))
      'terminating "##"
      'terminating racket-style-string-parser
      'nonterminating hash-t-parser
@@ -1486,17 +1490,16 @@ This is an implementation of the same idea, but also adding support for operator
   (define an-s-exp-readtable
     (extend-chido-readtable*
      (chido-readtable-add-list-parser
-      (chido-readtable-add-raw-string-parser
-       (chido-readtable-add-raw-string-parser
-        (chido-readtable-add-list-parser
-         (chido-readtable-add-list-parser
-          (chido-readtable-add-list-parser empty-chido-readtable "(" ")")
-          "[" "]")
-         "{" "}")
-        "«" "»")
-       "#|" "|#" #:readtable-add-type 'terminating-layout)
       "##{" "}##" #:readtable-add-type 'terminating-layout
-      )
+      (chido-readtable-add-raw-string-parser
+       "#|" "|#" #:readtable-add-type 'terminating-layout
+       (chido-readtable-add-raw-string-parser
+        "«" "»"
+        (chido-readtable-add-list-parser
+         "{" "}"
+         (chido-readtable-add-list-parser
+          "[" "]"
+          (chido-readtable-add-list-parser "(" ")" empty-chido-readtable))))))
      'nonterminating hash-t-parser
      'nonterminating hash-f-parser
      'terminating racket-style-string-parser
