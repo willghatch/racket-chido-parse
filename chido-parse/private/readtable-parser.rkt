@@ -1479,11 +1479,18 @@ This is an implementation of the same idea, but also adding support for operator
    (check-pred parse-failure?
                (p*/d "some-symbol" r1/no-symbol))
 
-
-
    )
-
   )
+
+#|
+TODO
+Make submodules providing some pre-made readtables:
+- a minimal s-exp reader with few features
+- racket default readtable re-implementation
+- a default chido-parse readtable with good improvements
+  - simplification of some complicated parts (eg. numbers, #stuff)
+  - nice features like raw strings, quasi-expression-comment, etc
+|#
 
 (module+ an-s-exp-readtable
   (provide an-s-exp-readtable)
