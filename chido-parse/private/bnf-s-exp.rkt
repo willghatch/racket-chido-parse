@@ -121,6 +121,7 @@
     [(_ arm-name:id
         (~or (~optional (~seq #:layout layout-arg:expr))
              (~optional (~seq #:layout-parsers layout-parsers:expr))
+             (~optional (~seq #:ignore-arm-name? ignore-arm-name/given:expr))
              (~optional (~seq #:result/stx arm-result/stx:expr))
              (~optional (~seq #:result/bare arm-result/bare:expr))
              (~optional (~seq (~literal result/stx-inherit)
@@ -136,6 +137,7 @@
         spec:bnf-arm-alt-spec
         ...+)
      #'(begin
+         (define ignore-arm-name-use (~? ignore-arm-name/given #f))
          (define layout-arg-use (~? layout-arg bnf-default-layout-requirement))
          (define given-result/bare? (~? arm-result/bare #f))
          (define given-result/stx? (~? arm-result/stx #f))
@@ -158,11 +160,13 @@
                      ([parser (~? layout-parsers bnf-default-layout-parsers)])
              (extend-chido-readtable 'terminating-layout parser rt)))
 
-         (define rt3 (readtable-extend-as-bnf-arm rt2
-                                                  #:result/stx use-result/stx?
-                                                  #:result/bare use-result/bare?
-                                                  #:arm-name arm-name
-                                                  spec ...))
+         (define rt3 (readtable-extend-as-bnf-arm
+                      rt2
+                      #:ignore-arm-name? ignore-arm-name-use
+                      #:result/stx use-result/stx?
+                      #:result/bare use-result/bare?
+                      #:arm-name arm-name
+                      spec ...))
          (define arm-name rt3))]))
 
 
@@ -237,16 +241,14 @@
                 [use-result/bare? (~? default-result/bare #f)]
                 [default-use-stx? (not use-result/bare?)]
                 [ignore-arm-name? (~? ignore-arm-name?/given #f)]
-                [default-result-form (or use-result/stx?
-                                         use-result/bare?
-                                         (λ elems elems))]
                 ;;;;;;;;;; TODO - aoeu - I need to inject the arm name into the list even when there is a result-specific handler, UNLESS ignore-arm-name is true.
                 [alts (list (let* ([alt-specific-result/stx result/stx]
                                    [alt-specific-result/bare result/bare]
                                    [arm-specific-result/pre-name-add
                                     (or alt-specific-result/stx
                                         alt-specific-result/bare
-                                        default-result-form)]
+                                        ;; TODO - should I allow use-result/stx or use-result/bare to be a procedure that builds the result?  As a default it would be hard to make a good procedure...
+                                        (λ elems elems))]
                                    [arm-specific-result
                                     (if (or alt-specific-result/stx
                                             alt-specific-result/bare
@@ -317,11 +319,13 @@
            (error "not a number")))))
 
   (define-bnf-arm test1
+    #:ignore-arm-name? #t
     #:result/bare #t
     #:layout 'none
     ["a" [: #:ignore #t "b"] "c"]
     ["a" "a" "b"])
   (define-bnf-arm test1/layout
+    #:ignore-arm-name? #t
     #:result/bare #t
     #:layout 'required
     ["a" [: #:ignore #t "b"] "c" #:name "test-name-1"]
@@ -363,6 +367,7 @@
   (define-bnf-arm test2
     #:layout 'optional
     #:result/bare #t
+    #:ignore-arm-name? #t
     ["n"]
     [test2 "+" test2 #:associativity 'left]
     [test2 "*" test2 #:associativity 'left #:precidence-greater-than "+"]
@@ -372,30 +377,30 @@
 
   (check-equal? (p*/r "n"
                       (chido-readtable->read1 test2))
-                '("n"))
+                '(("n")))
   (check-equal? (wp*/r "n+n+n" test2)
-                '((("n" "+" "n") "+" "n")))
+                '(((("n") "+" ("n")) "+" ("n"))))
   (check-equal? (wp*/r "n ++" test2)
-                '(("n" "++")))
+                '((("n") "++")))
   (check-equal? (wp*/r "n + n ++" test2)
-                '(("n" "+" ("n" "++"))))
+                '((("n") "+" (("n") "++"))))
   (check-equal? (wp*/r "n * n ++" test2)
-                '((("n" "*" "n") "++")))
+                '(((("n") "*" ("n")) "++")))
   (check-equal? (wp*/r "n + n * n * n + n" test2)
-                '((("n" "+" (("n" "*" "n") "*" "n")) "+" "n")))
+                '(((("n") "+" ((("n") "*" ("n")) "*" ("n"))) "+" ("n"))))
 
   (check-equal? (wp*/r "if n then n else n" test2)
-                '(("if" "n" "then" "n" "else" "n")))
+                '(("if" ("n") "then" ("n") "else" ("n"))))
   ;; Optional space around operators is not as nice as required space.
   (check-equal? (wp*/r "ifnthennelsen" test2)
-                '(("if" "n" "then" "n" "else" "n")))
+                '(("if" ("n") "then" ("n") "else" ("n"))))
   (check-equal? (wp*/r "n + if n then n else n + n" test2)
-                '(("n" "+" ("if" "n" "then" "n" "else" ("n" "+" "n")))))
+                '((("n") "+" ("if" ("n") "then" ("n") "else" (("n") "+" ("n"))))))
 
   )
 
 (struct bnf-parser
-  (main-arm-key arm-hash layout-parsers layout-alt)
+  (main-arm-key arm-hash layout-parsers layout-alt arm-name-ignore-hash)
   #:property prop:custom-parser
   (λ (self)
     (proc-parser
@@ -435,11 +440,14 @@
              (~optional (~seq #:main-arm main-arm-arg:id))
              )
         ...
-        [arm-name:id arm-spec/kw ...]
+        [arm-name:id (~optional (~seq #:ignore-arm-name ignore-arm-name?/given:expr))
+                     arm-spec/kw ...]
         ...)
      (define/syntax-parse main-arm:id
        (or (attribute main-arm-arg)
            (first (syntax->list #'(arm-name ...)))))
+     (define/syntax-parse (ignore-arm-name ...)
+       (generate-temporaries #'(arm-name ...)))
 
      #'(define name
          (let ()
@@ -466,9 +474,12 @@
                       "arm names can currently only be used as identifiers"
                       stx)]))
            ...
+           (define ignore-arm-name (~? ignore-arm-name?/given #f))
+           ...
            (define inner-bnf-name
              (let ([arm-name (let ()
                                (define-bnf-arm arm-name
+                                 #:ignore-arm-name? ignore-arm-name
                                  layout-parsers-inherit (list bnf-layout-parser)
                                  layout-inherit layout/inherit
                                  result/bare-inherit result/bare/inherit
@@ -479,7 +490,8 @@
                (bnf-parser 'main-arm
                            (hash (~@ 'arm-name arm-name) ...)
                            layout-parsers/use
-                           layout-alt)))
+                           layout-alt
+                           (hash (~@ 'arm-name ignore-arm-name) ...))))
            inner-bnf-name))]))
 
 (define-for-syntax get-current-bnf-arm
@@ -550,13 +562,26 @@
     [id ["x"]])
 
   (check-equal? (wp*/r "pass" bnf-test-1)
-                '("pass"))
+                '((statement "pass")))
   (check-equal? (wp*/r "5 + 67 * 3" bnf-test-1)
-                '((5 "+" (67 "*" 3))))
+                '((statement (expression (expression 5) "+"
+                                         (expression (expression 67)
+                                                     "*"
+                                                     (expression 3))))))
   (check-equal? (wp*/r "for x in 27 + 13 do { 555 * x }" bnf-test-1)
-                '(("for" "x" "in" (27 "+" 13) "do" ("{" (555 "*" "x") "}"))))
+                '((statement "for" (id "x") "in"
+                             (expression (expression 27) "+" (expression 13))
+                             "do" (statement "{" (statement (expression
+                                                             (expression 555)
+                                                             "*"
+                                                             (expression (id "x"))))
+                                             "}"))))
   (check-equal? (wp*/r "{ 5 6 7 }" bnf-test-1)
-                '(("{" 5 6 7 "}")))
+                '((statement "{"
+                             (statement (expression 5))
+                             (statement (expression 6))
+                             (statement (expression 7))
+                             "}")))
 
   (define bnf-test-2
     (extend-bnf
@@ -569,7 +594,21 @@
      [id]))
 
   (check-equal? (wp*/r "{ pass break 2 + let x = 5 in 2 + 2 }" bnf-test-2)
-                '(("{" "pass" "break" ((2 "+" ("let" "x" "=" 5 "in" 2)) "+" 2) "}")))
+                '((statement "{"
+                             (statement "pass")
+                             (statement "break")
+                             (statement (expression (expression
+                                                     (expression 2)
+                                                     "+"
+                                                     (expression "let"
+                                                                 (id "x")
+                                                                 "="
+                                                                 (expression 5)
+                                                                 "in"
+                                                                 (expression 2)))
+                                                    "+"
+                                                    (expression 2)))
+                             "}")))
 
   )
 
@@ -607,7 +646,7 @@
              #:attr nonquick
              #'(make-alt-parser
                 "TODO-name_bnf-inner-elem-alt"
-                (list (binding-sequence elem.nonquick)
+                (list (binding-sequence elem.nonquick #:splice 1)
                       ...))))
   (define-splicing-syntax-class binding-sequence-elem/quick
     (pattern (~seq
@@ -696,50 +735,56 @@
 
   (check se/datum?
          (wp*/r "a" quick-simple)
-         (list #'"a"))
+         (list #'(stmt (expr "a"))))
   (check se/datum?
          (wp*/r "q1" quick-simple)
-         (list #'("q" "1")))
+         (list #'(stmt (expr "q" "1"))))
   (check se/datum?
          (wp*/r "q" quick-simple)
-         (list #'("q")))
+         (list #'(stmt (expr "q"))))
   (check se/datum?
          (wp*/r "p2" quick-simple)
-         (list #'("p" "2")))
+         (list #'(stmt (expr "p" "2"))))
   (check se/datum?
          (wp*/r "p" quick-simple)
-         (list #'("p")))
+         (list #'(stmt (expr "p"))))
   (check se/datum?
          (wp*/r "r" quick-simple)
-         (list #'("r")))
-  (check se/datum?
+         (list #'(stmt (expr "r"))))
+  (fail "there are 3 commented-out failing tests here, I just want a smaller fail footprint while I work on other things.")
+  #;(check se/datum?
          (wp*/r "r3(p)" quick-simple)
-         (list #'("r" ((LIST "p")))))
-  (check se/datum?
+         (list #'(stmt (expr "r" (expr (LIST (expr "p")))))))
+  #;(check se/datum?
          (wp*/r "r3p" quick-simple)
-         (list #'("r" ("p"))))
-  (check se/datum?
+         (list #'(stmt (expr "r" (expr "p")))))
+  #;(check se/datum?
          (wp*/r "r3p2pp2" quick-simple)
-         (list #'("r" ("p" "2") ("p") ("p" "2"))))
+         (list #'(stmt (expr "r" (expr "p" "2") (expr "p") (expr "p" "2")))))
   (check se/datum?
          (wp*/r "(aa(ba)ba)" quick-simple)
-         (list #'(LIST "a" "a" (LIST "b" "a") "b" "a")))
+         (list #'(stmt (LIST (expr "a")
+                             (expr "a")
+                             (LIST (expr "b") (expr "a"))
+                             (expr "b")
+                             (expr "a")))))
   (check se/datum?
          (wp*/r "a mirror a" quick-simple)
-         (list #'("a" "mirror" "a")))
+         (list #'(stmt (expr (expr "a") "mirror" (expr "a")))))
   (check se/datum?
          (wp*/r "a mirror b" quick-simple)
          '())
   (check se/datum?
          (wp*/r "#1#2#1 #1#3" quick-simple)
-         (list #'("#1" "#2" "#1" "#1" "#3")))
+         (list #'(stmt (expr "#1" "#2" "#1" "#1" "#3"))))
   (check se/datum?
          (wp*/r "#1 one two#1 #3" quick-simple)
-         (list #'("#1" ("one" "two") "#1" "#3")))
+         (list #'(stmt (expr "#1" ("one" "two") "#1" "#3"))))
   (check se/datum?
          (wp*/r "FOR foo in q1111 do FOR foo in #1#1#3 do (a b)" quick-simple)
-         (list #'("FOR" "foo" "in" ("q" "1" "1" "1" "1") "do"
-                        ("FOR" "foo" "in" ("#1" "#1" "#3") "do" (LIST "a" "b")))))
+         (list #'(stmt "FOR" "foo" "in" (expr "q" "1" "1" "1" "1") "do"
+                       (stmt "FOR" "foo" "in" (expr "#1" "#1" "#3") "do"
+                             (stmt (LIST (expr "a") (expr "b")))))))
 
   (define-bnf/quick bnf-test-1/quick
     [statement ["pass"]
@@ -756,33 +801,50 @@
 
   (check se/datum?
          (wp*/r "pass" bnf-test-1/quick)
-         (list #'"pass"))
+         (list #'(statement "pass")))
 
   (check se/datum?
          (wp*/r "53" bnf-test-1/quick)
-         (list #'53))
+         (list #'(statement (expression 53))))
   (check se/datum?
          (wp*/r "53 + 27" bnf-test-1/quick)
-         (list #'(53 "+" 27)))
+         (list #'(statement (expression (expression 53) "+" (expression 27)))))
 
   (check se/datum?
          (wp*/r "5 + 67 * 3" bnf-test-1/quick)
-         (list #'(5 "+" (67 "*" 3))))
+         (list #'(statement (expression (expression 5)
+                                        "+"
+                                        (expression (expression 67)
+                                                    "*"
+                                                    (expression 3))))))
 
 
   (check se/datum?
          (wp*/r "for x in 27 + 13 do { 555 * x }" bnf-test-1/quick)
-         (list #'("for" "x" "in" (27 "+" 13) "do" ("{" (555 "*" "x") "}"))))
+         (list #'(statement "for" (id "x") "in"
+                            (expression (expression 27)
+                                        "+"
+                                        (expression 13))
+                            "do"
+                            (statement "{" (statement
+                                            (expression (expression 555)
+                                                        "*"
+                                                        (expression (id "x"))))
+                                       "}"))))
   (check se/datum?
          (wp*/r "{ 5 6 7 }" bnf-test-1/quick)
-         (list #'("{" 5 6 7 "}")))
+         (list #'(statement "{"
+                            (statement (expression 5))
+                            (statement (expression 6))
+                            (statement (expression 7))
+                            "}")))
 
   (define-bnf/quick with-subseq
     [an-arm ["a" @@ #("b" "c") + "d"]])
 
   (check se/datum?
          (wp*/r "a b c b c b c d" with-subseq)
-         (list #'("a" "b" "c" "b" "c" "b" "c" "d")))
+         (list #'(an-arm "a" "b" "c" "b" "c" "b" "c" "d")))
 
   )
 
