@@ -22,6 +22,9 @@
    racket/port
    "private/core.rkt"
    "private/procedural-combinators.rkt"
+   "private/readtable-parser.rkt"
+   ;; TODO - use default chido-parse readtable
+   (submod "private/readtable-parser.rkt" an-s-exp-readtable)
    "private/bnf-parse.rkt"
    "private/bnf-macro.rkt"
    "private/bnf-s-exp.rkt"
@@ -31,8 +34,18 @@
       (strip-context
        (parse-derivation-result
         (whole-parse port
-                     (bnf-parser->with-surrounding-layout
-                      syntactic-bnf-parser)))))
+                     (sequence
+                      (bnf-parser->with-surrounding-layout
+                       syntactic-bnf-parser)
+                      (repetition
+                       #:min 0 #:max 1
+                       (sequence
+                        (result-filter an-s-exp-readtable
+                                       (λ (stx) (keyword? (syntax-e stx))))
+                        (chido-readtable->read* an-s-exp-readtable)
+                        #:result/stx (λ (kw forms) (cons kw forms)))))))))
+    ;; If we don't consume the port we'll get an error.
+    ;; TODO - what is the best way to present this to users?  Should whole-parse consume the port automatically?  Should there be a version that does and that doesn't?  Maybe a keyword about whether or not it does, defaulting to doing it?
     (port->string port)
     parse-result)
   (define (bnf-read port)
@@ -40,9 +53,14 @@
   )
 
 (define-syntax (bnf-module-begin stx)
+  (define-syntax-class not-keyword
+    (pattern x #:when (not (keyword? (syntax-e #'x)))))
   (syntax-parse stx
-    [(_ form ...)
+    [(_ (bnf-form:not-keyword ...)
+        (((~optional (~seq (~and kw:keyword (~commit #:definitions))
+                           lisp-form ...)))))
      #'(#%module-begin
+        (~? (begin lisp-form ...))
         (define-bnf/syntactic/parsed parser
-          form ...)
+          bnf-form ...)
         (provide parser))]))
