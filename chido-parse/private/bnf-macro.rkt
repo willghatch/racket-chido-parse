@@ -7,6 +7,9 @@
  readtable-extend-as-bnf-arm/syntactic
  extend-bnf/syntactic
  |#
+
+ ;; for internal use in other chido-parse modules
+ define-bnf/syntactic/parsed
  )
 
 (require
@@ -14,6 +17,7 @@
  "procedural-combinators.rkt"
  (for-syntax
   "core.rkt"
+  "bnf-s-exp.rkt"
   "procedural-combinators.rkt"
   "bnf-parse.rkt"
   racket/base
@@ -86,7 +90,7 @@
                                   ...)))
  )
 
-(define-syntax (syntactic-bnf-definition/parsed stx)
+(define-syntax (define-bnf/syntactic/parsed stx)
   (syntax-parse stx
     [(_ name
         (arm-name:id ":" arm-alt:syntactic-bnf-arm-alt ...)
@@ -102,8 +106,9 @@
         #'src
         (parse-derivation-result
          (whole-parse (open-input-string (syntax->datum #'src))
-                      syntactic-bnf-parser))))
-     #`(syntactic-bnf-definition/parsed name #,@parse-result)]))
+                      (bnf-parser->with-surrounding-layout
+                       syntactic-bnf-parser)))))
+     #`(define-bnf/syntactic/parsed name #,@parse-result)]))
 
 
 (module+ test

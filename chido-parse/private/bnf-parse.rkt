@@ -67,7 +67,6 @@
    (λ (port) (parse* port default-s-exp-parser))))
 
 (define-bnf/quick syntactic-bnf-parser
-  [top-level-with-layout [/ current-chido-readtable-layout*-parser @ top-level / current-chido-readtable-layout*-parser]]
   [top-level [arm +]]
   [arm [id-parser ":" @ alt-sequence]]
   [alt-sequence [alt @@ #(/ "|" alt) *]]
@@ -100,11 +99,13 @@
 stmt: \"pass\"
 ")
   (check se/datum?
-         (wp*/r bnf-string-1 syntactic-bnf-parser)
+         (wp*/r bnf-string-1 (bnf-parser->with-surrounding-layout
+                              syntactic-bnf-parser))
          (list #'([stmt ":" [((() () () "pass" () () ())) ()]])))
 
   (check se/datum?
-         (wp*/r "something: $(in lisp escape)" syntactic-bnf-parser)
+         (wp*/r "something: $(in lisp escape)" (bnf-parser->with-surrounding-layout
+                                                syntactic-bnf-parser))
          (list #'([something ":" [((() () () (in lisp escape) () () ())) ()]])))
 
 
@@ -121,7 +122,8 @@ bnumber : (\"0\" | \"1\") +
 ")
 
   (define result (whole-parse* (open-input-string bnf-string/stmt)
-                               syntactic-bnf-parser))
+                               (bnf-parser->with-surrounding-layout
+                                syntactic-bnf-parser)))
 
 
   (check se/datum?
@@ -130,7 +132,8 @@ bnumber : (\"0\" | \"1\") +
                (whole-parse* (open-input-string bnf-string/stmt
                                                 ;; use this name to make it easy to compare syntax output when they differ -- it's the same length
                                                 "aaaaaaaaaaaaaaaaaaaaaA")
-                             syntactic-bnf-parser)))
+                             (bnf-parser->with-surrounding-layout
+                              syntactic-bnf-parser))))
          (list #'([stmt ":"
                         {([() () () "pass" () () ()]) ()}
                         {([() () () expr () () ()]) ()}

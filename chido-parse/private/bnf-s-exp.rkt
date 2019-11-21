@@ -15,6 +15,7 @@
  extend-bnf/quick
  |#
 
+ bnf-parser->with-surrounding-layout
  )
 
 (require
@@ -385,6 +386,12 @@
         (parse* port
                 (hash-ref (bnf-parser-arm-hash self)
                           (bnf-parser-main-arm-key self))))))))
+
+(define (bnf-parser->with-surrounding-layout bnf)
+  (sequence (kleene-star (bnf-parser-layout-alt bnf))
+            bnf
+            (kleene-star (bnf-parser-layout-alt bnf))
+            #:result/stx (λ (l bnf r) bnf)))
 
 (define (bnf-parser-ref bnf-parser key
                         [default (λ () (error 'bnf-parser-ref
