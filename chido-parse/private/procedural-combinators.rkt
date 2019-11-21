@@ -196,7 +196,7 @@
   (define-syntax-class binding-sequence-elem
     (pattern (~and whole-pattern
                    [(~datum :)
-                    (~or (~optional parser-given:expr)
+                    (~or (~once parser:expr)
                          (~optional (~seq #:bind name:id))
                          (~optional (~seq #:ignore ignore-given:expr))
                          (~optional (~seq #:splice splice-given:expr))
@@ -205,11 +205,6 @@
                          (~optional (~seq #:repeat-greedy? repeat-greedy-given:expr))
                          )
                     ...])
-             #:attr parser
-             (or (attribute parser-given)
-                 (raise-syntax-error 'binding-sequence
-                                     "given a parser spec with no parser"
-                                     #'whole-pattern))
              #:attr ignore #'(~? ignore-given #f)
              #:attr splice #'(~? splice-given #f)
              #:attr repeat-min #'(~? repeat-min-given #f)
