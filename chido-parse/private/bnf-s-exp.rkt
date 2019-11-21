@@ -95,8 +95,7 @@
                    (~optional (~seq #:result/stx result/stx:expr))
                    (~optional (~seq #:result/bare result/bare:expr))
                    )
-              ...]
-             #:attr parser #f))
+              ...]))
   )
 
 (define-syntax (result/bare-inherit stx)
@@ -235,20 +234,19 @@
          (let* ([rt/start arm]
                 [use-result/stx? (~? default-result/stx #f)]
                 [use-result/bare? (~? default-result/bare #f)]
-                [alts (list (~? spec.parser
-                                (let ([send-result/stx
-                                       (or result/stx (and (not result/bare)
-                                                           use-result/stx?))]
-                                      [send-result/bare
-                                       (or result/bare (and (not result/stx)
-                                                            use-result/bare?))])
-                                  (binding-sequence
-                                   spec.elem ...
-                                   #:result/stx send-result/stx
-                                   #:result/bare send-result/bare
-                                   #:between bnf-inserted-layout-parser
-                                   #:name (or alt-name/direct
-                                              alt-name/inferred))))
+                [alts (list (let ([send-result/stx
+                                   (or result/stx (and (not result/bare)
+                                                       use-result/stx?))]
+                                  [send-result/bare
+                                   (or result/bare (and (not result/stx)
+                                                        use-result/bare?))])
+                              (binding-sequence
+                               spec.elem ...
+                               #:result/stx send-result/stx
+                               #:result/bare send-result/bare
+                               #:between bnf-inserted-layout-parser
+                               #:name (or alt-name/direct
+                                          alt-name/inferred)))
                             ...)]
                 [rt/extended
                  (for/fold ([rt rt/start])
