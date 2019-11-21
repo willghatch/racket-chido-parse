@@ -12,3 +12,18 @@ bnumber : ($zero-str | "1") +
 #:definitions
 (define my-string-append string-append)
 (define zero-str "0")
+
+
+(module* test racket/base
+  (require
+   rackunit
+   "test-util-3.rkt"
+   (submod "..")
+   )
+
+  (check se/datum?
+         (wp*/r "{ 10 + 11 pass 11 * 11 + 110}" parser)
+         (list #'("{" ("10" "+" "11")
+                      "pass"
+                      (("11" "*" "11") "+" "110")  "}")))
+  )
