@@ -30,6 +30,7 @@
 
  whole-parse*
  whole-parse
+ parse
  )
 
 (require
@@ -1237,12 +1238,24 @@ TODO - what kind of filters do I need?
                       #:start [start #f])
   (parse* port/pbw (follow-filter parser (not-parser eof-parser)
                                   #:include-failures? #f)))
-(define (whole-parse port/pbw parser)
-  (define result* (whole-parse* port/pbw parser))
-  (cond [(stream-empty? result*) result*]
-        [(stream-empty? (stream-rest result*)) (stream-first result*)]
-        ;; TODO - better error message
-        [else (error 'whole-parse "ambiguous parse.")]))
+
+(define (no-ambiguity+read-port! port result errname)
+  (define result*
+    (cond [(stream-empty? result) result]
+          [(stream-empty? (stream-rest result)) (stream-first result)]
+          ;; TODO - better error message
+          [else (error errname "ambiguous parse.")]))
+  (when (and (not (stream? result*))
+             (input-port? port))
+    (read-string (- (parse-derivation-end-position result*)
+                    (parse-derivation-start-position result*))
+                 port))
+  result*)
+
+(define (whole-parse port parser)
+  (no-ambiguity+read-port! port (whole-parse* port parser) 'whole-parse))
+(define (parse port parser)
+  (no-ambiguity+read-port! port (parse* port parser) 'parse))
 
 (module+ test
   (c check-equal?

@@ -30,24 +30,19 @@
    "private/bnf-s-exp.rkt"
    )
   (define (bnf-read-syntax src port)
-    (define parse-result
-      (strip-context
-       (parse-derivation-result
-        (whole-parse port
+    (strip-context
+     (parse-derivation-result
+      (whole-parse port
+                   (sequence
+                    (bnf-parser->with-surrounding-layout
+                     syntactic-bnf-parser)
+                    (repetition
+                     #:min 0 #:max 1
                      (sequence
-                      (bnf-parser->with-surrounding-layout
-                       syntactic-bnf-parser)
-                      (repetition
-                       #:min 0 #:max 1
-                       (sequence
-                        (result-filter an-s-exp-readtable
-                                       (λ (stx) (keyword? (syntax-e stx))))
-                        (chido-readtable->read* an-s-exp-readtable)
-                        #:result/stx (λ (kw forms) (cons kw forms)))))))))
-    ;; If we don't consume the port we'll get an error.
-    ;; TODO - what is the best way to present this to users?  Should whole-parse consume the port automatically?  Should there be a version that does and that doesn't?  Maybe a keyword about whether or not it does, defaulting to doing it?
-    (port->string port)
-    parse-result)
+                      (result-filter an-s-exp-readtable
+                                     (λ (stx) (keyword? (syntax-e stx))))
+                      (chido-readtable->read* an-s-exp-readtable)
+                      #:result/stx (λ (kw forms) (cons kw forms)))))))))
   (define (bnf-read port)
     (syntax->datum (bnf-read-syntax (object-name port) port)))
   )

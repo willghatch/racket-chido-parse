@@ -1286,7 +1286,13 @@ But I still need to encapsulate the port and give a start position.
 
 (define (parse* port/pbw parser
                 #:start [start #f])
-  (parse-inner enter-the-parser port/pbw parser start))
+  (parse-inner enter-the-parser
+               (cond [(string? port/pbw) (open-input-string port/pbw)]
+                     [(input-port? port/pbw) port/pbw]
+                     [(port-broker-wrap? port/pbw) port/pbw]
+                     [else (error 'parse* "bad input: ~v" port/pbw)])
+               parser
+               start))
 
 (define-syntax (for/parse stx)
   (syntax-parse stx
