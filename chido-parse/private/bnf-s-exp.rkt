@@ -157,7 +157,9 @@
 
          (define rt2
            (for/fold ([rt rt1])
-                     ([parser (~? layout-parsers bnf-default-layout-parsers)])
+                     ([parser (~? layout-parsers
+                                  (~? layout-parsers/inherit
+                                      bnf-default-layout-parsers))])
              (extend-chido-readtable 'terminating-layout parser rt)))
 
          (define rt3 (readtable-extend-as-bnf-arm

@@ -57,8 +57,8 @@
     (pattern x #:when (not (keyword? (syntax-e #'x)))))
   (syntax-parse stx
     [(_ (bnf-form:not-keyword ...)
-        (((~optional (~seq (~and kw:keyword (~commit #:definitions))
-                           lisp-form ...)))))
+        ((~optional ((~and kw:keyword (~commit #:definitions))
+                     lisp-form ...))))
      #'(#%module-begin
         (~? (begin lisp-form ...))
         (define-bnf/syntactic/parsed parser

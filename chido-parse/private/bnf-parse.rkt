@@ -66,7 +66,25 @@
    #:prefix "$"
    (λ (port) (parse* port default-s-exp-parser))))
 
+(define line-comment-parser
+  (proc-parser
+   #:prefix ";"
+   (λ (port)
+     (let loop ()
+       (define c (read-char port))
+       (if (or (eq? c #\newline)
+               (eof-object? c))
+           (make-parse-derivation #t)
+           (loop))))))
+
+
+(module+ test
+  (check-equal? (wp*/r ";;; this is a line-comment-test"
+                       line-comment-parser)
+                '(#t)))
+
 (define-bnf/quick syntactic-bnf-parser
+  #:layout-parsers (list " " "\t" "\r" "\n" line-comment-parser)
   [top-level [@ arm +]]
   ;; TODO - I would like to use "/"? here, but it makes the parse ambiguous due to layout parsing differences.  What is the best way to fix that?
   [arm ["/" id-parser ":" @ alt-sequence]
@@ -116,8 +134,9 @@ stmt: \"pass\"
 
   (define bnf-string/stmt "
 stmt : \"pass\"
-     | expr
+     | expr ; a comment
      | \"{\" stmt + \"}\"
+;; another comment
 expr : @ $(follow-filter bnumber bnumber)
      | expr \"+\" expr & left
      | expr \"*\" expr & left > \"+\"
