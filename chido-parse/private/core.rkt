@@ -194,6 +194,8 @@
                                      (map parse-derivation-end-position
                                           derivation-list)))
                          (current-chido-parse-derivation-implicit-end)
+                         (let ([port (parser-job-port job)])
+                           (and port (port->pos port)))
                          (error 'make-parse-derivation
                                 "Couldn't infer end location and none provided.")))
      (define delayed? (procedure? result))
