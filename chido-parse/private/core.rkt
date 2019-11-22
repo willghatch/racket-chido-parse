@@ -301,7 +301,8 @@
   (cond [(parser-struct? p) p]
         [(custom-parser? p)
          (parser->usable ((custom-parser-ref p) p))]
-        [(string? p) p]
+        [(and (string? p) (immutable? p)) p]
+        [(string? p) (string->immutable-string p)]
         ;; Usually I want to cache thunk results, but some, including chido-parse-parameters, specifically need NOT to be cached (at least not merely on procedure object identity), because they depend on chido-parse-parameterization.
         [(non-cached-parser-thunk? p) (parser->usable (p))]
         [(chido-parse-parameter? p) (parser->usable (p))]
