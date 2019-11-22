@@ -27,6 +27,7 @@
 
  char-parser
  char-range-parser
+ any-char-parser
 
  whole-parse*
  whole-parse
@@ -1220,6 +1221,15 @@ TODO - what kind of filters do I need?
                               (format "character (~v) not in range: ~v-~v"
                                       c min-use max-use)))))))
 
+(define any-char-parser
+  (proc-parser
+   #:promise-no-left-recursion? #t
+   (λ (port)
+     (define c (read-char port))
+     (if (eof-object? c)
+         (make-parse-failure)
+         (make-parse-derivation c)))))
+
 (module+ test
   (check-equal? (p*/r "a" (char-parser "a")) '(#\a))
   (check-pred parse-failure? (parse* (open-input-string "b") (char-parser "a")))
@@ -1227,6 +1237,7 @@ TODO - what kind of filters do I need?
   (check-equal? (p*/r "d" (char-range-parser #\a "f")) '(#\d))
   (check-pred parse-failure? (parse* (open-input-string "g")
                                      (char-range-parser "af")))
+  (check-equal? (p*/r "d" any-char-parser) '(#\d))
   )
 
 
