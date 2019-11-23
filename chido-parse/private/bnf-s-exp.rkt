@@ -22,6 +22,7 @@
  "core.rkt"
  "readtable-parser.rkt"
  "procedural-combinators.rkt"
+ "binding-sequence.rkt"
  "parameters.rkt"
  racket/stream
  racket/match

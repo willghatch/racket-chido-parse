@@ -21,6 +21,7 @@
 
  ;; this is not for the public interface...
  current-chido-parse-derivation-implicit-end
+ port->pos
 
  alt-parser?
  make-alt-parser
