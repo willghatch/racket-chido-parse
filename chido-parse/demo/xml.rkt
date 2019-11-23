@@ -11,7 +11,7 @@ STag : "<" Name Attribute* ">"
 ETag : "</" Name ">"
 Attribute : Name "=" AttValue
 AttValue : "\"" ($(char-not-in "<&\"") | Reference)* "\""
-         | "'" ($(char-not-in "<&'") | Reference) "'"
+         | "'" ($(char-not-in "<&'") | Reference)* "'"
 
 
 ;; 	content	   ::=   	CharData? ((element | Reference | CDSect | PI | Comment) CharData?)*
@@ -86,3 +86,22 @@ Misc : Comment | PI
 (define (char-not-in str)
   (result-filter any-char-parser (λ (c) (string-contains? str (string c)))))
 
+
+(module* main racket/base
+  (require
+   (submod "..")
+   racket/cmdline
+   chido-parse
+   )
+
+  (define file
+    (command-line #:args (xml-file) xml-file))
+  (define port (open-input-file file))
+  (define parse-result
+    (whole-parse port
+                 (bnf-parser->with-surrounding-layout
+                  parser)))
+  (if (parse-failure? parse-result)
+      (printf "~a\n" (parse-failure->string/chain parse-result))
+      (printf "~v\n" (parse-derivation-result parse-result)))
+  )
