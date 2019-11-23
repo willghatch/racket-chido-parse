@@ -110,13 +110,20 @@
 (define-syntax (define-bnf/syntactic stx)
   (syntax-parse stx
     [(_ name:id src:string)
+     (define derivation
+       (whole-parse (open-input-string (syntax->datum #'src))
+                    (bnf-parser->with-surrounding-layout
+                     syntactic-bnf-parser)))
+     (when (parse-failure? derivation)
+       (eprintf "~a" (parse-failure->string/chain derivation))
+       (raise-syntax-error 'define-bnf/syntactic
+                           "error while parsing syntax string"
+                           #'src))
      (define parse-result
        (replace-context
         #'src
         (parse-derivation-result
-         (whole-parse (open-input-string (syntax->datum #'src))
-                      (bnf-parser->with-surrounding-layout
-                       syntactic-bnf-parser)))))
+         derivation)))
      #`(define-bnf/syntactic/parsed name #,@parse-result)]))
 
 
