@@ -39,21 +39,16 @@
  racket/stream
  racket/match
  racket/list
- racket/stxparam
  (for-syntax
   racket/base
   syntax/parse
   ))
 
 (module+ test
-
   (require
    rackunit
    "test-util-2.rkt"
-   (for-syntax
-    racket/base
-    syntax/parse
-    )))
+   ))
 
 (define-syntax (/end stx)
   ;; quick hack to get end positions working with empty derivation lists

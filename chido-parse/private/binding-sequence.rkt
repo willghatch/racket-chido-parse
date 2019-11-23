@@ -8,12 +8,8 @@
 
 (require
  "core.rkt"
- "parse-stream.rkt"
  "procedural-combinators.rkt"
- racket/string
- racket/stream
  racket/match
- racket/list
  racket/stxparam
  (for-syntax
   racket/base
@@ -24,10 +20,7 @@
   (require
    rackunit
    "test-util-3.rkt"
-   (for-syntax
-    racket/base
-    syntax/parse
-    )))
+   ))
 
 (define (do-ignore-and-splice derivations
                               ignores
