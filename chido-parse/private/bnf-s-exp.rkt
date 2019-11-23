@@ -415,9 +415,14 @@
                           (bnf-parser-main-arm-key self))))))))
 
 (define (bnf-parser->with-surrounding-layout bnf)
-  (sequence (kleene-star (bnf-parser-layout-alt bnf))
+  (sequence (kleene-star (bnf-parser-layout-alt bnf)
+                         ;; TODO - figure out what to best do here
+                         ;#:greedy? #t
+                         )
             bnf
-            (kleene-star (bnf-parser-layout-alt bnf))
+            (kleene-star (bnf-parser-layout-alt bnf)
+                         ;#:greedy? #t
+                         )
             #:result/stx (λ (l bnf r) bnf)))
 
 (define (bnf-parser-ref bnf-parser key
@@ -674,6 +679,8 @@
                                 (~? (~@ #:bind name))
                                 #:ignore ignore
                                 #:splice (~? splice-given.number #f)
+                                ;; TODO - figure this out
+                                ;#:repeat-greedy? #t
                                 #:repeat-min (cond [(~? 'star #f) 0]
                                                    [(~? 'plus #f) 1]
                                                    [else #f])
