@@ -3,15 +3,17 @@
 ;document : prolog element Misc*
 ;; For now let's do a simplified version...
 document : element
+;; TODO - filter ETag based on STag name!
 element : EmptyElemTag
         | STag content ETag
 
 EmptyElemTag : "<" Name Attribute* "/>"
 STag : /"<" Name Attribute* /">"
 ETag : /"</" Name /">"
-Attribute : Name "=" AttValue
-AttValue : "\"" ($(char-not-in "<&\"") | Reference)* "\""
-         | "'" ($(char-not-in "<&'") | Reference)* "'"
+Attribute : Name /"=" AttValue
+;; TODO - I really need to disallow layout insertion here...
+AttValue : /"\"" @($(char-not-in "<&\"") | Reference)* /"\""
+         | /"'" @($(char-not-in "<&'") | Reference)* /"'"
 
 
 ;; 	content	   ::=   	CharData? ((element | Reference | CDSect | PI | Comment) CharData?)*
@@ -30,6 +32,8 @@ Reference : EntityRef | CharRef
 EntityRef :  "&" Name ";"
 CharRef : "&#" $(cr "09")+ ";"
         | "&#x" ($(cr "09") | $(cr "af") | $(cr "AF"))+ ";"
+
+;;; TODO !!!! Name is parsing wrong due to auto-layout insertion.  For several productions I need a switch to turn it off.  This should be easy, since I think the option exists in bnf-s-exp, but it is not threaded through to bnf-syntactic.
 
 ;NameStartChar	   ::=   	":" | [A-Z] | "_" | [a-z] | [#xC0-#xD6] | [#xD8-#xF6] | [#xF8-#x2FF] | [#x370-#x37D] | [#x37F-#x1FFF] | [#x200C-#x200D] | [#x2070-#x218F] | [#x2C00-#x2FEF] | [#x3001-#xD7FF] | [#xF900-#xFDCF] | [#xFDF0-#xFFFD] | [#x10000-#xEFFFF]
 / NameStartChar : ":" | $(cr "AZ") | "_" | $(cr "az") | $(cr "#xC0#xD6") | $(cr "#xD8#xF6") | $(cr "#xF8#x2FF") | $(cr "#x370#x37D") | $(cr "#x37F#x1FFF") | $(cr "#x200C#x200D") | $(cr "#x2070#x218F") | $(cr "#x2C00#x2FEF") | $(cr "#x3001#xD7FF") | $(cr "#xF900#xFDCF") | $(cr "#xFDF0#xFFFD") | $(cr "#x10000#xEFFFF")
@@ -95,8 +99,33 @@ Misc : Comment | PI
 
 (define Char any-char-parser)
 (define (char-not-in str)
-  (result-filter any-char-parser (λ (c) (string-contains? str (string c)))))
+  (result-filter any-char-parser
+                 (λ (c)
+                   (not (string-contains? str (string c))))))
 
+(module* test racket/base
+  (require
+   (submod "..")
+   rackunit
+   chido-parse
+   racket/dict
+   "../private/test-util-3.rkt"
+   )
+
+  (define name-parser (bnf-parser->arm-parser parser 'Name))
+  (define attr-parser (bnf-parser->arm-parser parser 'Attribute))
+  (define attvalue-parser (bnf-parser->arm-parser parser 'AttValue))
+
+  (check se/datum?
+         (wp*/r "hello" name-parser)
+         (list #'hello))
+  #;(check se/datum?
+         (wp*/r "'foo'" attvalue-parser)
+         #'(AttValue "foo"))
+  #;(check se/datum?
+         (wp*/r "hello='foo'" attr-parser)
+         #'(Attribute hello "foo"))
+  )
 
 (module* main racket/base
   (require
