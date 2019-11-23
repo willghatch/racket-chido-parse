@@ -42,6 +42,7 @@
 
  (struct-out parse-failure)
  make-parse-failure
+ parse-failure->string/location-triple
  parse-failure->string/simple
  parse-failure->string/message
  parse-failure->string/chain
@@ -121,8 +122,6 @@
   #:transparent)
 
 (define (parse-derivation-result! pd)
-  (when (not (parse-derivation? pd))
-    (error 'parse-derivation-result "not a parse-derivation: ~v\n" pd))
   (if (parse-derivation-result-forced? pd)
       (parse-derivation-result pd)
       (let* ([f (parse-derivation-result pd)]

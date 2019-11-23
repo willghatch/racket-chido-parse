@@ -30,8 +30,7 @@
    "private/bnf-s-exp.rkt"
    )
   (define (bnf-read-syntax src port)
-    (strip-context
-     (parse-derivation-result
+    (define parse-result
       (whole-parse port
                    (sequence
                     (bnf-parser->with-surrounding-layout
@@ -42,7 +41,15 @@
                       (result-filter an-s-exp-readtable
                                      (λ (stx) (keyword? (syntax-e stx))))
                       (chido-readtable->read* an-s-exp-readtable)
-                      #:result/stx (λ (kw forms) (cons kw forms)))))))))
+                      #:result/stx (λ (kw forms) (cons kw forms)))))))
+    (when (parse-failure? parse-result)
+      (eprintf "~a\n" (parse-failure->string/chain parse-result))
+      (error 'bnf-read-syntax
+             "Error parsing input file ~a at ~a."
+             src
+             (parse-failure->string/location-triple parse-result)))
+    (strip-context
+     (parse-derivation-result parse-result)))
   (define (bnf-read port)
     (syntax->datum (bnf-read-syntax (object-name port) port)))
   )
