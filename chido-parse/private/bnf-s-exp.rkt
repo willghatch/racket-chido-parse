@@ -16,6 +16,7 @@
  |#
 
  bnf-parser->with-surrounding-layout
+ bnf-parser->arm-parser
  )
 
 (require
@@ -413,6 +414,13 @@
         (parse* port
                 (hash-ref (bnf-parser-arm-hash self)
                           (bnf-parser-main-arm-key self))))))))
+
+(define (bnf-parser->arm-parser bnf arm-name)
+  (define arm (dict-ref (bnf-parser-arm-hash bnf) arm-name))
+  (proc-parser
+   (λ (port)
+     (chido-parse-parameterize ([current-bnf bnf])
+                               (parse* port arm)))))
 
 (define (bnf-parser->with-surrounding-layout bnf)
   (sequence (kleene-star (bnf-parser-layout-alt bnf)
