@@ -7,15 +7,15 @@ element : EmptyElemTag
         | STag content ETag
 
 EmptyElemTag : "<" Name Attribute* "/>"
-STag : "<" Name Attribute* ">"
-ETag : "</" Name ">"
+STag : /"<" Name Attribute* /">"
+ETag : /"</" Name /">"
 Attribute : Name "=" AttValue
 AttValue : "\"" ($(char-not-in "<&\"") | Reference)* "\""
          | "'" ($(char-not-in "<&'") | Reference)* "'"
 
 
 ;; 	content	   ::=   	CharData? ((element | Reference | CDSect | PI | Comment) CharData?)*
-content	:CharData? @ ((element | Reference | CDSect | PI | Comment) CharData?)*
+content	: @CharData? @ ((element | Reference | CDSect | PI | Comment) CharData?)*
 
 
 ;;CDSect : CDStart CData CDEnd
@@ -32,10 +32,12 @@ CharRef : "&#" $(cr "09")+ ";"
         | "&#x" ($(cr "09") | $(cr "af") | $(cr "AF"))+ ";"
 
 ;NameStartChar	   ::=   	":" | [A-Z] | "_" | [a-z] | [#xC0-#xD6] | [#xD8-#xF6] | [#xF8-#x2FF] | [#x370-#x37D] | [#x37F-#x1FFF] | [#x200C-#x200D] | [#x2070-#x218F] | [#x2C00-#x2FEF] | [#x3001-#xD7FF] | [#xF900-#xFDCF] | [#xFDF0-#xFFFD] | [#x10000-#xEFFFF]
-NameStartChar : ":" | $(cr "AZ") | "_" | $(cr "az") | $(cr "#xC0#xD6") | $(cr "#xD8#xF6") | $(cr "#xF8#x2FF") | $(cr "#x370#x37D") | $(cr "#x37F#x1FFF") | $(cr "#x200C#x200D") | $(cr "#x2070#x218F") | $(cr "#x2C00#x2FEF") | $(cr "#x3001#xD7FF") | $(cr "#xF900#xFDCF") | $(cr "#xFDF0#xFFFD") | $(cr "#x10000#xEFFFF")
+/ NameStartChar : ":" | $(cr "AZ") | "_" | $(cr "az") | $(cr "#xC0#xD6") | $(cr "#xD8#xF6") | $(cr "#xF8#x2FF") | $(cr "#x370#x37D") | $(cr "#x37F#x1FFF") | $(cr "#x200C#x200D") | $(cr "#x2070#x218F") | $(cr "#x2C00#x2FEF") | $(cr "#x3001#xD7FF") | $(cr "#xF900#xFDCF") | $(cr "#xFDF0#xFFFD") | $(cr "#x10000#xEFFFF")
 ;	NameChar	   ::=   	NameStartChar | "-" | "." | [0-9] | #xB7 | [#x0300-#x036F] | [#x203F-#x2040]
-NameChar : NameStartChar | "-" | "." | $(cr "09") | "#xB7" | $(cr "#x0300#x036F") | $(cr "#x203F#x2040")
-Name : NameStartChar NameChar*
+/ NameChar : NameStartChar | "-" | "." | $(cr "09") | "#xB7" | $(cr "#x0300#x036F") | $(cr "#x203F#x2040")
+/ Name : @NameStartChar @@@NameChar*
+:: (λ cs (string->symbol (apply string (map ->char cs))))
+
 Names : Name ("#x20" Name)*
 
 Comment : "<!--"
@@ -64,6 +66,15 @@ Misc : Comment | PI
 (define (not-dash? c)
   (not (equal? c (string-ref "-" 0))))
 (define cr char-range-parser)
+
+(define (->char x)
+  (cond [(syntax? x) (->char (syntax-e x))]
+        ;[(and (list? x) (null? (cdr x))) (->char (car x))]
+        [(char? x) x]
+        [(and (string? x) (eq? (string-length x) 1)) (string-ref x 0)]
+        [else
+         (eprintf "not char: ~v\n" x)
+         (error '->char "can't convert to char: ~v\n" x)]))
 
 (define (make-cdata excluding-regexp)
   (proc-parser
