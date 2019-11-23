@@ -92,16 +92,28 @@ Misc : Comment | PI
    (submod "..")
    racket/cmdline
    chido-parse
+   racket/stream
    )
 
   (define file
     (command-line #:args (xml-file) xml-file))
   (define port (open-input-file file))
   (define parse-result
-    (whole-parse port
-                 (bnf-parser->with-surrounding-layout
-                  parser)))
-  (if (parse-failure? parse-result)
-      (printf "~a\n" (parse-failure->string/chain parse-result))
-      (printf "~v\n" (parse-derivation-result parse-result)))
+    (whole-parse* port
+                  (bnf-parser->with-surrounding-layout
+                   parser)))
+  (cond [(parse-failure? parse-result)
+         (printf "~a\n" (parse-failure->string/chain parse-result))]
+        [(stream-empty? (stream-rest parse-result))
+         (printf "~v\n" (parse-derivation-result (stream-first parse-result)))]
+        [else
+         (printf "AMBIGUOUS PARSE!\n\n")
+         (printf "Result 1:\n")
+         (printf "~v\n" (parse-derivation-result (stream-first parse-result)))
+         (printf "\n\nResult 2:\n")
+         (printf "~v\n" (parse-derivation-result (stream-first (stream-rest
+                                                                parse-result))))
+         (printf "\n\n total number of results...\n")
+         (printf "~v\n" (stream-length parse-result))
+         ])
   )
