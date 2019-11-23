@@ -845,8 +845,7 @@ TODO - what kind of filters do I need?
    (λ (port)
      (if (eq? (read-char port) c-use)
          (make-parse-derivation c-use)
-         (make-parse-failure (string->immutable-string
-                              (format "character didn't match: ~v" c-use)))))))
+         (make-parse-failure)))))
 
 (define (char-range-parser min [max #f])
   ;; Accepts a min and a max as char or single-char strings,
@@ -866,9 +865,10 @@ TODO - what kind of filters do I need?
      (define c (read-char port))
      (if (char<=? min-use c max-use)
          (make-parse-derivation c)
-         (make-parse-failure (string->immutable-string
-                              (format "character (~v) not in range: ~v-~v"
-                                      c min-use max-use)))))))
+         (make-parse-failure
+          #:message (string->immutable-string
+                     (format "character (~v) not in range: ~v-~v"
+                             c min-use max-use)))))))
 
 (define any-char-parser
   (proc-parser
