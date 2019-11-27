@@ -4,26 +4,26 @@
 ;; For now let's do a simplified version...
 document : element
 ;; TODO - filter ETag based on STag name!
-element : EmptyElemTag
-        | STag content ETag
+% element : EmptyElemTag
+          | STag content ETag
 
 EmptyElemTag : "<" Name Attribute* "/>"
 STag : /"<" Name Attribute* /">"
 ETag : /"</" Name /">"
 Attribute : Name /"=" AttValue
 ;; TODO - I really need to disallow layout insertion here...
-AttValue : /"\"" @($(char-not-in "<&\"") | Reference)* /"\""
-         | /"'" @($(char-not-in "<&'") | Reference)* /"'"
+% AttValue : /"\"" @($(char-not-in "<&\"") | Reference)* /"\""
+           | /"'" @($(char-not-in "<&'") | Reference)* /"'"
 
 
 ;; 	content	   ::=   	CharData? ((element | Reference | CDSect | PI | Comment) CharData?)*
-content	: @CharData? @ ((element | Reference | CDSect | PI | Comment) CharData?)*
+% content : @ $non-null-CharData ? @ ((element | Reference | CDSect | PI | Comment) $non-null-CharData ?)*
 
 
 ;;CDSect : CDStart CData CDEnd
 ;;CDStart : "<![CDATA["
 ;;CDEnd : "]]>"
-CDSect : "<![CDATA[" CData "]]>"
+% CDSect : "<![CDATA[" CData "]]>"
 ;;;; CData and CharData are built below as a procedure
 ;;CData : (Char* - (Char* "]]>" Char*))
 ;; CharData	   ::=   	[^<&]* - ([^<&]* ']]>' [^<&]*)
@@ -39,12 +39,12 @@ CharRef : "&#" $(cr "09")+ ";"
 / NameStartChar : ":" | $(cr "AZ") | "_" | $(cr "az") | $(cr "#xC0#xD6") | $(cr "#xD8#xF6") | $(cr "#xF8#x2FF") | $(cr "#x370#x37D") | $(cr "#x37F#x1FFF") | $(cr "#x200C#x200D") | $(cr "#x2070#x218F") | $(cr "#x2C00#x2FEF") | $(cr "#x3001#xD7FF") | $(cr "#xF900#xFDCF") | $(cr "#xFDF0#xFFFD") | $(cr "#x10000#xEFFFF")
 ;	NameChar	   ::=   	NameStartChar | "-" | "." | [0-9] | #xB7 | [#x0300-#x036F] | [#x203F-#x2040]
 / NameChar : NameStartChar | "-" | "." | $(cr "09") | "#xB7" | $(cr "#x0300#x036F") | $(cr "#x203F#x2040")
-/ Name : @NameStartChar @@@NameChar*
+/ % Name : @NameStartChar @@@NameChar*
 :: (λ cs (string->symbol (apply string (map ->char cs))))
 
-Names : Name ("#x20" Name)*
+% Names : Name ("#x20" Name)*
 
-Comment : "<!--"
+% Comment : "<!--"
           ($(char-not-in "-") | ($(char-parser "-") $(char-not-in "-")))
           "-->"
 
@@ -93,6 +93,7 @@ Misc : Comment | PI
            (loop (cons (read-char port) chars))
            (apply string (reverse chars)))))))
 (define CharData (make-cdata (pregexp "^\\]\\]>")))
+(define non-null-CharData (result-filter CharData (λ (r) (not (equal? "" r)))))
 (define PI-text (make-cdata (pregexp "^\\?>")))
 (define CData (make-cdata #f))
 
