@@ -140,7 +140,9 @@
         ...+)
      #'(begin
          (define ignore-arm-name-use (~? ignore-arm-name/given #f))
-         (define layout-arg-use (~? layout-arg bnf-default-layout-requirement))
+         (define layout-arg-use (~? layout-arg
+                                    (~? layout/inherit
+                                        bnf-default-layout-requirement)))
          (define given-result/bare? (~? arm-result/bare #f))
          (define given-result/stx? (~? arm-result/stx #f))
          (define inherit-result/bare? (~? result/bare/inherit #f))
@@ -456,8 +458,11 @@
              (~optional (~seq #:main-arm main-arm-arg:id))
              )
         ...
-        [arm-name:id (~optional (~seq #:ignore-arm-name? ignore-arm-name?/given:expr))
-                     arm-spec/kw ...]
+        [arm-name:id
+         (~or (~optional (~seq #:ignore-arm-name? ignore-arm-name?/given:expr))
+              (~optional (~seq #:layout layout-for-arm?/given:expr)))
+         ...
+         arm-spec/kw ...]
         ...)
      (define/syntax-parse main-arm:id
        (or (attribute main-arm-arg)
@@ -496,6 +501,7 @@
              (let ([arm-name (let ()
                                (define-bnf-arm arm-name
                                  #:ignore-arm-name? ignore-arm-name
+                                 (~? (~@ #:layout layout-for-arm?/given))
                                  layout-parsers-inherit (list bnf-layout-parser)
                                  layout-inherit layout/inherit
                                  result/bare-inherit result/bare/inherit
@@ -649,6 +655,7 @@
   (define-syntax-class unspecial-expr
     (pattern (~and (~not (~or (~datum =)
                               (~datum /)
+                              (~datum %)
                               (~datum *)
                               (~datum +)
                               (~datum ?)
@@ -723,7 +730,10 @@
              ;(~optional (~seq #:main-arm main-arm-arg:id))
              )
         ...
-        [(~optional (~and (~datum /) ignore-arm-name))
+        [(~or (~optional (~and (~datum /) ignore-arm-name))
+              ;; TODO - I don't like how I have % implemented -- layout in the underlying macro is ternary -- required, optional, or none.  This only allows setting an arm to none.
+              (~optional (~and (~datum %) no-layout-for-arm)))
+         ...
          (~and arm-name:id unspecial:unspecial-expr)
          arm-spec:bnf-arm-alt-spec/quick ...]
         ...)
@@ -734,6 +744,7 @@
              (~? (~@ #:layout layout-arg))
              [arm-name
               (~? (~@ #:ignore-arm-name? 'ignore-arm-name))
+              (~? (~@ #:layout (and 'no-layout-for-arm 'none)))
               arm-spec.nonquick ...] ...)
            name))]))
 

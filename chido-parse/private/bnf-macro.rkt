@@ -101,14 +101,23 @@
     [(_ name
         (~datum top-level)
         ([~datum arm]
-         (~optional (~and "/" ignore-arm-name))
+         (~or (~optional (~and "/" ignore-arm-name))
+              (~optional (~and "%" no-layout-for-arm)))
+         ...
          arm-name:id ":" arm-alt:syntactic-bnf-arm-alt ...)
         ...)
      (define/syntax-parse (ignore ...)
        (map (λ (x) (if x #'(/) #'()))
             (attribute ignore-arm-name)))
+     (define/syntax-parse (no-layout ...)
+       (map (λ (x) (if x #'(%) #'()))
+            (attribute no-layout-for-arm)))
      #'(define-bnf/quick name
-         [(~@ . ignore) arm-name arm-alt.transformed ...] ...)]))
+         [(~@ . ignore)
+          (~@ . no-layout)
+          arm-name
+          arm-alt.transformed ...]
+         ...)]))
 
 (define-syntax (define-bnf/syntactic stx)
   (syntax-parse stx

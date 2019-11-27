@@ -87,8 +87,12 @@
   #:layout-parsers (list " " "\t" "\r" "\n" line-comment-parser)
   [top-level [@ arm +]]
   ;; TODO - I would like to use "/"? here, but it makes the parse ambiguous due to layout parsing differences.  What is the best way to fix that?
-  [arm ["/" id-parser ":" @ alt-sequence]
-       [id-parser ":" @ alt-sequence]]
+  [arm
+   ["/" id-parser ":" @ alt-sequence]
+   ["%" id-parser ":" @ alt-sequence]
+   ["/" "%" id-parser ":" @ alt-sequence]
+   ["%" "/" id-parser ":" @ alt-sequence]
+   [id-parser ":" @ alt-sequence]]
   [/ alt-sequence [alt @@ #(/ "|" alt) *]]
   [alt [elem + alt-flag *]]
   [/ alt-flag
