@@ -390,7 +390,9 @@
 (define (format-parser+message parser message)
   (if message
       (format "~a: ~a" (parser-name parser) message)
-      (parser-name parser)))
+      ;; TODO - this format should not be necessary, but parser-name is not always returning strings.  I should fix that.
+      (format "~a"
+              (parser-name parser))))
 
 (define (parse-failure->string/simple pf)
   (format "Parse failure at ~a. ~a"

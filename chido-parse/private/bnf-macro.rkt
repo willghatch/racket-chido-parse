@@ -41,12 +41,15 @@
                                                        (syntax-e #'flag-name)))
                                   flag-arg)))
  (define-syntax-class compound-parser
-   (pattern (~or ((~datum ELEM-ALT) alt-member:syntactic-bnf-elem ...)
-                 ((~datum ELEM-LIST) seq-member:syntactic-bnf-elem ...)
-                 simple-elem)
-            #:attr transformed #'(~? (|| (~@ . alt-member.transformed) ...)
-                                     (~? #((~@ . seq-member.transformed) ...)
-                                         simple-elem))))
+   (pattern (~and whole-stx
+                  (~or ((~datum ELEM-ALT) alt-member:syntactic-bnf-elem ...)
+                       ((~datum ELEM-LIST) seq-member:syntactic-bnf-elem ...)
+                       simple-elem))
+            #:attr transformed (syntax/loc
+                                   #'whole-stx
+                                   (~? (|| (~@ . alt-member.transformed) ...)
+                                       (~? #((~@ . seq-member.transformed) ...)
+                                           simple-elem)))))
  (define-syntax-class syntactic-bnf-elem
    (pattern ((~datum elem)
              bind-list

@@ -208,6 +208,19 @@
      (define/syntax-parse between-arg/use
        (or (attribute between-arg)
            subsequence-layout))
+     (define (basename-maybe pathstr)
+       (if (path-string? pathstr)
+           (path->string (car (reverse (explode-path pathstr))))
+           pathstr))
+     (define/syntax-parse name/infer
+       #`(format "binding-sequence-at_~a"
+                 '#,(format "~a:~a:~a:~a"
+                            (basename-maybe (syntax-source stx))
+                            (syntax-line stx)
+                            (syntax-column stx)
+                            (syntax-position stx))))
+     (define/syntax-parse name/use
+       #'(~? name name/infer))
      (if (syntax-parse #'between-arg/use [#f #f] [else #t])
          #`(let ([between-arg* between-arg/use])
              #,(with-syntax ([(parts-with-betweens ...)
@@ -223,12 +236,12 @@
                      (if between-arg*
                          (binding-sequence hidden-between-propagate-key between-arg*
                                            parts-with-betweens ...
-                                           #:name (~? name #f)
+                                           #:name name/use
                                            #:derive (~? derive-arg #f)
                                            #:result/bare (~? make-result-bare-arg #f)
                                            #:result/stx (~? make-result-stx-arg #f))
                          (binding-sequence part ...
-                                           #:name (~? name #f)
+                                           #:name name/use
                                            #:derive (~? derive-arg #f)
                                            #:result/bare (~? make-result-bare-arg #f)
                                            #:result/stx (~? make-result-stx-arg #f))))))
@@ -240,7 +253,7 @@
                    [make-result/bare (~? make-result-bare-arg #f)]
                    [make-result/stx (~? make-result-stx-arg #f)]
                    [splice (~? splice-arg #f)])
-               (proc-parser #:name (or (~? name #f) "TODO-binding-seq-name")
+               (proc-parser #:name name/use
                             ;; TODO - other optional args
                             (λ (port)
                               (binding-sequence-helper

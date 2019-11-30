@@ -208,7 +208,7 @@
                       parsers))
             (define str-elems (map syntax->datum str-elems/stx))
             (define name (if (null? str-elems)
-                             #f
+                             #'(format "alt-for:_~a" (parser-name arm))
                              (string-join str-elems "_")))
             (define postfix-op?
               (syntax-parse parsers
@@ -637,13 +637,15 @@
                                           (string-length
                                            (symbol->string (syntax->datum #'x))))))
   (define-syntax-class quick-subsequence
-    (pattern #(elem:binding-sequence-elem/quick ...)
-             #:attr nonquick #'(binding-sequence
-                                elem.nonquick ...
-                                ;; TODO - #:result/stx/bare
-                                ;; TODO - #:name
-                                #:between bnf-layout-parser
-                                )))
+    (pattern (~and whole-stx #(elem:binding-sequence-elem/quick ...))
+             #:attr nonquick (syntax/loc
+                                 #'whole-stx
+                                 (binding-sequence
+                                  elem.nonquick ...
+                                  ;; TODO - #:result/stx/bare
+                                  ;; TODO - #:name
+                                  #:between bnf-layout-parser
+                                  ))))
   (define-syntax-class unspecial-expr
     (pattern (~and (~not (~or (~datum =)
                               (~datum /)
