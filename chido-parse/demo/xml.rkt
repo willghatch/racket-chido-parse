@@ -2,7 +2,7 @@
 
 ;document : prolog element Misc*
 ;; For now let's do a simplified version...
-document : element
+document : prolog? element
 ;; TODO - filter ETag based on STag name!
 % element : EmptyElemTag
           | STag content ETag
@@ -29,7 +29,8 @@ Attribute : Name /"=" AttValue
 ;; CharData	   ::=   	[^<&]* - ([^<&]* ']]>' [^<&]*)
 
 Reference : EntityRef | CharRef
-EntityRef :  "&" Name ";"
+% EntityRef :  "&" Name ";"
+% PEReference : "%" Name ";"
 CharRef : "&#" $(cr "09")+ ";"
         | "&#x" ($(cr "09") | $(cr "af") | $(cr "AF"))+ ";"
 
@@ -45,7 +46,7 @@ CharRef : "&#" $(cr "09")+ ";"
 % Names : Name ("#x20" Name)*
 
 % Comment : "<!--"
-          ($(char-not-in "-") | ($(char-parser "-") $(char-not-in "-")))
+          ($(char-not-in "-") | ($(char-parser "-") $(char-not-in "-")))*
           "-->"
 
 ;;PI	   ::=   	'<?' PITarget (S (Char* - (Char* '?>' Char*)))? '?>'
@@ -57,12 +58,31 @@ PITarget : Name
 ;;Misc : Comment | PI | <whitespace>
 Misc : Comment | PI
 
-;;;; Prolog stuff
-;;[22]   	prolog	   ::=   	XMLDecl? Misc* (doctypedecl Misc*)?
-;;[23]   	XMLDecl	   ::=   	'<?xml' VersionInfo EncodingDecl? SDDecl? S? '?>'
-;;[24]   	VersionInfo	   ::=   	S 'version' Eq ("'" VersionNum "'" | '"' VersionNum '"')
-;;[25]   	Eq	   ::=   	S? '=' S?
-;;[26]   	VersionNum	   ::=   	'1.' [0-9]+
+
+prolog : XMLDecl? Misc* (doctypedecl Misc*)?
+XMLDecl : "<?xml" VersionInfo EncodingDecl? SDDecl? "?>"
+VersionInfo : "version" "=" (("'" VersionNum "'") | ("\"" VersionNum "\""))
+% VersionNum : "1." $(cr "09")+
+doctypedecl : "<!DOCTYPE" Name ExternalID? ("[" intSubset "]")? ">"
+;; TODO - elem-alts need to support sequences directly, rather than needing them to be put into parens.
+EncodingDecl : "encoding" "=" (("\"" EncName "\"") | ("'" EncName "'"))
+EncName : ($(cr "az") | $(cr "AZ")) ($(cr "az") | $(cr "AZ") | $(cr "09") | $(char-in "._-"))*
+SDDecl : "standalone" "=" (("'" ("yes" | "no") "'") | ("\"" ("yes" | "no") "\""))
+
+;; TODO - There are several more productions related to the prolog, but I want to start testing, and most xml does not include this crap.
+;% intSubset : (markupdecl | DeclSep)*
+intSubset : ""
+;markupdecl : elementdecl | AttlistDecl | EntityDecl | NotationDecl | PI | Comment
+;;markupdecl : elementdecl | AttlistDecl | EntityDecl | NotationDecl | PI | Comment
+
+ExternalID : "SYSTEM" SystemLiteral
+           | "PUBLIC" PubidLiteral SystemLiteral
+SystemLiteral : "'" $(char-not-in "'")* "'"
+              | "\"" $(char-not-in "\"")* "\""
+PubidLiteral : "'" PubidChar* "'"
+             | "\"" PubidChar* "\""
+PubidChar : "#x20" | "#xD" | "#xA" | $(cr "az") | $(cr "AZ") | $(cr "09") | $(char-in "-'()+,./:=?;!*#@$_%")
+;; TODO - all these "#x20" strings need to be changed to Racket's string escape format
 
 #:definitions
 (require racket/string)
@@ -103,6 +123,10 @@ Misc : Comment | PI
   (result-filter any-char-parser
                  (λ (c)
                    (not (string-contains? str (string c))))))
+(define (char-in str)
+  (result-filter any-char-parser
+                 (λ (c)
+                   (string-contains? str (string c)))))
 
 (module* test racket/base
   (require
