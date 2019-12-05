@@ -19,6 +19,7 @@
   (define f (command-line #:args (filename) filename))
 
   (define s (file->string f))
+  (eprintf "input length: ~v characters\n" (string-length s))
 
   (eprintf "Time for chido-parse s-exp parser:\n")
   (define my-parse
