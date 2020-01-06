@@ -2,18 +2,17 @@
 
 ;document : prolog element Misc*
 ;; For now let's do a simplified version...
-document : prolog? element
+% document : prolog element
 ;; TODO - filter ETag based on STag name!
 % element : EmptyElemTag
           | STag content ETag
 
-EmptyElemTag : "<" Name Attribute* "/>"
+EmptyElemTag : /"<" Name Attribute* /"/>"
 STag : /"<" Name Attribute* /">"
 ETag : /"</" Name /">"
-Attribute : Name /"=" AttValue
-% AttValue : /"\"" @($(char-not-in "<&\"") | Reference)* /"\""
-           | /"'" @($(char-not-in "<&'") | Reference)* /"'"
-           :: (λ cs (apply string (map ->char cs)))
+% Attribute : Name /"=" AttValue
+% AttValue : /"\"" @($(char-not-in "<&\"") | Reference)* /"\"" :: chars->string
+           | /"'" @($(char-not-in "<&'") | Reference)* /"'" :: chars->string
 
 
 ;; 	content	   ::=   	CharData? ((element | Reference | CDSect | PI | Comment) CharData?)*
@@ -31,8 +30,8 @@ Attribute : Name /"=" AttValue
 Reference : EntityRef | CharRef
 % EntityRef :  "&" Name ";"
 % PEReference : "%" Name ";"
-CharRef : "&#" $(cr "09")+ ";"
-        | "&#x" ($(cr "09") | $(cr "af") | $(cr "AF"))+ ";"
+% CharRef : "&#" $(cr "09")+ ";"
+          | "&#x" ($(cr "09") | $(cr "af") | $(cr "AF"))+ ";"
 
 ;;; TODO !!!! Name is parsing wrong due to auto-layout insertion.  For several productions I need a switch to turn it off.  This should be easy, since I think the option exists in bnf-s-exp, but it is not threaded through to bnf-syntactic.
 
@@ -100,6 +99,8 @@ PubidChar : "#x20" | "#xD" | "#xA" | $(cr "az") | $(cr "AZ") | $(cr "09") | $(ch
         [else
          (eprintf "not char: ~v\n" x)
          (error '->char "can't convert to char: ~v\n" x)]))
+
+(define chars->string (λ cs (apply string (map ->char cs))))
 
 (define (make-cdata excluding-regexp)
   (proc-parser
@@ -175,10 +176,12 @@ PubidChar : "#x20" | "#xD" | "#xA" | $(cr "az") | $(cr "AZ") | $(cr "09") | $(ch
         [else
          (printf "AMBIGUOUS PARSE!\n\n")
          (printf "Result 1:\n")
-         (printf "~v\n" (parse-derivation-result (stream-first parse-result)))
+         (printf "~v\n" (syntax->datum
+                         (parse-derivation-result (stream-first parse-result))))
          (printf "\n\nResult 2:\n")
-         (printf "~v\n" (parse-derivation-result (stream-first (stream-rest
-                                                                parse-result))))
+         (printf "~v\n" (syntax->datum
+                         (parse-derivation-result (stream-first (stream-rest
+                                                                 parse-result)))))
          (printf "\n\n total number of results...\n")
          (printf "~v\n" (stream-length parse-result))
          ])
