@@ -5,18 +5,19 @@
 % document : prolog element
 ;; TODO - filter ETag based on STag name!
 % element : EmptyElemTag
-          | STag content ETag
+          ;| STag content /$(result-filter ETag (λ (r) (eprintf "parsing ETag\n")(equal? (car r) 'foo) #t))
+          | STag @ content /ETag
 
-EmptyElemTag : /"<" Name Attribute* /"/>"
-STag : /"<" Name Attribute* /">"
-ETag : /"</" Name /">"
+/EmptyElemTag : /"<" Name Attribute* /"/>"
+/STag : /"<" Name Attribute* /">"
+/ETag : /"</" Name /">"
 % Attribute : Name /"=" AttValue
 % AttValue : /"\"" @($(char-not-in "<&\"") | Reference)* /"\"" :: chars->string
            | /"'" @($(char-not-in "<&'") | Reference)* /"'" :: chars->string
 
 
 ;; 	content	   ::=   	CharData? ((element | Reference | CDSect | PI | Comment) CharData?)*
-% content : @ $non-null-CharData ? @ ((element | Reference | CDSect | PI | Comment) $non-null-CharData ?)*
+%/content : @ $non-null-CharData ? @@ ((element | Reference | CDSect | PI | Comment) $non-null-CharData ?)*
 
 
 ;;CDSect : CDStart CData CDEnd
@@ -152,6 +153,15 @@ PubidChar : "#x20" | "#xD" | "#xA" | $(cr "az") | $(cr "AZ") | $(cr "09") | $(ch
   (check se/datum?
          (wp*/r "hello='foo'" attr-parser)
          (list #'(Attribute hello "foo")))
+  (check se/datum?
+         (wp*/r "<a/>" parser)
+         (list #'(document (prolog () () ())
+                           (element (a ())))))
+  (check se/datum?
+         ;; TODO - this is wrong because there is an extra space.
+         (wp*/r "<a><b></b> </a>" parser)
+         (list #'(document (prolog () () ())
+                           (element (a ()) (element (b ()))))))
   )
 
 (module* main racket/base
