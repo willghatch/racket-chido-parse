@@ -11,9 +11,9 @@ EmptyElemTag : "<" Name Attribute* "/>"
 STag : /"<" Name Attribute* /">"
 ETag : /"</" Name /">"
 Attribute : Name /"=" AttValue
-;; TODO - I really need to disallow layout insertion here...
 % AttValue : /"\"" @($(char-not-in "<&\"") | Reference)* /"\""
            | /"'" @($(char-not-in "<&'") | Reference)* /"'"
+           :: (λ cs (apply string (map ->char cs)))
 
 
 ;; 	content	   ::=   	CharData? ((element | Reference | CDSect | PI | Comment) CharData?)*
@@ -96,6 +96,7 @@ PubidChar : "#x20" | "#xD" | "#xA" | $(cr "az") | $(cr "AZ") | $(cr "09") | $(ch
         ;[(and (list? x) (null? (cdr x))) (->char (car x))]
         [(char? x) x]
         [(and (string? x) (eq? (string-length x) 1)) (string-ref x 0)]
+        ;; TODO - CharRef and EntityRef
         [else
          (eprintf "not char: ~v\n" x)
          (error '->char "can't convert to char: ~v\n" x)]))
@@ -144,12 +145,12 @@ PubidChar : "#x20" | "#xD" | "#xA" | $(cr "az") | $(cr "AZ") | $(cr "09") | $(ch
   (check se/datum?
          (wp*/r "hello" name-parser)
          (list #'hello))
-  #;(check se/datum?
+  (check se/datum?
          (wp*/r "'foo'" attvalue-parser)
-         #'(AttValue "foo"))
-  #;(check se/datum?
+         (list #'"foo"))
+  (check se/datum?
          (wp*/r "hello='foo'" attr-parser)
-         #'(Attribute hello "foo"))
+         (list #'(Attribute hello "foo")))
   )
 
 (module* main racket/base
