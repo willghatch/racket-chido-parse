@@ -62,7 +62,7 @@
              star-list
              plus-list)
             ;; These are stupid.  Basically I'm converting strings to symbols.  I should have a better way to have specific symbols in the parse above.
-            #:attr bind (syntax-parse #'bind-list [(x:id "=") #'(x =)] [else #'()])
+            #:attr bind (syntax-parse #'bind-list [((x:id "=")) #'(x =)] [else #'()])
             #:attr ignore (syntax-parse #'ignore-list [(x) #'(/)] [else #'()])
             #:attr splice (syntax-parse #'splice-list
                             [(x ...+) (datum->syntax

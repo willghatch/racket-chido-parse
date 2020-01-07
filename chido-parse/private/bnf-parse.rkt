@@ -42,6 +42,11 @@
          (wp*/r "test_id"
                 id-parser)
          (list #'test_id))
+  (check-pred parse-failure? (parse* (open-input-string "=") id-parser))
+  (check se/datum?
+         (map parse-derivation-result
+              (stream->list (parse* (open-input-string "foo=") id-parser)))
+         (list #'foo))
   ;; I originally forgot to put the ^ on the regexp...
   (check-pred parse-failure?
               (parse* (open-input-string "\"stringtest\"") id-parser)))
@@ -144,6 +149,9 @@ stmt : \"pass\"
 expr : @ $(follow-filter bnumber bnumber)
      | expr \"+\" expr & left
      | expr \"*\" expr & left > \"+\"
+     | m1 = expr \"mirror\"
+       $(foo)
+       & left > \"*\"
 /bnumber : (\"0\" | \"1\") +
            :: (λ (elems) (list (apply string-append (syntax->datum elems))))
 ")
@@ -152,6 +160,9 @@ expr : @ $(follow-filter bnumber bnumber)
                                (bnf-parser->with-surrounding-layout
                                 syntactic-bnf-parser)))
 
+
+  ;; This doesn't seem to work, and I'm not sure why.
+  ;(print-syntax-width +inf.0)
 
   (check se/datum?
          (map parse-derivation-result
@@ -184,6 +195,11 @@ expr : @ $(follow-filter bnumber bnumber)
                          [elem () () () "*" () () ()]
                          [elem () () () expr () () ()])
                         (["&" "left"] [">" "+"])}
+                       {alt
+                        ([elem ((m1 "=")) () () expr () () ()]
+                         [elem () () () "mirror" () () ()]
+                         [elem () () () (foo) () () ()])
+                        (["&" "left"] [">" "*"])}
                        ]
                   [arm "/" bnumber ":"
                        {alt
