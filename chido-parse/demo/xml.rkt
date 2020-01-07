@@ -19,7 +19,7 @@
 
 
 ;; 	content	   ::=   	CharData? ((element | Reference | CDSect | PI | Comment) CharData?)*
-%/content : @ $non-null-CharData ? @@ ((element | Reference | CDSect | PI | Comment) @$non-null-CharData ?)*
+/%content : @ $non-null-CharData ? @@ ((element | Reference | CDSect | PI | Comment) @$non-null-CharData ?)*
 
 
 ;;CDSect : CDStart CData CDEnd
@@ -41,8 +41,8 @@ Reference : EntityRef | CharRef
 ;NameStartChar	   ::=   	":" | [A-Z] | "_" | [a-z] | [#xC0-#xD6] | [#xD8-#xF6] | [#xF8-#x2FF] | [#x370-#x37D] | [#x37F-#x1FFF] | [#x200C-#x200D] | [#x2070-#x218F] | [#x2C00-#x2FEF] | [#x3001-#xD7FF] | [#xF900-#xFDCF] | [#xFDF0-#xFFFD] | [#x10000-#xEFFFF]
 / NameStartChar : ":" | $(cr "AZ") | "_" | $(cr "az") | $(cr "#xC0#xD6") | $(cr "#xD8#xF6") | $(cr "#xF8#x2FF") | $(cr "#x370#x37D") | $(cr "#x37F#x1FFF") | $(cr "#x200C#x200D") | $(cr "#x2070#x218F") | $(cr "#x2C00#x2FEF") | $(cr "#x3001#xD7FF") | $(cr "#xF900#xFDCF") | $(cr "#xFDF0#xFFFD") | $(cr "#x10000#xEFFFF")
 ;	NameChar	   ::=   	NameStartChar | "-" | "." | [0-9] | #xB7 | [#x0300-#x036F] | [#x203F-#x2040]
-/ NameChar : NameStartChar | "-" | "." | $(cr "09") | "#xB7" | $(cr "#x0300#x036F") | $(cr "#x203F#x2040")
-/ % Name : @NameStartChar @@@NameChar*
+/ NameChar : @NameStartChar | "-" | "." | $(cr "09") | "#xB7" | $(cr "#x0300#x036F") | $(cr "#x203F#x2040")
+/ % Name : @NameStartChar @@NameChar*
 :: (λ cs (string->symbol (apply string (map ->char cs))))
 
 % Names : Name ("#x20" Name)*
@@ -151,6 +151,11 @@ PubidChar : "#x20" | "#xD" | "#xA" | $(cr "az") | $(cr "AZ") | $(cr "09") | $(ch
          (wp*/r "hello" name-parser)
          (list #'hello))
   (check se/datum?
+         (wp*/r "hello1" name-parser)
+         (list #'hello1))
+  (check-pred parse-failure?
+              (parse* "1hello" name-parser))
+  (check se/datum?
          (wp*/r "'foo'" attvalue-parser)
          (list #'"foo"))
   (check se/datum?
@@ -165,19 +170,30 @@ PubidChar : "#x20" | "#xD" | "#xA" | $(cr "az") | $(cr "AZ") | $(cr "09") | $(ch
          (list #'(document (prolog () () ())
                            (element (a ())))))
   (check se/datum?
+         (wp*/r "</a><b/>" (sequence
+                            (bnf-parser->arm-parser parser 'ETag)
+                            (bnf-parser->arm-parser parser 'EmptyElemTag)))
+         (list #'((a) (b ()))))
+  (check se/datum?
          (wp*/r "</a>" (bnf-parser->arm-parser parser 'ETag))
          (list #'(a)))
+  (check se/datum?
+         (wp*/r "<tag_a/><tag_b/>" content-parser)
+         (list #'((element (tag_a ()))(element (tag_b ())))))
   (check se/datum?
          (wp*/r "hello <tag/>  test" content-parser)
          (list #'("hello " (element (tag ())) "  test")))
   (check se/datum?
-         (wp*/r "hello <!-- this is a comment -->  test" content-parser)
-         (list #'("hello " (Comment " this is a a comment ") "  test")))
+         (wp*/r "hello <!-- this is a comment --> test" content-parser)
+         (list #'("hello " (Comment " this is a comment ") " test")))
   (check se/datum?
-         ;; TODO - this is wrong because there is an extra space.
-         (wp*/r "<a><b></b> </a>" parser)
+         (wp*/r "<a><b></b></a>" parser)
          (list #'(document (prolog () () ())
                            (element (a ()) (element (b ()))))))
+  (check se/datum?
+         (wp*/r "<a><b></b> </a>" parser)
+         (list #'(document (prolog () () ())
+                           (element (a ()) (element (b ())) " "))))
   )
 
 (module* main racket/base
