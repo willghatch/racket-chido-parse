@@ -102,6 +102,7 @@ PubidChar : "#x20" | "#xD" | "#xA" | $(cr "az") | $(cr "AZ") | $(cr "09") | $(ch
         [(char? x) x]
         [(and (string? x) (eq? (string-length x) 1)) (string-ref x 0)]
         ;; TODO - CharRef and EntityRef
+        ;; Eg. (EntityRef "&" quot ";") should be a quotation mark.  There should be a list of all of these somewhere...
         [else
          (eprintf "not char: ~v\n" x)
          (error '->char "can't convert to char: ~v\n" x)]))
