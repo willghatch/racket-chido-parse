@@ -3,10 +3,12 @@
 ;document : prolog element Misc*
 ;; For now let's do a simplified version...
 % document : prolog element
-;; TODO - filter ETag based on STag name!
 % element : EmptyElemTag
-          | n = STag @content /$(result-filter ETag (λ (r) (equal? (car (syntax->datum r)) (car (syntax->datum n))) #t))
-          ;| STag @ content /ETag
+          | n = STag
+            @content
+            /$(result-filter ETag (λ (r) (equal? (car (syntax->datum r))
+                                                 (car (syntax->datum
+                                                       (parse-derivation-result n))))))
 
 /EmptyElemTag : /"<" Name Attribute* /"/>"
 /STag : /"<" Name Attribute* /">"
