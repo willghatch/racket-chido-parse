@@ -5,8 +5,8 @@
 % document : prolog element
 ;; TODO - filter ETag based on STag name!
 % element : EmptyElemTag
-          ;| STag content /$(result-filter ETag (λ (r) (eprintf "parsing ETag\n")(equal? (car r) 'foo) #t))
-          | STag @ content /ETag
+          | n = STag @content /$(result-filter ETag (λ (r) (equal? (car (syntax->datum r)) (car (syntax->datum n))) #t))
+          ;| STag @ content /ETag
 
 /EmptyElemTag : /"<" Name Attribute* /"/>"
 /STag : /"<" Name Attribute* /">"
@@ -158,6 +158,13 @@ PubidChar : "#x20" | "#xD" | "#xA" | $(cr "az") | $(cr "AZ") | $(cr "09") | $(ch
          (wp*/r "<a/>" parser)
          (list #'(document (prolog () () ())
                            (element (a ())))))
+  (check se/datum?
+         (wp*/r "<a></a>" parser)
+         (list #'(document (prolog () () ())
+                           (element (a ())))))
+  (check se/datum?
+         (wp*/r "</a>" (bnf-parser->arm-parser parser 'ETag))
+         (list #'(a)))
   (check se/datum?
          (wp*/r "hello <tag/>  test" content-parser)
          (list #'("hello " (element (tag ())) "  test")))

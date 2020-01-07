@@ -203,4 +203,26 @@ stmt : \"pass\"
          (wp*/r "exexexexexex" layout-test)
          (list #'(stmt (expr ("ex" "ex" "ex" "ex" "ex" "ex")))))
 
+  (require "core.rkt")
+  (define-bnf/syntactic use-assignment "
+stmt : \"pass\"
+     | expr
+     | \"{\" @ stmt + \"}\"
+expr : @ $(follow-filter bnumber bnumber)
+     | expr \"+\" expr & left
+     | expr \"*\" expr & left > \"+\"
+     | m1 = expr \"mirror\"
+       $(result-filter
+         expr
+         (λ (r)
+           (equal? (syntax->datum r)
+                   (syntax->datum
+                    (parse-derivation-result m1)))))
+       & left > \"*\"
+/bnumber : (\"0\" | \"1\") +
+           :: (λ (elems) (list (apply string-append (syntax->datum elems))))
+")
+  (check se/datum?
+         (wp*/r "1 mirror 1" use-assignment)
+         (list #'(stmt (expr (expr "1") "mirror" (expr "1")))))
   )
