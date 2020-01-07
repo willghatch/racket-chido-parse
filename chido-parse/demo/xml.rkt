@@ -3,6 +3,9 @@
 ;document : prolog element Misc*
 ;; For now let's do a simplified version...
 % document : prolog element
+
+Space : $(char-in "#x20#x9#xD#xA")+
+
 % element : EmptyElemTag
           | n = STag
             @content
@@ -53,7 +56,7 @@ Reference : EntityRef | CharRef
 
 ;;PI	   ::=   	'<?' PITarget (S (Char* - (Char* '?>' Char*)))? '?>'
 ;;PITarget	   ::=   	Name - (('X' | 'x') ('M' | 'm') ('L' | 'l'))
-PI : "<?" PITarget $PI-text "?>"
+% PI : "<?" PITarget Space $PI-text "?>"
 ;; Ignore the reservation of the name "XML".
 PITarget : Name
 
