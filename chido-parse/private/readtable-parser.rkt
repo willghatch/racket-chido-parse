@@ -36,6 +36,7 @@ This is an implementation of the same idea, but also adding support for operator
   [chido-readtable->layout* (-> chido-readtable? any/c)]
   [chido-readtable->layout+ (-> chido-readtable? any/c)]
   [set-chido-readtable-symbol-support (-> chido-readtable? any/c chido-readtable?)]
+  [set-chido-readtable-name (-> chido-readtable? any/c chido-readtable?)]
   [chido-readtable-symbol-support? (-> chido-readtable? boolean?)]
   [chido-readtable-blacklist-symbols (-> (listof (or/c symbol? string?))
                                          chido-readtable?
@@ -84,6 +85,7 @@ This is an implementation of the same idea, but also adding support for operator
 
 (struct chido-readtable
   (
+   name
    ;; Core parsers
    terminating-parsers
    soft-terminating-parsers
@@ -171,6 +173,8 @@ This is an implementation of the same idea, but also adding support for operator
 
 (define empty-chido-readtable
   (chido-readtable
+   ;; name
+   #f
    ;; core parsers
    '() '() '() '() '() '() '()
 
@@ -380,6 +384,11 @@ This is an implementation of the same idea, but also adding support for operator
     [(list) rt]
     [else (error 'extend-chido-readtable* "bad number of arguments")]))
 
+(define (set-chido-readtable-name rt name)
+  (struct-copy chido-readtable rt
+               [name name]
+               [flush-state? #t]))
+
 (define (set-chido-readtable-symbol-support rt bool)
   (struct-copy chido-readtable rt
                [symbol-support? (not (not bool))]
@@ -416,6 +425,12 @@ This is an implementation of the same idea, but also adding support for operator
       (map operator-wrap
            (chido-readtable-left-recursive-nonterminating-parsers rt)))
 
+    (define name-format
+      (let ([name (chido-readtable-name rt)])
+        (if name
+            (format "-~a-" name)
+            "-")))
+
     (set-chido-readtable-terminating-trie!
      rt
      (parser-list->trie terminating/wrap))
@@ -436,7 +451,7 @@ This is an implementation of the same idea, but also adding support for operator
      (parser-list->trie (chido-readtable-nonterminating-layout-parsers rt)))
     (set-chido-readtable-symbol-parser! rt (symbol/number-parser rt))
     (set-chido-readtable-layout1-parser!
-     rt (make-alt-parser "chido-readtable-layout1"
+     rt (make-alt-parser (format "chido-readtable~alayout1" name-format)
                          (append
                           (chido-readtable-terminating-layout-parsers rt)
                           (chido-readtable-soft-terminating-layout-parsers rt)
@@ -455,14 +470,15 @@ This is an implementation of the same idea, but also adding support for operator
      rt
      ;; TODO - better name!
      (proc-parser
-      #:name "chido-readtable-read1"
-      (let* ([alt (make-alt-parser "chido-readtable-read1/base-alt"
+      #:name (format "chido-readtable~aread1" name-format)
+      (let* ([alt (make-alt-parser (format "chido-readtable~aread1/base-alt"
+                                           name-format)
                                    (append
                                     nonterminating/wrap
                                     soft-terminating/wrap
                                     terminating/wrap))]
              [left-recursive-nonterminating-alt
-              (make-alt-parser "chido-readtable-read1/lrn-alt"
+              (make-alt-parser (format "chido-readtable~aread1/lrn-alt" name-format)
                                left-recursive-nonterminating/wrap)])
         (λ (port)
           (chido-parse-parameterize
@@ -503,7 +519,7 @@ This is an implementation of the same idea, but also adding support for operator
 
     (let ([with-content-parser
             (sequence
-             #:name "chido-readtable-read+"
+             #:name (format "chido-readtable~aread+" name-format)
              (kleene-plus (chido-readtable-layout*+read1-parser rt) #:greedy? #t)
              (chido-readtable-layout*-parser rt)
              #:derive (λ derivations
@@ -515,7 +531,7 @@ This is an implementation of the same idea, but also adding support for operator
       (set-chido-readtable-read+-parser! rt with-content-parser)
       (set-chido-readtable-read*-parser!
        rt
-       (make-alt-parser "chido-readtable-read*"
+       (make-alt-parser (format "chido-readtable~aread*" name-format)
                         (list with-content-parser no-content-parser))))
 
     ;;; Set transitive operator precidence hash
