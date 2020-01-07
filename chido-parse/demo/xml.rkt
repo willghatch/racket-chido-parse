@@ -17,7 +17,7 @@
 
 
 ;; 	content	   ::=   	CharData? ((element | Reference | CDSect | PI | Comment) CharData?)*
-%/content : @ $non-null-CharData ? @@ ((element | Reference | CDSect | PI | Comment) $non-null-CharData ?)*
+%/content : @ $non-null-CharData ? @@ ((element | Reference | CDSect | PI | Comment) @$non-null-CharData ?)*
 
 
 ;;CDSect : CDStart CData CDEnd
@@ -45,9 +45,9 @@ Reference : EntityRef | CharRef
 
 % Names : Name ("#x20" Name)*
 
-% Comment : "<!--"
-          ($(char-not-in "-") | ($(char-parser "-") $(char-not-in "-")))*
-          "-->"
+% Comment : /"<!--"
+          @($(char-not-in "-") | ($(char-parser "-") $(char-not-in "-")))*
+          /"-->" :: (λ cs (list 'Comment (apply chars->string cs)))
 
 ;;PI	   ::=   	'<?' PITarget (S (Char* - (Char* '?>' Char*)))? '?>'
 ;;PITarget	   ::=   	Name - (('X' | 'x') ('M' | 'm') ('L' | 'l'))
@@ -143,6 +143,7 @@ PubidChar : "#x20" | "#xD" | "#xA" | $(cr "az") | $(cr "AZ") | $(cr "09") | $(ch
   (define name-parser (bnf-parser->arm-parser parser 'Name))
   (define attr-parser (bnf-parser->arm-parser parser 'Attribute))
   (define attvalue-parser (bnf-parser->arm-parser parser 'AttValue))
+  (define content-parser (bnf-parser->arm-parser parser 'content))
 
   (check se/datum?
          (wp*/r "hello" name-parser)
@@ -157,6 +158,12 @@ PubidChar : "#x20" | "#xD" | "#xA" | $(cr "az") | $(cr "AZ") | $(cr "09") | $(ch
          (wp*/r "<a/>" parser)
          (list #'(document (prolog () () ())
                            (element (a ())))))
+  (check se/datum?
+         (wp*/r "hello <tag/>  test" content-parser)
+         (list #'("hello " (element (tag ())) "  test")))
+  (check se/datum?
+         (wp*/r "hello <!-- this is a comment -->  test" content-parser)
+         (list #'("hello " (Comment " this is a a comment ") "  test")))
   (check se/datum?
          ;; TODO - this is wrong because there is an extra space.
          (wp*/r "<a><b></b> </a>" parser)
