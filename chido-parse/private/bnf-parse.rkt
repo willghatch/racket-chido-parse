@@ -35,7 +35,8 @@
                         (->sym m)
                         (list (object-name port) line col pos
                               (string-length (symbol->string (->sym m)))))
-                       (make-parse-failure))))))
+                       ;; we need to explicitly use #:end here because apparently regexp-match likes to read way off to the end when it fails.  Actually, I should probably just do something manually instead to make it faster...
+                       (make-parse-failure #:end pos))))))
 
 (module+ test
   (check se/datum?

@@ -360,8 +360,7 @@
                                                 all-failures)))
                            (and best-failure
                                 (parse-failure-effective-end best-failure))))
-     (define effective-end (max (or end 0) (or position 0)
-                                guess-end (or inner-end 0)))
+     (define effective-end (max (or end guess-end) (or position 0) (or inner-end 0)))
      (define report-position (or position effective-end))
      (define pb (scheduler-port-broker (parser-job-scheduler job)))
      (define report-line (port-broker-line pb report-position))

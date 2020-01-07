@@ -155,7 +155,9 @@
                                           (not given-result/bare?))))
          (define rt1
            (dict-set
-            (set-chido-readtable-symbol-support empty-chido-readtable #f)
+            (set-chido-readtable-name
+             (set-chido-readtable-symbol-support empty-chido-readtable #f)
+             'arm-name)
             bnf-layout-mode-key
             layout-arg-use))
 
