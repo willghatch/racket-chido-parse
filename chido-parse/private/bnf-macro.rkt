@@ -178,4 +178,29 @@ expr : @ $(follow-filter bnumber bnumber)
                                     "+" (expr "110")))
                         "}")))
 
+  (define-bnf/syntactic layout-test "
+stmt : \"pass\"
+     | expr
+     | \"{\" @ stmt + \"}\"
+     | \"st\"+
+% expr : @ $(follow-filter bnumber bnumber)
+       | expr \"+\" expr & left
+       | expr \"*\" expr & left > \"+\"
+       | \"ex\"+
+/bnumber : (\"0\" | \"1\") +
+           :: (λ (elems) (list (apply string-append (syntax->datum elems))))
+")
+  (check se/datum?
+         (wp*/r "st st st    stst st" layout-test)
+         (list #'(stmt ("st" "st" "st" "st" "st" "st"))))
+  (check se/datum?
+         (wp*/r "stststststst" layout-test)
+         (list #'(stmt ("st" "st" "st" "st" "st" "st"))))
+  (check equal?
+         (wp*/r "ex ex ex    exex ex" layout-test)
+         '())
+  (check se/datum?
+         (wp*/r "exexexexexex" layout-test)
+         (list #'(stmt (expr ("ex" "ex" "ex" "ex" "ex" "ex")))))
+
   )
