@@ -25,18 +25,27 @@
   (proc-parser #:name "id-parser"
                (λ (port)
                  (define-values (line col pos) (port-next-location port))
-                 (define (->sym m)
-                   (string->symbol (bytes->string/utf-8 (car m))))
-                 (let ([m (regexp-match #px"^\\w+"
-                                        port)])
-                   (if m
-                       (datum->syntax
-                        #f
-                        (->sym m)
-                        (list (object-name port) line col pos
-                              (string-length (symbol->string (->sym m)))))
-                       ;; we need to explicitly use #:end here because apparently regexp-match likes to read way off to the end when it fails.  Actually, I should probably just do something manually instead to make it faster...
-                       (make-parse-failure #:end pos))))))
+                 (define (finish chars)
+                   (if (null? chars)
+                       (make-parse-failure)
+                       (let ([str (apply string (reverse chars))])
+                         (datum->syntax
+                          #f
+                          (string->symbol str)
+                          (list (object-name port) line col pos
+                                (string-length str))))))
+
+                 (let loop ([chars '()])
+                   (define c (peek-char port))
+                   (cond
+                     [(and (char? c)
+                           (or (char<=? #\a c #\z)
+                               (char<=? #\A c #\Z)
+                               (char<=? #\0 c #\9)
+                               (eq? c #\_)))
+                      (begin (read-char port)
+                             (loop (cons c chars)))]
+                     [else (finish chars)])))))
 
 (module+ test
   (check se/datum?
