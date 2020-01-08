@@ -151,8 +151,9 @@
   (for/and ([string-index (in-range len)]
             [pb-index (in-range position (+ position len))])
     (define info (info-for pb pb-index))
-    (and info (eq? (vector-ref info info-char-offset)
-                   (string-ref string string-index)))))
+    ;; Apparently `eq?` doesn't work on non-ascii characters.  They must have an allocated wrapper around their integer value!
+    (and info (equal? (vector-ref info info-char-offset)
+                      (string-ref string string-index)))))
 
 (define (port-broker-substring pb position length)
   (apply
@@ -464,12 +465,8 @@ A wrapped port should be able to give a handle to the broker it is wrapping.
   (check-equal? pos/2 2)
   (check-equal? pos/4 4)
 
-  #|
-  TODO - port-broker-commit-bytes is broken.  The following test fails.
-  |#
-  ;(port-broker-commit-bytes pb1 15)
-  ;(check-true (se? (wp3-read) r3))
-
+  (let ([pb-lozenge (cache-port-broker (open-input-string "a◊b"))])
+    (check-true (port-broker-substring? pb-lozenge 2 "◊")))
 
 
 )
