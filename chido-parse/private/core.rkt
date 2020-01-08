@@ -1416,5 +1416,12 @@ TODO
                  c3-parser)))
    '("abc"))
 
+  (check-equal?
+   (map parse-derivation-result!
+        (stream->list
+         (parse* (open-input-string "◊")
+                 "◊")))
+   (list "◊"))
+
   )
 
