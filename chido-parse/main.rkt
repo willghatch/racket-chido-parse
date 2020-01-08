@@ -3,6 +3,7 @@
 (require
  "private/core.rkt"
  "private/procedural-combinators.rkt"
+ "private/readtable-parser.rkt"
  "private/binding-sequence.rkt"
  "private/parameters.rkt"
  "private/parse-stream.rkt"
@@ -15,6 +16,7 @@
  ;; TODO - I don't want to provide all of this.  Some things should not be part of the public interface.
  (all-from-out "private/core.rkt")
  (all-from-out "private/procedural-combinators.rkt")
+ (all-from-out "private/readtable-parser.rkt")
  (all-from-out "private/binding-sequence.rkt")
  (all-from-out "private/parameters.rkt")
  (all-from-out "private/parse-stream.rkt")
