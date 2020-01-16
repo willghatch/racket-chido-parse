@@ -234,4 +234,5 @@ PubidChar : "#x20" | "#xD" | "#xA" | $(cr "az") | $(cr "AZ") | $(cr "09") | $(ch
          (printf "\n\n total number of results...\n")
          (printf "~v\n" (stream-length parse-result))
          ])
+  (get-counts!)
   )
