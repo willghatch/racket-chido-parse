@@ -42,9 +42,12 @@ Reference : EntityRef | CharRef
 ;;; TODO !!!! Name is parsing wrong due to auto-layout insertion.  For several productions I need a switch to turn it off.  This should be easy, since I think the option exists in bnf-s-exp, but it is not threaded through to bnf-syntactic.
 
 ;NameStartChar	   ::=   	":" | [A-Z] | "_" | [a-z] | [#xC0-#xD6] | [#xD8-#xF6] | [#xF8-#x2FF] | [#x370-#x37D] | [#x37F-#x1FFF] | [#x200C-#x200D] | [#x2070-#x218F] | [#x2C00-#x2FEF] | [#x3001-#xD7FF] | [#xF900-#xFDCF] | [#xFDF0-#xFFFD] | [#x10000-#xEFFFF]
-/ NameStartChar : ":" | $(cr "AZ") | "_" | $(cr "az") | $(cr "#xC0#xD6") | $(cr "#xD8#xF6") | $(cr "#xF8#x2FF") | $(cr "#x370#x37D") | $(cr "#x37F#x1FFF") | $(cr "#x200C#x200D") | $(cr "#x2070#x218F") | $(cr "#x2C00#x2FEF") | $(cr "#x3001#xD7FF") | $(cr "#xF900#xFDCF") | $(cr "#xFDF0#xFFFD") | $(cr "#x10000#xEFFFF")
+/ NameStartChar : ":" | $(cr "AZ") | "_" | $(cr "az") | $(cr "\uC0\uD6") | $(cr "\uD8\uF6") | $(cr "\uF8\u2FF") | $(cr "\u370\u37D") | $(cr "\u37F\u1FFF") | $(cr "\u200C\u200D") | $(cr "\u2070\u218F") | $(cr "\u2C00\u2FEF") | $(cr "\u3001\uD7FF") | $(cr "\uF900\uFDCF") | $(cr "\uFDF0\uFFFD")
+; The following should be an option in NameStartChar, but it doesn't seem to be working with Racket's string reader.
+;| $(cr "\u10000\uEFFFF")
+
 ;	NameChar	   ::=   	NameStartChar | "-" | "." | [0-9] | #xB7 | [#x0300-#x036F] | [#x203F-#x2040]
-/ NameChar : @NameStartChar | "-" | "." | $(cr "09") | "#xB7" | $(cr "#x0300#x036F") | $(cr "#x203F#x2040")
+/ NameChar : @NameStartChar | "-" | "." | $(cr "09") | "\uB7" | $(cr "\u0300\u036F") | $(cr "\u203F\u2040")
 / % Name : @NameStartChar @@NameChar*
 :: (λ cs (string->symbol (apply string (map ->char cs))))
 
