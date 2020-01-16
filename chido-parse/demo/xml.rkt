@@ -209,30 +209,37 @@ PubidChar : "#x20" | "#xD" | "#xA" | $(cr "az") | $(cr "AZ") | $(cr "09") | $(ch
    racket/cmdline
    chido-parse
    racket/stream
+   racket/port
+   racket/file
    )
 
   (define file
     (command-line #:args (xml-file) xml-file))
-  (define port (open-input-file file))
-  (define parse-result
-    (whole-parse* port
-                  (bnf-parser->with-surrounding-layout
-                   parser)))
-  (cond [(parse-failure? parse-result)
-         (printf "~a\n" (parse-failure->string/chain parse-result))]
-        [(stream-empty? (stream-rest parse-result))
-         (printf "~v\n" (parse-derivation-result (stream-first parse-result)))]
-        [else
-         (printf "AMBIGUOUS PARSE!\n\n")
-         (printf "Result 1:\n")
-         (printf "~v\n" (syntax->datum
-                         (parse-derivation-result (stream-first parse-result))))
-         (printf "\n\nResult 2:\n")
-         (printf "~v\n" (syntax->datum
-                         (parse-derivation-result (stream-first (stream-rest
-                                                                 parse-result)))))
-         (printf "\n\n total number of results...\n")
-         (printf "~v\n" (stream-length parse-result))
-         ])
+
+  (define s (file->string file))
+  (eprintf "input length: ~v characters\n" (string-length s))
+
+  ;(define port (open-input-file file))
+  (define port (open-input-string s))
+  (time
+   (let ([parse-result (whole-parse* port
+                                     (bnf-parser->with-surrounding-layout
+                                      parser))])
+     (cond [(parse-failure? parse-result)
+            (printf "~a\n" (parse-failure->string/chain parse-result))]
+           [(stream-empty? (stream-rest parse-result))
+            (printf "~v\n" (parse-derivation-result (stream-first parse-result)))]
+           [else
+            (printf "AMBIGUOUS PARSE!\n\n")
+            (printf "Result 1:\n")
+            (printf "~v\n" (syntax->datum
+                            (parse-derivation-result (stream-first parse-result))))
+            (printf "\n\nResult 2:\n")
+            (printf "~v\n" (syntax->datum
+                            (parse-derivation-result (stream-first (stream-rest
+                                                                    parse-result)))))
+            (printf "\n\n total number of results...\n")
+            (printf "~v\n" (stream-length parse-result))
+            ])))
   (get-counts!)
   )

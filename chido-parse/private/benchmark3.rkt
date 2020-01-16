@@ -21,6 +21,7 @@
   (define s (file->string f))
   (eprintf "input length: ~v characters\n" (string-length s))
 
+  (collect-garbage 'major)
   (eprintf "Time for chido-parse s-exp parser:\n")
   (define my-parse
     (time (parse-derivation-result
