@@ -699,7 +699,7 @@ TODO - what kind of filters do I need?
               (define all-failures (if (parse-failure? results)
                                        (cons results failures)
                                        failures))
-              (make-parse-failure #:all-failures all-failures)]
+              (make-parse-failure #:failures all-failures)]
              [else (define r1 (stream-first results))
                    (define filter-result (filter-func port r1))
                    (define use-result (if (and replace-derivation? filter-result)
@@ -855,7 +855,9 @@ TODO - what kind of filters do I need?
       [(list (and (? string?) (? (λ (s) (eq? (string-length s) 2))))
              #f)
        (values (string-ref min 0) (string-ref min 1))]
-      [(list _ #f) (error 'char-range-parser "requires min and max value")]
+      [(list anything #f) (error 'char-range-parser
+                                 "requires min and max value (given ~v, ~v)"
+                                 anything #f)]
       [else (values (->char min) (->char max))]))
   (when (char<? max-use min-use)
     (error 'char-range-parser "max (~v) is less than min (~v)" max-use min-use))
