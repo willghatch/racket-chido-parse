@@ -282,12 +282,12 @@
          (p*/r "ab"
                (binding-sequence "a" "b"
                                  #:result/stx list))
-         (list (datum->syntax #f '("a" "b") (list 'string 1 1 1 2))))
+         (list (datum->syntax #f '("a" "b") (list 'string 1 0 1 2))))
   (check se?
          (p*/r "ab"
                (binding-sequence "a" "b"
                                  #:result/stx #t))
-         (list (datum->syntax #f '("a" "b") (list 'string 1 1 1 2))))
+         (list (datum->syntax #f '("a" "b") (list 'string 1 0 1 2))))
 
   (check-equal? (p*/r "ab"
                       (binding-sequence [: #:bind a1 "a"] "b"
