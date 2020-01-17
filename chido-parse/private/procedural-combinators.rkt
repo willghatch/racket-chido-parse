@@ -501,14 +501,14 @@
      (p*/r "qqqz"
            (repetition "q" #:result/stx (λ (elems) (string-join elems ""))
                        #:after "z"))
-     (list (datum->syntax #f "qqq" (list 'string 1 1 1 4))))
+     (list (datum->syntax #f "qqq" (list 'string 1 0 1 4))))
 
   ;;; sequence with begin/before/after
   (c check se?
      (p*/r "a_b_c"
            (sequence "a" "b" "c" #:result/stx (λ elems (string-join elems ""))
                      #:between "_"))
-     (list (datum->syntax #f "abc" (list 'string 1 1 1 5))))
+     (list (datum->syntax #f "abc" (list 'string 1 0 1 5))))
   (c check-equal?
      (p*/r "_a_b_c_"
            (sequence "a" "b" "c" #:result/bare (λ elems (string-join elems ""))
