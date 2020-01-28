@@ -80,10 +80,36 @@ A flattened stream is flattened depth-first, a la `flatten` for lists.
             14
             15
             (stream (stream (stream)))
+            (stream (stream (stream) 16))
+            (stream (stream (stream 17)))
             (stream (stream))))
   (define ssc (stream->stream-stack-cursor stream-tree))
   (check-equal?
    (stream->list ssc)
-   (list 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15))
+   (list 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17))
+
+  ;; A test that should reflect the structure of parsing "4+4+4" with my parse-direct plus example.
+  (define st2
+    (stream 1
+            (stream ;; +@1_l
+             (stream ;; +@1_+, l=literal@1
+              (stream ;; +@1_r
+               '+13 ;; r=literal@3
+               ;; r=+@3
+               (stream ;; +@3_l
+                (stream ;; +@3_+
+                 (stream ;; +@3_r
+                  '+1+35
+                  )))
+               )
+              )
+             ;; +@1
+             (stream ;; +@1_+, l=+13
+              (stream ;; +@1_r
+               '++135
+               )))))
+  (check-equal?
+   (stream->list (stream->stream-stack-cursor st2))
+   (list 1 '+13 '+1+35 '++135))
   )
 
