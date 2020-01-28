@@ -12,7 +12,9 @@
  parse-derivation-column
  parse-derivation-start-position
  parse-derivation-end-position
+ ;; TODO - replace uses of derivation-list and then rename in the struct itself.
  parse-derivation-derivation-list
+ (rename-out [parse-derivation-derivation-list parse-derivation-subderivations])
 
  parse-derivation-parser?
  parse-derivation-parser-name?
@@ -24,7 +26,9 @@
  port->pos
 
  alt-parser?
+ ;; TODO - use the renamed `alt-parser` everywhere.  Its interface is better than `make-alt-parser`.
  make-alt-parser
+ (rename-out [make-alt-parser* alt-parser])
  alt-parser-parsers
  alt-parser-left-recursive?
  ;alt-parser-null?
@@ -236,11 +240,16 @@
   (define trie (for/fold ([t empty-trie])
                          ([p parsers])
                  (trie-add t (parser-prefix p) p)))
-  (alt-parser name
+  (define name-use (or name (format "alt_~a"
+                                    (string-join (map parser-name parsers)
+                                                 "_"))))
+  (alt-parser name-use
               parsers
               l-recursive?
               null?
               trie))
+(define (make-alt-parser* #:name [name #f] . parsers)
+  (make-alt-parser name parsers))
 
 (define-values (prop:custom-parser custom-parser? custom-parser-ref)
   ;; TODO - document -- the property should be a function that accepts a `self` argument and returns a parser.
