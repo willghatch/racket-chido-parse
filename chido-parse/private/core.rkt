@@ -355,7 +355,8 @@
                                (remove-duplicates
                                 (if inner-failure
                                     (cons inner-failure failures)
-                                    failures))))
+                                    failures)
+                                eq?)))
      (define best-failure (or inner-failure
                               (and all-failures
                                    (not (null? all-failures))
@@ -1008,7 +1009,7 @@ But I still need to encapsulate the port and give a start position.
               #:ready-jobs (list ready-job rjs ...)
               #:remaining-jobs remaining-jobs
               #:failures failures)
-        (set-alt-worker-remaining-jobs! k/worker (remove ready-job remaining-jobs))
+        (set-alt-worker-remaining-jobs! k/worker (remq ready-job remaining-jobs))
         (set-alt-worker-ready-jobs! k/worker rjs)
         (define result (job->result ready-job))
         (cond
