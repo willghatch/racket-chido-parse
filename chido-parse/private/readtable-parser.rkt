@@ -942,6 +942,7 @@ This is an implementation of the same idea, but also adding support for operator
             (make-parse-derivation (λ args (parse-derivation-result d))
                                    #:derivations d))
            (make-parse-failure
+            #:message
             "uncomment parser is only valid inside a quasi-expression-comment")))))
   (define inner-parser
     (proc-parser
@@ -966,15 +967,18 @@ This is an implementation of the same idea, but also adding support for operator
               (if all-layout?
                   d
                   (make-parse-failure
+                   #:message
                    "quasicomment had no uncomment, so it is entirely layout."))]
              [(null? (cdr uncomments))
               (define uncomment (car uncomments))
               (if all-layout?
                   (make-parse-failure
+                   #:message
                    "quasicomment contains uncomment, so it is not entirely layout.")
                   (make-parse-derivation (λ args (parse-derivation-result uncomment))
                                          #:derivations (list d uncomment)))]
              [else (make-parse-failure
+                    #:message
                     "quasicomment contained multiple uncomments")]))))
   (define all-layout-parser (make-quasicomment-parser #t))
   (define with-uncomment-parser (make-quasicomment-parser #f))
