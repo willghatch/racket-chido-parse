@@ -28,7 +28,9 @@ later elements in the streams will get different parameterizations.
     [(_ head:expr tail:expr)
      #'(let* ([cp-params (current-chido-parse-parameters)]
               [h (parameterize ([current-chido-parse-parameters cp-params])
-                   head)])
+                   ;; TODO - really this exception should be converted into a failure.
+                   (with-handlers ([(λ(e)#t) (λ(e)e)])
+                     head))])
          ;; Note:  I previously used stream-cons here, which would be, uh,
          ;; more correct.  But stream cons onto a *custom* empty stream seems
          ;; to replace the custom empty stream with the canonical empty stream.
