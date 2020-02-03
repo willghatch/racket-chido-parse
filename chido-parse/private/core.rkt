@@ -1369,7 +1369,7 @@ TODO
         (make-parse-derivation "a"
                                #:end (add1 pos)
                                #:derivations '())
-        (make-parse-failure "Didn't match.")))
+        (make-parse-failure #:message "Didn't match.")))
   (define a1-parser-obj (make-proc-parser #:name "a" #:prefix "" a1-parser-proc))
 
   (define (Aa-parser-proc port)
