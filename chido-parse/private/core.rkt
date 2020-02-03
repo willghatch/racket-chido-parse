@@ -50,6 +50,7 @@
  parse-failure->string/simple
  parse-failure->string/message
  parse-failure->string/chain
+ parse-failure->string/tree
  greatest-failure
  chido-parse-keep-multiple-failures?
 
@@ -88,6 +89,7 @@
  "trie.rkt"
  "parse-stream.rkt"
  racket/stream
+ racket/port
  racket/match
  racket/list
  racket/struct
@@ -420,6 +422,19 @@
                                                (parse-failure-message pf)))
                 (parse-failure->chain pf))
            "\n")))
+
+(define (parse-failure->string/tree pf)
+  (define (->tree depth pf)
+    (define (print-indent)
+      (for ([i (in-range depth)])
+        (printf "  ")))
+    (with-output-to-string
+      (λ ()
+        (print-indent)
+        (printf "* ~a\n" (parse-failure->string/message pf))
+        (for ([inner (or (parse-failure-inner-failure-list pf) '())])
+          (printf "~a\n" (->tree (add1 depth) inner))))))
+  (->tree 0 pf))
 
 
 (define (make-cycle-failure job job-cycle-list)
