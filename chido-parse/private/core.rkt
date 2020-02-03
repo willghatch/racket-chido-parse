@@ -240,9 +240,7 @@
   (define trie (for/fold ([t empty-trie])
                          ([p parsers])
                  (trie-add t (parser-prefix p) p)))
-  (define name-use (or name (format "alt_~a"
-                                    (string-join (map parser-name parsers)
-                                                 "_"))))
+  (define name-use (or name "alt-parser"))
   (alt-parser name-use
               parsers
               l-recursive?
