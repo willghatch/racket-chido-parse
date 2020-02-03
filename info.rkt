@@ -7,6 +7,7 @@
     "rackunit-lib"
     "data-lib"
     "kw-make-struct"
+    "quickcheck"
 
     "profile-lib"
     ))

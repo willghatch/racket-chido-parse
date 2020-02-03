@@ -68,6 +68,9 @@ A flattened stream is flattened depth-first, a la `flatten` for lists.
 
 (module+ test
   (require rackunit)
+  (check-equal? (stream->list (stream->stream-stack-cursor (stream)))
+                '())
+
   (define stream-tree
     (stream (stream (stream))
             (stream 1)
@@ -111,5 +114,59 @@ A flattened stream is flattened depth-first, a la `flatten` for lists.
   (check-equal?
    (stream->list (stream->stream-stack-cursor st2))
    (list 1 '+13 '+1+35 '++135))
+
+
+  ;;; Test with quickcheck
+  (require quickcheck
+           racket/list
+           rackunit/quickcheck
+           )
+
+  (define (simple-flatten stream)
+    (define (sf-inner item)
+      (if (stream? item)
+          (map sf-inner (stream->list item))
+          item))
+    (flatten (sf-inner stream)))
+  (define (stream-tree->tree st)
+    (if (stream? st)
+        (map stream-tree->tree (stream->list st))
+        st))
+
+
+  (define (choose-stream elem-gen size)
+    (bind-generators ([ls (choose-list elem-gen size)])
+                     (for/stream ([x ls])
+                                 x)))
+  (define (choose-stream-tree [depth-limit 5])
+    (if (< 0 depth-limit)
+        (bind-generators
+         ([result
+           (choose-with-frequencies
+            (list (cons 1 (bind-generators
+                           ([len (choose-integer 0 5)]
+                            [the-stream
+                             (choose-stream
+                              (choose-with-frequencies
+                               (list
+                                (cons 1 (choose-stream-tree (sub1 depth-limit)))
+                                (cons 1 arbitrary-integer)))
+                              len)])
+                           the-stream))
+                  (cons 1 (choose-integer 0 1000))))])
+         result)
+        (choose-integer 0 1000)))
+
+  (define stream-tree-flatten-works
+    (property ([st (bind-generators ([len (choose-integer 1 5)]
+                                     [a-stream
+                                      (choose-stream (choose-stream-tree 4) len)])
+                                    a-stream)])
+              ;(eprintf "tree: ~v\n\n" (stream-tree->tree st))
+              (equal? (stream->list (stream->stream-stack-cursor st))
+                      (simple-flatten st))))
+
+  (check-property stream-tree-flatten-works)
+
   )
 
