@@ -1177,7 +1177,8 @@ But I still need to encapsulate the port and give a start position.
     (if (eq? result recursive-enter-flag)
         (run-scheduler scheduler)
         (if (and (stream? result)
-                 (not (flattened-stream? result)))
+                 (not (flattened-stream? result))
+                 (not (parse-failure? result)))
             (flatten-loop
              (call-with-continuation-prompt
               (λ () (parameterize ([current-chido-parse-job job])
