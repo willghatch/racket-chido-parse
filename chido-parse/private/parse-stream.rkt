@@ -1,6 +1,7 @@
 #lang racket/base
 
 (provide
+ parse-direct-prompt
  parse-stream-cons
  for/parse-proc
  )
@@ -14,6 +15,10 @@
   syntax/parse
   ))
 
+#|
+The parse-direct function needs its own continuation prompt.  When called during evaluation of a stream, it should NOT abort the processing of that stream to return its own stream instead.  The parse-direct stream should be a child of any outer streams that are being processed.
+|#
+(define parse-direct-prompt (make-continuation-prompt-tag 'parse-direct-prompt))
 
 #|
 Parameters and streams don't work nicely together.
@@ -30,7 +35,9 @@ later elements in the streams will get different parameterizations.
               [h (parameterize ([current-chido-parse-parameters cp-params])
                    ;; TODO - really this exception should be converted into a failure.
                    (with-handlers ([(λ(e)#t) (λ(e)e)])
-                     head))])
+                     (call-with-continuation-prompt
+                      (λ () head)
+                      parse-direct-prompt)))])
          ;; Note:  I previously used stream-cons here, which would be, uh,
          ;; more correct.  But stream cons onto a *custom* empty stream seems
          ;; to replace the custom empty stream with the canonical empty stream.

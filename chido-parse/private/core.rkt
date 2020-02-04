@@ -1172,7 +1172,9 @@ But I still need to encapsulate the port and give a start position.
         (result-loop (λ ()
                        (with-handlers ([(λ (e) #t) (λ (e) (exn->failure e job))])
                          (parameterize ([current-chido-parse-job job])
-                           (thunk/k)))))))
+                           (call-with-continuation-prompt
+                            thunk/k
+                            parse-direct-prompt)))))))
   (let flatten-loop ([result result])
     (if (eq? result recursive-enter-flag)
         (run-scheduler scheduler)
@@ -1182,7 +1184,10 @@ But I still need to encapsulate the port and give a start position.
             (flatten-loop
              (call-with-continuation-prompt
               (λ () (parameterize ([current-chido-parse-job job])
-                      (stream-flatten result)))
+                      (call-with-continuation-prompt
+                       (λ ()
+                         (stream-flatten result))
+                       parse-direct-prompt)))
               chido-parse-prompt
               result-loop))
             (begin (cache-result-and-ready-dependents! scheduler job result)
@@ -1346,7 +1351,7 @@ But I still need to encapsulate the port and give a start position.
       (call-with-composable-continuation
        (λ (k)
          (abort-current-continuation
-          chido-parse-prompt
+          parse-direct-prompt
           ;; TODO - better failure handling and propagation
           (λ () (for/parse ([d (parse* port parser #:start core-start)]
                             #:failure (λ (f)
@@ -1358,7 +1363,7 @@ But I still need to encapsulate the port and give a start position.
                                               (make-parse-failure
                                                #:inner-failure f)))))
                            (k d)))))
-       chido-parse-prompt))
+       parse-direct-prompt))
     (define new-pos (parse-derivation-end-position new-derivation))
     (port-broker-port-reset-position! port new-pos)
     new-derivation)
