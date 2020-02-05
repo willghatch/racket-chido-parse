@@ -238,35 +238,35 @@ This is an implementation of the same idea, but also adding support for operator
 (define (chido-readtable-dict-set rt key val)
   (dict-set rt key val))
 
-(define (extend-chido-readtable extension-type parser rt
-                                ;; TODO - better name for extension-type, and make it a keyword argument.
+(define (extend-chido-readtable symbol-affect parser rt
+                                ;; TODO - better name for symbol-affect, and make it a keyword argument.
                                 #:operator [operator #f]
                                 #:precidence-less-than [precidence-less-than '()]
                                 #:precidence-greater-than [precidence-greater-than '()]
                                 #:associativity [associativity #f]
                                 #:symbol-blacklist [symbol-blacklist #f]
                                 )
-  ;; extension-type is 'terminating, 'soft-terminating, 'nonterminating, 'left-recursive-nonterminating,  'terminating-layout, 'soft-terminating-layout, or 'nonterminating-layout
+  ;; symbol-affect is 'terminating, 'soft-terminating, 'nonterminating, 'left-recursive-nonterminating,  'terminating-layout, 'soft-terminating-layout, or 'nonterminating-layout
   ;; operator is #f, 'infix, 'prefix, or 'postfix
   ;; associativity is #f, 'left, or 'right
   ;; precidence lists are for names of other operators that are immediately greater or lesser in the precidence lattice.
   ;; symbol-blacklist can be #f to do nothing, #t to add the parser name to the symbol blacklist (for the common case that the operator name is the parser name), or a list of symbols or strings to blacklist.
   ;; TODO - maybe symbol-blacklist doesn't belong here, but its primary motivation is to blacklist operator names...
 
-  #| TODO - make extension-type a keyword argument, make the default nonterminating? |#
-  (when (and (member extension-type '(terminating-layout
-                                      soft-terminating-layout
-                                      nonterminating-layout))
+  #| TODO - make symbol-affect a keyword argument, make the default nonterminating? |#
+  (when (and (member symbol-affect '(terminating-layout
+                                     soft-terminating-layout
+                                     nonterminating-layout))
              operator)
     (error 'extend-chido-readtable
            "can't add operator parsers to layout parsers"))
   (when (and (member operator '(infix postfix))
-             (not (eq? extension-type 'left-recursive-nonterminating)))
+             (not (eq? symbol-affect 'left-recursive-nonterminating)))
     (error 'extend-chido-readtable
            "infix and postfix operators must be added as left-recursive-nonterminating parsers"))
 
   (define pre-blacklist
-    (match extension-type
+    (match symbol-affect
       ['terminating
        (struct-copy
         chido-readtable
