@@ -834,7 +834,7 @@ This is an implementation of the same idea, but also adding support for operator
          #:wrapper [wrapper #f]
          ;#:inside-readtable
          ;; TODO - what is the right name here?
-         #:readtable-add-type [rt-add-type 'terminating]
+         #:readtable-symbol-affect [rt-add-type 'terminating]
          )
   (define (inner-parser)
     (proc-parser #:name (format "list-inner-parser-~a-~a" left right)
@@ -1088,7 +1088,7 @@ This is an implementation of the same idea, but also adding support for operator
          #:wrapper [wrapper #f]
          ;#:inside-readtable
          ;; TODO - what is the right name here?
-         #:readtable-add-type [rt-add-type 'terminating]
+         #:readtable-symbol-affect [rt-add-type 'terminating]
          )
   (define right-parser
     (proc-parser #:name (format "trailing-right-delimiter_~a" right)
@@ -1285,9 +1285,9 @@ This is an implementation of the same idea, but also adding support for operator
          (chido-readtable-add-raw-string-parser
           "<<" ">>"
           (chido-readtable-add-list-parser
-           "##{" "}##" #:readtable-add-type 'terminating-layout
+           "##{" "}##" #:readtable-symbol-affect 'terminating-layout
            (chido-readtable-add-raw-string-parser
-            "#|" "|#" #:readtable-add-type 'terminating-layout
+            "#|" "|#" #:readtable-symbol-affect 'terminating-layout
             (chido-readtable-add-list-parser
              "$(" ")" #:wrapper '#%dollar-paren
              (chido-readtable-add-list-parser
@@ -1517,9 +1517,9 @@ Make submodules providing some pre-made readtables:
   (define an-s-exp-readtable
     (extend-chido-readtable*
      (chido-readtable-add-list-parser
-      "##{" "}##" #:readtable-add-type 'terminating-layout
+      "##{" "}##" #:readtable-symbol-affect 'terminating-layout
       (chido-readtable-add-raw-string-parser
-       "#|" "|#" #:readtable-add-type 'terminating-layout
+       "#|" "|#" #:readtable-symbol-affect 'terminating-layout
        (chido-readtable-add-raw-string-parser
         "«" "»"
         (chido-readtable-add-list-parser
