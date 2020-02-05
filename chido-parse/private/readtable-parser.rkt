@@ -30,7 +30,7 @@ This is an implementation of the same idea, but also adding support for operator
   [chido-readtable-add-list-parser
    (->* (string? string? chido-readtable?)
         (#:wrapper (or/c #f symbol? (-> syntax? syntax?))
-         #:inside-readtable (or/c #f chido-readtable?)
+         #:inside-readtable (or/c #f chido-readtable? (-> chido-readtable?))
          #:readtable-symbol-affect symbol-affect/c)
         chido-readtable?)]
   [chido-readtable-add-raw-string-parser
@@ -61,6 +61,7 @@ This is an implementation of the same idea, but also adding support for operator
          #:associativity (or/c 'left 'right #f))
         any/c)]
   )
+ chido-readtable-name
  extend-chido-readtable*
  chido-readtable-add-mixfix-operators
  current-chido-readtable
@@ -848,7 +849,10 @@ This is an implementation of the same idea, but also adding support for operator
   (define (inner-parser)
     (proc-parser #:name (format "list-inner-parser-~a-~a" left right)
                  (λ (port)
-                   (define inner-rt (or inside-readtable (current-chido-readtable)))
+                   (define inner-rt (match inside-readtable
+                                      [#f (current-chido-readtable)]
+                                      [(? chido-readtable?) inside-readtable]
+                                      [(? procedure?) (inside-readtable)]))
                    (parse* port (chido-readtable->read* inner-rt)))
                  #:use-port? #f))
   (define left-parser
