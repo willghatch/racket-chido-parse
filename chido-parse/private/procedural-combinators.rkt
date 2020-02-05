@@ -5,6 +5,7 @@
  repetition
  kleene-star
  kleene-plus
+ kleene-question
  epsilon-parser
  eof-parser
  not-parser
@@ -308,6 +309,27 @@
               #:after after
               #:min 1))
 
+(define (kleene-question #:name [name #f]
+                         #:derive [derive #f]
+                         #:result/bare [make-result/bare #f]
+                         #:result/stx [make-result/stx #f]
+                         #:greedy? [greedy? #f]
+                         #:between [between #f]
+                         #:before [before #f]
+                         #:after [after #f]
+                         parser)
+  (repetition parser
+              #:name (or name (format "~a?" (parser-name parser)))
+              #:derive derive
+              #:result/bare make-result/bare
+              #:result/stx make-result/stx
+              #:greedy? greedy?
+              #:between between
+              #:before before
+              #:after after
+              #:min 0
+              #:max 1))
+
 (define (optional #:name [name #f]
                   #:derive [derive #f]
                   #:result/bare [make-result/bare #f]
@@ -452,6 +474,11 @@
            (kleene-plus "q"
                         #:result/bare (λ (elems) (string-join elems ""))))
      (list "q" "qq" "qqq"))
+  (c check-equal?
+     (p*/r "q"
+           (kleene-question "q"
+                            #:result/bare (λ (elems) (string-join elems ""))))
+     (list "" "q"))
   (c check-equal?
      (p*/r "qqqqqqqqqqqqqqqqqqqqqqq"
            (repetition "q" #:result/bare (λ (elems) (string-join elems ""))
