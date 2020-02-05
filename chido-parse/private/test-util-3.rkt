@@ -12,3 +12,5 @@
 
 (define (wp*/r str parser)
   (->results (whole-parse* (open-input-string str) parser)))
+(define (wp/r str parser)
+  (parse-derivation-result (whole-parse (open-input-string str) parser)))
