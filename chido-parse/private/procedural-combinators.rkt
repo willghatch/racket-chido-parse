@@ -9,6 +9,7 @@
  epsilon-parser
  eof-parser
  not-parser
+ peek-parser
 
 
  ;; TODO - These are not great, should probably be replaced
@@ -377,6 +378,17 @@
                      (make-parse-failure #:message "succeeded parsing in not parser"
                                          #:position pos)))))
 
+(define (peek-parser parser)
+  (proc-parser
+   (λ (p)
+     (define start (port->pos p))
+     (define inner-result (parse* p parser))
+     (for/parse ([d inner-result])
+                (make-parse-derivation
+                 #:end start #:derivations d
+                 (λ (src line col pos span derivations)
+                   (parse-derivation-result d)))))))
+
 
 
 (define (wrap-derivation parser wrap-func #:name [name #f])
@@ -572,6 +584,11 @@
      (p*/r "abc"
            (not-parser eof-parser #:result 'foo))
      (list 'foo))
+
+  (c se/datum?
+     (p*/r "abc"
+           (sequence (peek-parser "abc") "abc"))
+     (list #'("abc" "abc")))
 
 
   ;;;;;;;;;;;;;;;;;;;
