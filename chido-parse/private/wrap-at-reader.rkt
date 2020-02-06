@@ -12,6 +12,7 @@
  "parameters.rkt"
  scribble/reader
  racket/stream
+ syntax/parse
  )
 
 ;; At-expressions are @<cmd>[<datum>*]{text-body*}
@@ -55,12 +56,20 @@
 ;; This is a terrible hack.  But without a way to hijack the core readtable functions, or editing the datum reader to actually use a different read function upon hitting the left bracket, this is the best I'm going to do for now.
 
 
+(define datum-space-hack-result (gensym))
+(define datum-space-hack
+  (proc-parser
+   (λ (port)
+     (parse* port (sequence (chido-readtable->layout* (current-chido-readtable))
+                            (peek-parser "]")
+                            #:result/stx (λ args datum-space-hack-result))))))
+
 (define (core-read->rewind-1-and-chido-read char port src line col pos)
   (define crt (current-chido-readtable))
+  (define crt-with-datum-space-hack
+    (extend-chido-readtable 'nonterminating datum-space-hack crt))
   (define read-with-some-layout
-    (sequence (chido-readtable->read1/layout crt)
-              (chido-readtable->layout* crt)
-              #:result/stx (λ (l r) l)))
+    (chido-readtable->read1/layout crt-with-datum-space-hack))
   (define results
     (parse* port read-with-some-layout #:start (sub1 (port->pos port))))
   (define single-derivation
@@ -81,7 +90,7 @@
 
 
 (define shim-rt
-  (begin ;time
+  (begin #;time
    (for/fold ([rt #f])
              (
               ;; This is far enough into unicode that, uh, probably most people won't notice.  But it's still fast enough.
@@ -117,14 +126,25 @@
                        #:command-readtable 'dynamic
                        #:datum-readtable 'dynamic
                        ))
-  (proc-parser
-   #:prefix prefix
-   #:preserve-prefix? #t
-   #:promise-no-left-recursion? #t
-   #:name "at-reader"
-   (λ (port)
-     (parameterize ([current-readtable at-rt])
-       (read-syntax (object-name port) port)))))
+  (wrap-derivation
+   (proc-parser
+    #:prefix prefix
+    #:preserve-prefix? #t
+    #:promise-no-left-recursion? #t
+    #:name "at-reader"
+    (λ (port)
+      (parameterize ([current-readtable at-rt])
+        (read-syntax (object-name port) port))))
+   (λ (d)
+     (λ (src line col pos span derivations)
+       (let ([orig-result (parse-derivation-result d)])
+         (define-syntax-class datum-space-hack-result-stx
+           (pattern x:id
+                    #:when (eq? (syntax->datum #'x) datum-space-hack-result)))
+         (syntax-parse orig-result
+           [(pre ... dhrs:datum-space-hack-result-stx post ...)
+            (datum->syntax #f (syntax->list #'(pre ... post ...)))]
+           [else orig-result]))))))
 
 (define (chido-readtable-add-at-reader
          rt-to-extend
@@ -154,8 +174,15 @@
          (wp/r "@«raw string»" at-rt)
          #'"raw string")
   (check se/datum?
+         (wp/r "@atcmd[in datum]" at-rt)
+         #'(atcmd in datum))
+  (check se/datum?
          (wp/r "@atcmd[in datum]{in at string}" at-rt)
          #'(atcmd in datum "in at string"))
+  (check se/datum?
+         ;; Test for proper space handling in escapes AND datum segment
+         (wp/r "@atcmd[in datum  ]{in at string @(escaped) back in string}" at-rt)
+         #'(atcmd in datum "in at string " (escaped) " back in string"))
   (check se/datum?
          (wp/r "@atcmd[in datum (with) «guillemet raw string»]{in at string}" at-rt)
          #'(atcmd in datum (with) "guillemet raw string" "in at string"))
@@ -180,7 +207,7 @@
          (wp/r "^atcmd[datum «raw»]{in at string ^with[«raw»]{escape}}" caret-rt)
          #'(atcmd datum "raw" "in at string " (with "raw" "escape")))
 
-  (fail "The below are the same as the caret tests, but are failing inexplicably.  Probably some weird unicode issue.")
+  (fail "The below commented out tests are the same as the caret tests, but are failing inexplicably.  Probably some weird unicode issue.")
   ;(define lozenge-rt (chido-readtable-add-at-reader an-s-exp-readtable #:prefix "◊"))
   ;(check se/datum?
   ;       (wp/r "◊atcmd" lozenge-rt)
