@@ -184,7 +184,7 @@
                                #:end [end #f]
                                #:derivations [derivations '()])
   ;; `result` should be a non-procedure OR a procedure that accepts
-  ;; line column start-position end-position derivation-list
+  ;; src line column start-position span derivation-list
   (define job (current-chido-parse-job))
   (define derivation-list (if (list? derivations) derivations (list derivations)))
   (match job
