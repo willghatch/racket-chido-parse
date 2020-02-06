@@ -1,6 +1,9 @@
 #lang racket/base
 
-(provide chido-readtable-add-at-reader)
+(provide
+ chido-readtable-add-at-reader
+ make-at-reader-parser
+ )
 
 (require
  "core.rkt"
@@ -99,9 +102,7 @@
 
 ;;;; Chido-parse at-readtable implementation using the shim Racket readtable
 
-(define (chido-readtable-add-at-reader
-         rt-to-extend
-         #:prefix [prefix "@"])
+(define (make-at-reader-parser #:prefix [prefix "@"])
   (define command-char
     (cond [(char? prefix) prefix]
           [(and (string? prefix) (equal? 1 (string-length prefix)))
@@ -110,24 +111,28 @@
            (error 'chido-readtable-add-at-reader
                   "Only single character prefixes are supported.  Given ~v"
                   prefix)]))
-
   (define at-rt
     (make-at-readtable #:command-char command-char
                        #:readtable shim-rt
                        #:command-readtable 'dynamic
                        #:datum-readtable 'dynamic
                        ))
-  (define at-pp
-    (proc-parser
-     #:prefix prefix
-     #:preserve-prefix? #t
-     #:promise-no-left-recursion? #t
-     #:name "at-reader"
-     (λ (port)
-       (parameterize ([current-readtable at-rt])
-         (read-syntax (object-name port) port)))))
+  (proc-parser
+   #:prefix prefix
+   #:preserve-prefix? #t
+   #:promise-no-left-recursion? #t
+   #:name "at-reader"
+   (λ (port)
+     (parameterize ([current-readtable at-rt])
+       (read-syntax (object-name port) port)))))
 
-  (extend-chido-readtable 'terminating at-pp rt-to-extend))
+(define (chido-readtable-add-at-reader
+         rt-to-extend
+         #:prefix [prefix "@"])
+
+  (extend-chido-readtable 'terminating
+                          (make-at-reader-parser #:prefix prefix)
+                          rt-to-extend))
 
 
 (module+ test
