@@ -431,11 +431,11 @@
 (define (bnf-parser->with-surrounding-layout bnf)
   (sequence (kleene-star (bnf-parser-layout-alt bnf)
                          ;; TODO - figure out what to best do here
-                         ;#:greedy? #t
+                         #:greedy? #t
                          )
             bnf
             (kleene-star (bnf-parser-layout-alt bnf)
-                         ;#:greedy? #t
+                         #:greedy? #t
                          )
             #:result/stx (λ (l bnf r) bnf)))
 
