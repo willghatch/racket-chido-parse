@@ -6,7 +6,7 @@
 
 Space : $(char-in "#x20#x9#xD#xA")+
 
-% element : EmptyElemTag
+% element : @EmptyElemTag
           | n = @STag
             @content
             /$(result-filter ETag (λ (r) (equal? (car (syntax->datum r))
@@ -33,11 +33,16 @@ Space : $(char-in "#x20#x9#xD#xA")+
 ;;CData : (Char* - (Char* "]]>" Char*))
 ;; CharData	   ::=   	[^<&]* - ([^<&]* ']]>' [^<&]*)
 
-Reference : EntityRef | CharRef
-% EntityRef :  "&" Name ";"
-% PEReference : "%" Name ";"
-% CharRef : "&#" $(cr "09")+ ";"
-          | "&#x" ($(cr "09") | $(cr "af") | $(cr "AF"))+ ";"
+/Reference : @EntityRef | @CharRef
+% EntityRef :  /"&" Name /";"
+% PEReference : /"%" Name /";"
+% CharRef : /"&#" @$(cr "09")+ /";"
+          :: (λ cs `(CharRef ,(string->number
+                               (apply string-append (map ->str cs)))))
+          | /"&#x" @($(cr "09") | $(cr "af") | $(cr "AF"))+ /";"
+          :: (λ cs `(CharRef ,(string->number
+                               (apply string-append (map ->str cs))
+                               16)))
 
 ;;; TODO !!!! Name is parsing wrong due to auto-layout insertion.  For several productions I need a switch to turn it off.  This should be easy, since I think the option exists in bnf-s-exp, but it is not threaded through to bnf-syntactic.
 
@@ -175,15 +180,15 @@ PubidChar : "#x20" | "#xD" | "#xA" | $(cr "az") | $(cr "AZ") | $(cr "09") | $(ch
          (list #'"foo"))
   (check se/datum?
          (wp*/r "hello='foo'" attr-parser)
-         (list #'(Attribute hello "foo")))
+         (list #'(hello "foo")))
   (check se/datum?
          (wp*/r "<a/>" parser)
          (list #'(document (prolog () () ())
-                           (element (a ())))))
+                           (element a ()))))
   (check se/datum?
          (wp*/r "<a></a>" parser)
          (list #'(document (prolog () () ())
-                           (element (a ())))))
+                           (element a ()))))
   (check se/datum?
          (wp*/r "</a><b/>" (sequence
                             (bnf-parser->arm-parser parser 'ETag)
@@ -194,21 +199,21 @@ PubidChar : "#x20" | "#xD" | "#xA" | $(cr "az") | $(cr "AZ") | $(cr "09") | $(ch
          (list #'(a)))
   (check se/datum?
          (wp*/r "<tag_a/><tag_b/>" content-parser)
-         (list #'((element (tag_a ()))(element (tag_b ())))))
+         (list #'((element tag_a ()) (element tag_b ()))))
   (check se/datum?
          (wp*/r "hello <tag/>  test" content-parser)
-         (list #'("hello " (element (tag ())) "  test")))
+         (list #'("hello " (element tag ()) "  test")))
   (check se/datum?
          (wp*/r "hello <!-- this is a comment --> test" content-parser)
          (list #'("hello " (Comment " this is a comment ") " test")))
   (check se/datum?
          (wp*/r "<a><b></b></a>" parser)
          (list #'(document (prolog () () ())
-                           (element (a ()) (element (b ()))))))
+                           (element a () (element b ())))))
   (check se/datum?
          (wp*/r "<a><b></b> </a>" parser)
          (list #'(document (prolog () () ())
-                           (element (a ()) (element (b ())) " "))))
+                           (element a () (element b ()) " "))))
   )
 
 (module* main racket/base
