@@ -909,12 +909,12 @@ TODO - what kind of filters do I need?
    #:promise-no-left-recursion? #t
    (λ (port)
      (define c (read-char port))
-     (if (char<=? min-use c max-use)
-         (make-parse-derivation c)
-         (make-parse-failure
-          #:message (string->immutable-string
-                     (format "character (~v) not in range: ~v-~v"
-                             c min-use max-use)))))))
+     (cond [(eof-object? c) (make-parse-failure #:message "got eof")]
+           [(char<=? min-use c max-use) (make-parse-derivation c)]
+           [else (make-parse-failure
+                  #:message (string->immutable-string
+                             (format "character (~v) not in range: ~v-~v"
+                                     c min-use max-use)))]))))
 
 (define any-char-parser
   (proc-parser
@@ -950,7 +950,11 @@ TODO - what kind of filters do I need?
     (cond [(stream-empty? result) result]
           [(stream-empty? (stream-rest result)) (stream-first result)]
           ;; TODO - better error message
-          [else (error errname "ambiguous parse.")]))
+          [else (error errname "ambiguous parse: got (at least):\n~v\nand\n~v"
+                       (parse-derivation-result
+                        (stream-first result))
+                       (parse-derivation-result
+                        (stream-first (stream-rest result))))]))
   (when (and (not (stream? result*))
              (input-port? port))
     (read-string (- (parse-derivation-end-position result*)
