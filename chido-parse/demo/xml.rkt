@@ -7,7 +7,7 @@
 Space : $(char-in "#x20#x9#xD#xA")+
 
 % element : EmptyElemTag
-          | n = STag
+          | n = @STag
             @content
             /$(result-filter ETag (λ (r) (equal? (car (syntax->datum r))
                                                  (car (syntax->datum
@@ -16,7 +16,7 @@ Space : $(char-in "#x20#x9#xD#xA")+
 /EmptyElemTag : /"<" Name Attribute* /"/>"
 /STag : /"<" Name Attribute* /">"
 /ETag : /"</" Name /">"
-% Attribute : Name /"=" AttValue
+/% Attribute : Name /"=" AttValue
 % AttValue : /"\"" @($(char-not-in "<&\"") | Reference)* /"\"" :: chars->string
            | /"'" @($(char-not-in "<&'") | Reference)* /"'" :: chars->string
 
@@ -68,13 +68,15 @@ Misc : Comment | PI
 
 
 prolog : XMLDecl? Misc* (doctypedecl Misc*)?
-XMLDecl : "<?xml" VersionInfo EncodingDecl? SDDecl? "?>"
-VersionInfo : "version" "=" (("'" VersionNum "'") | ("\"" VersionNum "\""))
-% VersionNum : "1." $(cr "09")+
+XMLDecl : /"<?xml" VersionInfo EncodingDecl? SDDecl? /"?>"
+VersionInfo : /"version" /"=" @((/"'" VersionNum /"'") | (/"\"" VersionNum /"\""))
+/% VersionNum : "1." @$(cr "09")+
+:: (λ parts (apply string-append (map ->str parts)))
 doctypedecl : "<!DOCTYPE" Name ExternalID? ("[" intSubset "]")? ">"
 ;; TODO - elem-alts need to support sequences directly, rather than needing them to be put into parens.
-EncodingDecl : "encoding" "=" (("\"" EncName "\"") | ("'" EncName "'"))
-EncName : ($(cr "az") | $(cr "AZ")) ($(cr "az") | $(cr "AZ") | $(cr "09") | $(char-in "._-"))*
+EncodingDecl : /"encoding" /"=" @((/"\"" EncName /"\"") | (/"'" EncName /"'"))
+/ EncName : ($(cr "az") | $(cr "AZ")) @($(cr "az") | $(cr "AZ") | $(cr "09") | $(char-in "._-"))*
+:: (λ cs (apply string (map ->char cs)))
 SDDecl : "standalone" "=" (("'" ("yes" | "no") "'") | ("\"" ("yes" | "no") "\""))
 
 ;; TODO - There are several more productions related to the prolog, but I want to start testing, and most xml does not include this crap.
@@ -109,6 +111,12 @@ PubidChar : "#x20" | "#xD" | "#xA" | $(cr "az") | $(cr "AZ") | $(cr "09") | $(ch
         [else
          (eprintf "not char: ~v\n" x)
          (error '->char "can't convert to char: ~v\n" x)]))
+(define (->str x)
+  (cond [(syntax? x) (->str (syntax-e x))]
+        [(char? x) (string x)]
+        [(string? x) x]
+        [(symbol? x) (symbol->string x)]
+        [else (error '->str "not supported: ~v\n" x)]))
 
 (define chars->string (λ cs (apply string (map ->char cs))))
 
@@ -228,7 +236,8 @@ PubidChar : "#x20" | "#xD" | "#xA" | $(cr "az") | $(cr "AZ") | $(cr "09") | $(ch
      (cond [(parse-failure? parse-result)
             (printf "~a\n" (parse-failure->string/chain parse-result))]
            [(stream-empty? (stream-rest parse-result))
-            (printf "~v\n" (parse-derivation-result (stream-first parse-result)))]
+            (printf "~v\n" (syntax->datum
+                            (parse-derivation-result (stream-first parse-result))))]
            [else
             (printf "AMBIGUOUS PARSE!\n\n")
             (printf "Result 1:\n")
