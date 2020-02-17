@@ -46,6 +46,7 @@
 
  (struct-out parse-failure)
  make-parse-failure
+ (rename-out [exn->failure/export exn->failure])
  parse-failure->string/location-triple
  parse-failure->string/simple
  parse-failure->string/message
@@ -454,6 +455,7 @@
                     #f
                     #f)]))
 
+(define convert-exceptions-to-failures? #f)
 (define (exn->failure e job)
   (let ([message (format "Exception while parsing: ~a\n" (exn->string e))])
     (match job
@@ -473,6 +475,12 @@
                       (not (equal? start-position fail-pos))
                       #f
                       #f)])))
+(define (exn->failure/export e)
+  (let ([j (current-chido-parse-job)])
+    (if j
+        (exn->failure e j)
+        (error 'exn->failure
+               "Can only be called in the dynamic extent of chido-parse."))))
 
 (define (alt-worker->failure aw)
   (match aw
@@ -1170,7 +1178,11 @@ But I still need to encapsulate the port and give a start position.
                                        result-loop
                                        k-arg)
         (result-loop (λ ()
-                       (with-handlers ([(λ (e) #t) (λ (e) (exn->failure e job))])
+                       (with-handlers ([(λ (e) #t)
+                                        (λ (e)
+                                          (if convert-exceptions-to-failures?
+                                              (exn->failure e job)
+                                              (raise e)))])
                          (parameterize ([current-chido-parse-job job])
                            (call-with-continuation-prompt
                             thunk/k

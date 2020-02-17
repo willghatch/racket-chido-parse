@@ -320,11 +320,13 @@
   (define number-parser
     (proc-parser
      (λ (port)
-       (define r (read port))
+       (define r
+         (with-handlers ([(λ(e)#t)(λ(e)(exn->failure e))])
+           (read port)))
        (define-values (line col pos) (port-next-location port))
        (if (number? r)
            (make-parse-derivation r #:end pos)
-           (error "not a number")))))
+           (make-parse-failure #:message "not a number")))))
 
   (define-bnf-arm test1
     #:ignore-arm-name? #t
