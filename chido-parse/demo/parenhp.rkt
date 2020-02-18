@@ -1,13 +1,31 @@
 #lang racket/base
 
 (require
- "xml-macros.rkt" 
- )
+ "xml-macros.rkt"
+ web-server/servlet
+ web-server/servlet-env
+ (for-syntax
+  racket/base
+  syntax/parse
+  ))
 
 (provide
  (all-from-out  "xml-macros.rkt")
- (all-from-out racket/base)
+ (all-from-out web-server/servlet)
+ (all-from-out web-server/servlet-env)
+ (except-out (all-from-out racket/base)
+             #%module-begin)
+ (rename-out [parenhp-module-begin #%module-begin])
  )
+
+(define-syntax (parenhp-module-begin stx)
+  (syntax-parse stx
+    [(_ form ...)
+     #'(#%module-begin
+        (define (start req)
+          (response/xexpr
+           (begin form ...)))
+        (serve/servlet start))]))
 
 (module reader syntax/module-reader
   chido-parse/demo/parenhp

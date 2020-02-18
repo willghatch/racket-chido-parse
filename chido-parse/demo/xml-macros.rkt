@@ -28,17 +28,16 @@
 (define-syntax-parser document
   [(_ prolog-form top-level-element)
    ;; TODO - actually use the prolog
-   #'(begin
-       (define document-content top-level-element)
-       (printf "got xexpr: ~v\n" document-content)
-       (printf "as xml: ~v\n" (xexpr->string document-content))
-       )])
+   #'(let ([document-content top-level-element])
+       ;(printf "got xexpr: ~v\n" document-content)
+       ;(printf "as xml: ~v\n" (xexpr->string document-content))
+       document-content)])
 #;(define-synatx-parser prolog
   TODO)
 
 (define-syntax-parser element
   [(_ tag:id ((attribute-name:id attribute-value:str) ...) contents ...)
-   #'(list 'tag (list ('attribute-name 'attribute-value) ...)
+   #'(list 'tag '((attribute-name attribute-value) ...)
            contents ...)])
 
 (define-syntax-parser EntityRef
@@ -51,6 +50,7 @@
 (define-syntax-parser CharRef
   [(_ n:number)
    #'(string (integer->char n))])
+
 
 
 

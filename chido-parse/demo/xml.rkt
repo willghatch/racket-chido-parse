@@ -23,6 +23,7 @@ Space : $(char-in "#x20#x9#xD#xA")+
 
 ;; 	content	   ::=   	CharData? ((element | Reference | CDSect | PI | Comment) CharData?)*
 /%content : @ $non-null-CharData ? @@ ((element | Reference | CDSect | PI | Comment) @$non-null-CharData ?)*
+:: (λ elems (filter (syntax-parser [((~datum Comment) str) #f] [else #t]) elems))
 
 
 ;;CDSect : CDStart CData CDEnd
@@ -100,7 +101,10 @@ PubidChar : "#x20" | "#xD" | "#xA" | $(cr "az") | $(cr "AZ") | $(cr "09") | $(ch
 ;; TODO - all these "#x20" strings need to be changed to Racket's string escape format
 
 #:definitions
-(require racket/string)
+(require
+ racket/string
+ syntax/parse
+ )
 
 (define (not-dash? c)
   (not (equal? c (string-ref "-" 0))))
