@@ -8,7 +8,11 @@
       ,#<b>escape<¿(list 'a '((href "https://docs.racket-lang.org")
                               (style "color: #ff0000;"))
                          "!!!"
-                         #<div style="background-color: #00ff00">??</div>)¿></b>
+                         #<span style="background-color: #00ff00">??</span>)¿></b>
       ,#<b>!!!</b>)¿>
 </p>
+<p>Query parameters: <¿(append '(table ())
+                               (for/list ([pair (request-bindings (current-request))])
+                                 #<tr><td><¿(car pair)¿></td>
+                                 <td><¿(cdr pair)¿></td></tr>))¿></p>
 </html>

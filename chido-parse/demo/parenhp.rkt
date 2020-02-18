@@ -16,15 +16,19 @@
  (except-out (all-from-out racket/base)
              #%module-begin)
  (rename-out [parenhp-module-begin #%module-begin])
+ current-request
  )
+
+(define current-request (make-parameter #f))
 
 (define-syntax (parenhp-module-begin stx)
   (syntax-parse stx
     [(_ form ...)
      #'(#%module-begin
         (define (start req)
-          (response/xexpr
-           (begin form ...)))
+          (parameterize ([current-request req])
+            (response/xexpr
+             (begin form ...))))
         (serve/servlet start))]))
 
 (module reader syntax/module-reader
