@@ -7,11 +7,12 @@
 Space : $(char-in "#x20#x9#xD#xA")+
 
 % element : @EmptyElemTag
-          | n = @STag
+          | open = @STag
             @content
-            /$(result-filter ETag (λ (r) (equal? (car (syntax->datum r))
-                                                 (car (syntax->datum
-                                                       (parse-derivation-result n))))))
+            /$(derivation-filter
+               ETag
+               (λ (close) (equal? (derivation->tag-name open)
+                                  (derivation->tag-name close))))
 
 /EmptyElemTag : /"<" Name Attribute* /"/>"
 /STag : /"<" Name Attribute* /">"
@@ -105,6 +106,9 @@ PubidChar : "#x20" | "#xD" | "#xA" | $(cr "az") | $(cr "AZ") | $(cr "09") | $(ch
  racket/string
  syntax/parse
  )
+
+(define (derivation->tag-name d)
+  (car (syntax->datum (parse-derivation-result d))))
 
 (define (not-dash? c)
   (not (equal? c (string-ref "-" 0))))
@@ -207,9 +211,13 @@ PubidChar : "#x20" | "#xD" | "#xA" | $(cr "az") | $(cr "AZ") | $(cr "09") | $(ch
   (check se/datum?
          (wp*/r "hello <tag/>  test" content-parser)
          (list #'("hello " (element tag ()) "  test")))
-  (check se/datum?
+  ;; TODO - in some situations you want to keep comments, but I don't want syntax objects representing comments.  I need to figure out how I want to deal with comments in parsers generally.  Should comments/layout be a syntax property on the result?  This probably only works well for prefix layout.  What about an empty list with whitespace or comments inside?
+  #;(check se/datum?
          (wp*/r "hello <!-- this is a comment --> test" content-parser)
          (list #'("hello " (Comment " this is a comment ") " test")))
+  (check se/datum?
+         (wp*/r "hello <!-- this is a comment --> test" content-parser)
+         (list #'("hello " " test")))
   (check se/datum?
          (wp*/r "<a><b></b></a>" parser)
          (list #'(document (prolog () () ())

@@ -29,7 +29,8 @@
           (parameterize ([current-request req])
             (response/xexpr
              (begin form ...))))
-        (serve/servlet start))]))
+        (module+ main
+          (serve/servlet start)))]))
 
 (module reader syntax/module-reader
   chido-parse/demo/parenhp
