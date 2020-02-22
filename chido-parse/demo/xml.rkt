@@ -62,7 +62,7 @@ Space : $(char-in "#x20#x9#xD#xA")+
 
 % Comment : /"<!--"
           @($(char-not-in "-") | ($(char-parser "-") $(char-not-in "-")))*
-          /"-->" :: (λ cs (list 'Comment (apply chars->string cs)))
+          /"-->" :: (λ cs (list 'Comment (apply chars->string (flatten (map syntax->datum cs)))))
 
 ;;PI	   ::=   	'<?' PITarget (S (Char* - (Char* '?>' Char*)))? '?>'
 ;;PITarget	   ::=   	Name - (('X' | 'x') ('M' | 'm') ('L' | 'l'))
@@ -104,6 +104,7 @@ PubidChar : "#x20" | "#xD" | "#xA" | $(cr "az") | $(cr "AZ") | $(cr "09") | $(ch
 #:definitions
 (require
  racket/string
+ racket/list
  syntax/parse
  )
 
@@ -122,7 +123,6 @@ PubidChar : "#x20" | "#xD" | "#xA" | $(cr "az") | $(cr "AZ") | $(cr "09") | $(ch
         ;; TODO - CharRef and EntityRef
         ;; Eg. (EntityRef "&" quot ";") should be a quotation mark.  There should be a list of all of these somewhere...
         [else
-         (eprintf "not char: ~v\n" x)
          (error '->char "can't convert to char: ~v\n" x)]))
 (define (->str x)
   (cond [(syntax? x) (->str (syntax-e x))]
@@ -131,7 +131,8 @@ PubidChar : "#x20" | "#xD" | "#xA" | $(cr "az") | $(cr "AZ") | $(cr "09") | $(ch
         [(symbol? x) (symbol->string x)]
         [else (error '->str "not supported: ~v\n" x)]))
 
-(define chars->string (λ cs (apply string (map ->char cs))))
+(define chars->string (λ cs
+                        (apply string (map ->char cs))))
 
 (define (make-cdata excluding-regexp)
   (proc-parser

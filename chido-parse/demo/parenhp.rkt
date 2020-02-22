@@ -44,19 +44,20 @@
    )
 
   (define basic-readtable an-s-exp-readtable)
+  (define hash-tag-parser
+    (proc-parser
+     #:prefix "#<"
+     #:preserve-prefix? #t
+     (λ (port)
+       ;; consume #
+       (read-char port)
+       (parse* port (bnf-parser->arm-parser
+                     parenhp-parser
+                     'element)))))
   (define parenhp-s-exp
     (extend-chido-readtable 'terminating
-                            (proc-parser
-                             #:prefix "#<"
-                             #:preserve-prefix? #t
-                             (λ (port)
-                               ;; consume #
-                               (read-char port)
-                               (parse* port (bnf-parser->arm-parser
-                                             parenhp-parser
-                                             'element))))
+                            hash-tag-parser
                             basic-readtable))
-
   (define parenhp-parser
     (extend-bnf
      parser
