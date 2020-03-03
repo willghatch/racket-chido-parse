@@ -58,7 +58,7 @@
  get-counts!
 
  parse*
- parse-direct
+ parse*-direct
  for/parse
  #;(contract-out
   [parse* (->* (input-port? parser?)
@@ -1186,7 +1186,7 @@ But I still need to encapsulate the port and give a start position.
                          (parameterize ([current-chido-parse-job job])
                            (call-with-continuation-prompt
                             thunk/k
-                            parse-direct-prompt)))))))
+                            parse*-direct-prompt)))))))
   (let flatten-loop ([result result])
     (if (eq? result recursive-enter-flag)
         (run-scheduler scheduler)
@@ -1199,7 +1199,7 @@ But I still need to encapsulate the port and give a start position.
                       (call-with-continuation-prompt
                        (λ ()
                          (stream-flatten result))
-                       parse-direct-prompt)))
+                       parse*-direct-prompt)))
               chido-parse-prompt
               result-loop))
             (begin (cache-result-and-ready-dependents! scheduler job result)
@@ -1348,11 +1348,11 @@ But I still need to encapsulate the port and give a start position.
                        (~? failure-arg
                            (λ (f) f (make-parse-failure #:inner-failure f))))]))
 
-(define (parse-direct port parser
+(define (parse*-direct port parser
                       #:start [start #f]
                       #:failure [failure-arg #f])
   (when (not (input-port? port))
-    (error 'parse-direct "parse-direct requires a port as an argument, given: ~v"
+    (error 'parse*-direct "parse*-direct requires a port as an argument, given: ~v"
            port))
   (define start-use (or start (port->pos port)))
   ;; This one lets the user get a single result back, but the return is actually a stream.
@@ -1363,7 +1363,7 @@ But I still need to encapsulate the port and give a start position.
       (call-with-composable-continuation
        (λ (k)
          (abort-current-continuation
-          parse-direct-prompt
+          parse*-direct-prompt
           ;; TODO - better failure handling and propagation
           (λ () (for/parse ([d (parse* port parser #:start core-start)]
                             #:failure (λ (f)
@@ -1375,7 +1375,7 @@ But I still need to encapsulate the port and give a start position.
                                               (make-parse-failure
                                                #:inner-failure f)))))
                            (k d)))))
-       parse-direct-prompt))
+       parse*-direct-prompt))
     (define new-pos (parse-derivation-end-position new-derivation))
     (port-broker-port-reset-position! port new-pos)
     new-derivation)
@@ -1430,8 +1430,8 @@ TODO
 
 
   (define (Aa-parser-proc/direct port)
-    (define d/A (parse-direct port (get-A-parser/direct)))
-    (define d/a (parse-direct port a1-parser-obj))
+    (define d/A (parse*-direct port (get-A-parser/direct)))
+    (define d/a (parse*-direct port a1-parser-obj))
     (make-parse-derivation (λ args (string-append (parse-derivation-result! d/A)
                                                   (parse-derivation-result! d/a)))
                            #:derivations (list d/A d/a)))

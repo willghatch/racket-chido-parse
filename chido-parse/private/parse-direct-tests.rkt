@@ -1,7 +1,7 @@
 #lang racket/base
 
 #|
-I had a terrible bug with parse-direct, which was demonstrated by the plus parser example I wanted to use.
+I had a terrible bug with parse*-direct, which was demonstrated by the plus parser example I wanted to use.
 
 This file has several variations of the bad parsers that I was using to try to figure out what was going wrong.
 I figure I should commit it as a test.
@@ -71,13 +71,13 @@ I figure I should commit it as a test.
                     2)
     )
   (let ()
-    (e1printf "\n\nl with parse-direct\n")
+    (e1printf "\n\nl with parse*-direct\n")
     (define plus
       (proc-parser
        #:name "plus"
        (λ (port)
-         (define l (parse-direct port expression))
-         (e1printf "~v: l (via parse-direct) is: ~v\n"
+         (define l (parse*-direct port expression))
+         (e1printf "~v: l (via parse*-direct) is: ~v\n"
                   (parse-derivation-start-position l)
                   (parse-derivation-result l))
          (for/parse ([op (parse* port "+" #:start l)])
@@ -86,7 +86,7 @@ I figure I should commit it as a test.
                              (parse-derivation-start-position op)
                              (parse-derivation-result op))
                     (for/parse ([r (parse* port expression #:start op)])
-                               (e1printf "~v,~v,~v: r (via parse-direct) is: ~v\n"
+                               (e1printf "~v,~v,~v: r (via parse*-direct) is: ~v\n"
                                         (parse-derivation-start-position l)
                                         (parse-derivation-start-position op)
                                         (parse-derivation-start-position r)
@@ -108,7 +108,7 @@ I figure I should commit it as a test.
                     2)
     )
   (let ()
-    (e1printf "\n\nop with parse-direct\n")
+    (e1printf "\n\nop with parse*-direct\n")
     (define plus
       (proc-parser
        #:name "plus"
@@ -117,13 +117,13 @@ I figure I should commit it as a test.
                     (e1printf "~v: l (via for/parse) is: ~v\n"
                              (parse-derivation-start-position l)
                              (parse-derivation-result l))
-                    (define op (parse-direct port "+" #:start l))
+                    (define op (parse*-direct port "+" #:start l))
                     (e1printf "~v,~v: op (via for/parse) is: ~v\n"
                              (parse-derivation-start-position l)
                              (parse-derivation-start-position op)
                              (parse-derivation-result op))
                     (for/parse ([r (parse* port expression #:start op)])
-                               (e1printf "~v,~v,~v: r (via parse-direct) is: ~v\n"
+                               (e1printf "~v,~v,~v: r (via parse*-direct) is: ~v\n"
                                         (parse-derivation-start-position l)
                                         (parse-derivation-start-position op)
                                         (parse-derivation-start-position r)
@@ -145,7 +145,7 @@ I figure I should commit it as a test.
                     2)
     )
   (let ()
-    (e1printf "\n\nr with parse-direct\n")
+    (e1printf "\n\nr with parse*-direct\n")
     (define plus
       (proc-parser
        #:name "plus"
@@ -159,8 +159,8 @@ I figure I should commit it as a test.
                                         (parse-derivation-start-position l)
                                         (parse-derivation-start-position op)
                                         (parse-derivation-result op))
-                               (define r (parse-direct port expression #:start op))
-                               (e1printf "~v,~v,~v: r (via parse-direct) is: ~v\n"
+                               (define r (parse*-direct port expression #:start op))
+                               (e1printf "~v,~v,~v: r (via parse*-direct) is: ~v\n"
                                         (parse-derivation-start-position l)
                                         (parse-derivation-start-position op)
                                         (parse-derivation-start-position r)
@@ -182,14 +182,14 @@ I figure I should commit it as a test.
                     2)
     )
   (let ()
-    (e1printf "\n\nexample 1 op and r with parse-direct\n")
+    (e1printf "\n\nexample 1 op and r with parse*-direct\n")
     (define plus
       (proc-parser
        #:name "plus"
        (λ (port)
          (for/parse ([l (parse* port expression)])
-                    (define op (parse-direct port "+" #:start l))
-                    (define r (parse-direct port expression #:start op))
+                    (define op (parse*-direct port "+" #:start l))
+                    (define r (parse*-direct port expression #:start op))
                     (make-parse-derivation
                      `(+ ,(parse-derivation-result l)
                          ,(parse-derivation-result r))
@@ -206,14 +206,14 @@ I figure I should commit it as a test.
                     2)
     )
   (let ()
-    (e1printf "\n\nexample 1 l and r as parse-direct\n")
+    (e1printf "\n\nexample 1 l and r as parse*-direct\n")
     (define plus
       (proc-parser
        #:name "plus"
        (λ (port)
-         (define l (parse-direct port expression))
+         (define l (parse*-direct port expression))
          (for/parse ([op (parse* port "+" #:start l)])
-                    (define r (parse-direct port expression #:start op))
+                    (define r (parse*-direct port expression #:start op))
                     (make-parse-derivation
                      `(+ ,(parse-derivation-result l)
                          ,(parse-derivation-result r))
@@ -230,13 +230,13 @@ I figure I should commit it as a test.
                     2)
     )
   (let ()
-    (e1printf "\n\nexample 1 l and op as parse-direct\n")
+    (e1printf "\n\nexample 1 l and op as parse*-direct\n")
     (define plus
       (proc-parser
        #:name "plus"
        (λ (port)
-         (define l (parse-direct port expression))
-         (define op (parse-direct port "+" #:start l))
+         (define l (parse*-direct port expression))
+         (define op (parse*-direct port "+" #:start l))
          (for/parse ([r (parse* port expression #:start op)])
                     (make-parse-derivation
                      `(+ ,(parse-derivation-result l)
@@ -254,14 +254,14 @@ I figure I should commit it as a test.
                     2)
     )
   (let ()
-    (e1printf "\n\nexample 1 all parse-direct but with explicit positions\n")
+    (e1printf "\n\nexample 1 all parse*-direct but with explicit positions\n")
     (define plus
       (proc-parser
        #:name "plus"
        (λ (port)
-         (define l (parse-direct port expression))
-         (define op (parse-direct port "+" #:start l))
-         (define r (parse-direct port expression #:start op))
+         (define l (parse*-direct port expression))
+         (define op (parse*-direct port "+" #:start l))
+         (define r (parse*-direct port expression #:start op))
          (make-parse-derivation
           `(+ ,(parse-derivation-result l)
               ,(parse-derivation-result r))
@@ -286,9 +286,9 @@ I figure I should commit it as a test.
   (proc-parser
    #:name "plus"
    (λ (port)
-     (define l (parse-direct port expression))
-     (define op (parse-direct port "+"))
-     (define r (parse-direct port expression))
+     (define l (parse*-direct port expression))
+     (define op (parse*-direct port "+"))
+     (define r (parse*-direct port expression))
      (make-parse-derivation
       `(+ ,(parse-derivation-result l)
           ,(parse-derivation-result r))

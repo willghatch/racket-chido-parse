@@ -951,7 +951,7 @@ This is an implementation of the same idea, but also adding support for operator
        (if (current-quasi-expression-comment-active)
            (chido-parse-parameterize
             ([current-quasi-expression-comment-active #f])
-            (define d (parse-direct port (current-chido-readtable)))
+            (define d (parse*-direct port (current-chido-readtable)))
             (make-parse-derivation (λ args (parse-derivation-result d))
                                    #:derivations d))
            (make-parse-failure
@@ -974,7 +974,7 @@ This is an implementation of the same idea, but also adding support for operator
      #:preserve-prefix? #t
      #:promise-no-left-recursion? (not (equal? "" prefix))
      (λ (port)
-       (define d (parse-direct port inner-parser))
+       (define d (parse*-direct port inner-parser))
        (define uncomments (find-uncomments d))
        (cond [(null? uncomments)
               (if all-layout?

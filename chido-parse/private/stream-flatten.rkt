@@ -91,7 +91,7 @@ A flattened stream is flattened depth-first, a la `flatten` for lists.
    (stream->list ssc)
    (list 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17))
 
-  ;; A test that should reflect the structure of parsing "4+4+4" with my parse-direct plus example.
+  ;; A test that should reflect the structure of parsing "4+4+4" with my parse*-direct plus example.
   (define st2
     (stream 1
             (stream ;; +@1_l
