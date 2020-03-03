@@ -59,6 +59,7 @@
 
  parse*
  parse*-direct
+ delimit-parse*-direct
  for/parse
  #;(contract-out
   [parse* (->* (input-port? parser?)
@@ -1196,10 +1197,8 @@ But I still need to encapsulate the port and give a start position.
             (flatten-loop
              (call-with-continuation-prompt
               (λ () (parameterize ([current-chido-parse-job job])
-                      (call-with-continuation-prompt
-                       (λ ()
-                         (stream-flatten result))
-                       parse*-direct-prompt)))
+                      (delimit-parse*-direct
+                       (stream-flatten result))))
               chido-parse-prompt
               result-loop))
             (begin (cache-result-and-ready-dependents! scheduler job result)

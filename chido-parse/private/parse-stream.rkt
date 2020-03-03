@@ -2,6 +2,7 @@
 
 (provide
  parse*-direct-prompt
+ delimit-parse*-direct
  parse-stream-cons
  for/parse-proc
  )
@@ -20,6 +21,13 @@ The parse*-direct function needs its own continuation prompt.  When called durin
 |#
 (define parse*-direct-prompt (make-continuation-prompt-tag 'parse*-direct-prompt))
 
+(define-syntax (delimit-parse*-direct stx)
+  (syntax-parse stx
+    [(_ e:expr)
+     #'(call-with-continuation-prompt
+        (λ () e)
+        parse*-direct-prompt)]))
+
 #|
 Parameters and streams don't work nicely together.
 Not only do I need a special set of chido-parse-parameters to be captured by the
@@ -35,9 +43,7 @@ later elements in the streams will get different parameterizations.
               [h (parameterize ([current-chido-parse-parameters cp-params])
                    ;; TODO - really this exception should be converted into a failure.
                    (with-handlers ([(λ(e)#t) (λ(e)e)])
-                     (call-with-continuation-prompt
-                      (λ () head)
-                      parse*-direct-prompt)))])
+                     (delimit-parse*-direct head)))])
          ;; Note:  I previously used stream-cons here, which would be, uh,
          ;; more correct.  But stream cons onto a *custom* empty stream seems
          ;; to replace the custom empty stream with the canonical empty stream.
