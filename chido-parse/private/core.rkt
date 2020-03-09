@@ -623,7 +623,7 @@ The job cache is a multi-level dictionary with the following keys / implementati
 * cp-params / mutable hashequal?
 |#
 (define (make-start-position-cache)
-  (make-gvector #:capacity 1000))
+  (make-gvector #:capacity 10000))
 (define (make-parser-cache)
   (make-hasheq))
 (define (make-cp-params-cache)
@@ -638,48 +638,67 @@ The job cache is a multi-level dictionary with the following keys / implementati
                   0 siblings-vec #f #f '() #f #f))
     (gvector-add! siblings-vec job)
     job)
-  ;; traverse-cache returns the contents if `update` is false.
   (define (traverse-cache parser)
+    ;; Traverse the cache.  If no job is found, it updates the cache with a job.
+    ;; Either way it returns a job object.
+    ;; Each level of the cache may have a literal job object or a layer of caching.
+    ;; A layer of caching may be a gvector or a hash table.
+    (define (job-match? j)
+      (and
+       (eq? parser (parser-job-parser j))
+       (equal? cp-params (parser-job-cp-params j))))
     (define update #t)
     (inc-traverse-cache!)
     (define c/start-pos (scheduler-job-info->job-cache s))
-    (define c/parser
-      (cond [(< start-position (gvector-count c/start-pos))
-             (gvector-ref c/start-pos start-position)]
-            [update (for ([i (in-range (gvector-count c/start-pos)
-                                       (add1 start-position))])
-                      (gvector-add! c/start-pos
-                                    (make-parser-cache)))
-                    (gvector-ref c/start-pos start-position)]
-            [else #f]))
-    ;; This seems to make a difference for some benchmarks, but it's not huge.
-    #;(define value/skip-cp-params
-      (and c/parser
-           (let ([r (hash-ref c/parser parser #f)])
-             (cond [r r]
-                   [update (let ([c (make-fresh-parser-job usable)])
-                             (hash-set! c/parser parser c)
-                             c)]
-                   [else #f]))))
-    (define c/cp-params
-      (and c/parser
-           (let ([r (hash-ref c/parser parser #f)])
-             (cond [r r]
-                   [update (let ([c (make-cp-params-cache)])
-                             (hash-set! c/parser parser c)
-                             c)]
-                   [else #f]))))
-    (define value
-      (and c/cp-params
-           (let ([r (hash-ref c/cp-params cp-params #f)])
-             (cond [r r]
-                   [update
-                    (define new (make-fresh-parser-job usable))
-                    (hash-set! c/cp-params cp-params new)
-                    new]
-                   [else #f]))))
-    value
-    ;value/skip-cp-params
+    (define start-pos-referenced
+      (and (< start-position (gvector-count c/start-pos))
+           (gvector-ref c/start-pos start-position)))
+    (define (start-pos-add-cache-layer! old-job)
+      (define parser-cache-layer (make-parser-cache))
+      (define new-job (make-fresh-parser-job parser))
+      (hash-set! parser-cache-layer (parser-job-parser old-job) old-job)
+      (hash-set! parser-cache-layer parser new-job)
+      (gvector-set! c/start-pos start-position parser-cache-layer)
+      new-job)
+    (match start-pos-referenced
+      [#f
+       ;; extend gvector out to start position
+       (for ([i (in-range (gvector-count c/start-pos)
+                          (add1 start-position))])
+         (gvector-add! c/start-pos #f))
+       ;; add the parser to the cache
+       (define new-job (make-fresh-parser-job parser))
+       (gvector-set! c/start-pos start-position new-job)
+       new-job]
+      [(? parser-job?) (if (job-match? start-pos-referenced)
+                           start-pos-referenced
+                           (start-pos-add-cache-layer! start-pos-referenced))]
+      [else
+       (define c/parser start-pos-referenced)
+       (define parser-referenced (hash-ref c/parser parser #f))
+       (define (parser-add-cache-layer! old-job)
+         (define new-cache-layer (make-cp-params-cache))
+         (define new-job (make-fresh-parser-job parser))
+         (hash-set! new-cache-layer (parser-job-cp-params old-job) old-job)
+         (hash-set! new-cache-layer cp-params new-job)
+         (hash-set! c/parser parser new-cache-layer)
+         new-job)
+       (match parser-referenced
+         [#f
+          (define new-job (make-fresh-parser-job parser))
+          (hash-set! c/parser parser new-job)
+          new-job]
+         [(? parser-job?) (if (job-match? parser-referenced)
+                              parser-referenced
+                              (parser-add-cache-layer! parser-referenced))]
+         [else
+          (define c/cp-params parser-referenced)
+          (define cp-params-referenced (hash-ref c/cp-params cp-params #f))
+          (if cp-params-referenced
+              cp-params-referenced
+              (let ([new-job (make-fresh-parser-job parser)])
+                (hash-set! c/cp-params cp-params new-job)
+                new-job))])])
     )
 
   (define usable (parser->usable parser))
