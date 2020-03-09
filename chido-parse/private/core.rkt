@@ -178,6 +178,8 @@
                               run-scheduler
                               no-hint
                               traverse-cache
+                              cache-parser-conflict
+                              cache-cp-param-conflict
                               ))
 
 (define current-chido-parse-derivation-implicit-end (make-parameter #f))
@@ -654,6 +656,7 @@ The job cache is a multi-level dictionary with the following keys / implementati
       (and (< start-position (gvector-count c/start-pos))
            (gvector-ref c/start-pos start-position)))
     (define (start-pos-add-cache-layer! old-job)
+      (inc-cache-parser-conflict!)
       (define parser-cache-layer (make-parser-cache))
       (define new-job (make-fresh-parser-job parser))
       (hash-set! parser-cache-layer (parser-job-parser old-job) old-job)
@@ -677,6 +680,7 @@ The job cache is a multi-level dictionary with the following keys / implementati
        (define c/parser start-pos-referenced)
        (define parser-referenced (hash-ref c/parser parser #f))
        (define (parser-add-cache-layer! old-job)
+         (inc-cache-cp-param-conflict!)
          (define new-cache-layer (make-cp-params-cache))
          (define new-job (make-fresh-parser-job parser))
          (hash-set! new-cache-layer (parser-job-cp-params old-job) old-job)
