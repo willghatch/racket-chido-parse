@@ -554,6 +554,16 @@ The job->result-cache is a map from parser-job structs -> parser-stream OR parse
    )
   #:transparent)
 
+(define (job-immediately-actionable? job)
+  (and (not (job->result job))
+       (match job
+         [(s/kw parser-job #:continuation/worker c/w)
+          (match c/w
+            [#f #t]
+            [(s/kw scheduled-continuation #:ready? (? (λ(x)x))) #t]
+            [(s/kw alt-worker #:ready-jobs (? (λ(x) (not (null? x))))) #t]
+            [else #f])])))
+
 (define (push-parser-job-dependent! job new-dependent)
   (set-parser-job-dependents!
    job
@@ -1155,11 +1165,19 @@ But I still need to encapsulate the port and give a start position.
                     (filter (λ (x) (not (parser-job-result x))) dep-jobs))
                   (define worker
                     (alt-worker job unready-deps ready-deps '() #f))
-                  (for ([dep (alt-worker-remaining-jobs worker)])
+                  (for ([dep unready-deps])
                     (push-parser-job-dependent! dep worker))
                   (set-parser-job-continuation/worker! job worker)
+                  (cond [(not (null? ready-deps))
+                         ;; There is a result ready, so we just run this same job again to set the result.
+                         (run-actionable-job scheduler job)]
+                        [(and (not (null? unready-deps))
+                              (null? (cdr unready-deps))
+                              (job-immediately-actionable? (car unready-deps)))
+                         (run-actionable-job scheduler (car unready-deps))]
+                        [else (run-scheduler scheduler)])
                   ;(push-hint! scheduler worker)
-                  (run-scheduler scheduler)]
+                  ]
                  [(? string?)
                   (define s parser)
                   (define pb (scheduler-port-broker scheduler))
