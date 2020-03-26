@@ -521,7 +521,7 @@ The job-cache structure is described by the caching code -- it's a multi-tiered 
   #:transparent)
 (define (make-scheduler port-broker)
   (scheduler port-broker '() (make-start-position-cache)))
-(define (peek-scheduler-job s)
+(define (scheduler-peek-job s)
   (match s
     [(s/kw scheduler #:job-stacks '()) #f]
     [(s/kw scheduler #:job-stacks (list (vector pos
@@ -529,7 +529,10 @@ The job-cache structure is described by the caching code -- it's a multi-tiered 
                                                 altstack)
                                         vs ...))
      j1]))
-(define (push-scheduler-job s j)
+(define (scheduler-push-job! s j)
+  (when (parser-job-on-scheduler-stack? j)
+    (error 'scheduler-push-job! "chido-parse internal error - job marked as already on stack"))
+  (set-parser-job-on-scheduler-stack?! j #t)
   (define jpos (parser-job-start-position j))
   (define alt? (alt-parser? (parser-job-parser j)))
   (match s
@@ -543,22 +546,41 @@ The job-cache structure is described by the caching code -- it's a multi-tiered 
       s
       (cons (vector jpos (list j) (if alt? (list j) (list)))
             vs))]))
-(define (pop-scheduler-job s)
+(define (scheduler-pop-job! s)
+  (define j
+    (match s
+      [(s/kw scheduler #:job-stacks '())
+       (error 'scheduler-pop-job! "Chido Parse internal error -- job stacks empty")]
+      [(s/kw scheduler #:job-stacks (list (and v1
+                                               (vector pos (list one-job) altstack))
+                                          vs ...))
+       (set-scheduler-job-stacks! s vs)
+       one-job]
+      [(s/kw scheduler #:job-stacks (list (and v1
+                                               (vector pos jobstack altstack))
+                                          vs ...))
+       (define j (car jobstack))
+       (define alt? (alt-parser? (parser-job-parser j)))
+       (vector-set! v1 1 (cdr jobstack))
+       (when alt?
+         (vector-set! v1 2 (cdr altstack)))
+       j]))
+  (set-parser-job-on-scheduler-stack? j #f)
+  j)
+(define (scheduler-get-stack-jobs s)
+  ;; IE return the job stack for the current position
   (match s
     [(s/kw scheduler #:job-stacks '())
-     (error 'pop-scheduler "Chido Parse internal error -- job stacks empty")]
-    [(s/kw scheduler #:job-stacks (list (and v1 (vector pos (list one-job) altstack))
-                                        vs ...))
-     (set-scheduler-job-stacks! s vs)
-     one-job]
-    [(s/kw scheduler #:job-stacks (list (and v1 (vector pos jobstack altstack))
-                                        vs ...))
-     (define j (car jobstack))
-     (define alt? (alt-parser? (parser-job-parser j)))
-     (vector-set! v1 1 (cdr jobstack))
-     (when alt?
-       (vector-set! v1 2 (cdr altstack)))
-     j]))
+     (error 'scheduler-get-stack-jobs "chido parse internal error")]
+    [(s/kw scheduler #:job-stacks (list (vector pos jobstack altstack)))
+     jobstack]))
+(define (scheduler-get-stack-alts s)
+  ;; IE return the job stack for the current position
+  (match s
+    [(s/kw scheduler #:job-stacks '())
+     (error 'scheduler-get-stack-jobs "chido parse internal error")]
+    [(s/kw scheduler #:job-stacks (list (vector pos jobstack altstack)))
+     altstack]))
 
 
 (struct parser-job
@@ -581,8 +603,12 @@ The job-cache structure is described by the caching code -- it's a multi-tiered 
    ;; This one is not used for alt-parsers, but is used to keep track of the
    ;; stream from a procedure.
    [result-stream #:mutable]
+   [on-scheduler-stack? #:mutable]
    )
   #:transparent)
+
+(define (alt-parser-job? j)
+  (alt-parser? (parser-job-parser j)))
 
 (define (job-immediately-actionable? job)
   TODO
@@ -698,7 +724,7 @@ The job cache is a multi-level dictionary with the following keys / implementati
     (define siblings-vec (make-gvector))
     (define job
       (parser-job usable s cp-params start-position
-                  0 siblings-vec #f #f '() #f #f))
+                  0 siblings-vec #f #f '() #f #f #f))
     (gvector-add! siblings-vec job)
     job)
   (define (traverse-cache parser)
@@ -866,10 +892,10 @@ But I still need to encapsulate the port and give a start position.
                   (define k-job (scheduled-continuation #f #f job #f))
                   (push-parser-job-dependent! job k-job)
                   ;; As a fresh entry into the parser, we start a fresh hint stack.
-                  (scheduler-push-job job)
+                  (scheduler-push-job! job)
                   (run-scheduler scheduler)))
               (begin
-                (scheduler-pop-job)
+                (scheduler-pop-job!)
                 result))))))
 
 
@@ -1262,15 +1288,7 @@ But I still need to encapsulate the port and give a start position.
                           parse*-direct-prompt))))))
   (let flatten-loop ([result result])
     (if (eq? result recursive-enter-flag)
-        (let* ([dependency (scheduled-continuation-dependency
-                            (parser-job-continuation/worker job))]
-               [alt? (alt-parser (parser-job-parser dependency))]
-               [alt-on-stack? TODO]
-               [blocked-procedure? TODO])
-          (TODO "if it's a blocked procedure, we need to check for a pure procedural dependency chain, which implies a stupid cycle with no alts.  It can be failed immediately.")
-          (TODO "if its an otherwise blocked procedure, we need to chase its dependencies to an alt job, push those dependencies on the scheduler's job stack, and act on that alt job.")
-          (TODO "if it's an alt on the stack, we need to mark that alt and all alts above it in the stack that that job path is blocked on `dependency`.  Then we should pop the stack to the top alt and start working on it.")
-          (run-scheduler scheduler))
+        (reschedule scheduler job)
         (if (and (stream? result)
                  (not (flattened-stream? result))
                  (not (parse-failure? result)))
@@ -1283,6 +1301,85 @@ But I still need to encapsulate the port and give a start position.
               result-loop))
             (begin (cache-result-and-ready-dependents! scheduler job result)
                    (run-scheduler scheduler))))))
+
+(define (reschedule scheduler job)
+  ;; This is only run when a job just had its continuation captured.
+  ;; We need to check on the stack to see if we have actually created a cycle.
+  (let* ([dependency (scheduled-continuation-dependency
+                      (parser-job-continuation/worker job))]
+         [dep-on-stack? (parser-job-on-scheduler-stack? dependency)]
+         [alt? (alt-parser (parser-job-parser dependency))]
+         [blocked-procedure? (and (proc-parser? (parser-job-parser dependency))
+                                  (not (job-actionable? dependency)))])
+    (cond [(and dep-on-stack? alt?)
+           ;; If it's an alt job on the stack, we've detected a left-recursion cycle.
+           ;; In that case, for each alt on the stack between the new dependency and itself (inclusive), we mark its working-child-job with the slice of the stack on top of it.
+           ;; Then we pop the stack up to the top alt job, so the scheduler can try a different path with it.
+           ;; For the top alt job, we also mark the working-child-job as blocked, and set the working-child-offset to #f.
+           (define alts-in-cycle
+             (let loop ([in-cycle '()]
+                        [alts (scheduler-get-stack-alts scheduler)])
+               (define new-in-cycle (cons (car alts) in-cycle))
+               (if (eq? (car alts) dependency)
+                   new-in-cycle
+                   (loop new-in-cycle (cdr alts)))))
+           (define jobstack (scheduler-get-stack-jobs scheduler))
+           (for ([alt alts-in-cycle])
+             (define worker (parser-job-continuation/worker alt))
+             (define offset (alt-worker-working-child-offset worker))
+             (define worker-child-job
+               (match (vector-ref (alt-worker-child-job-vector worker)
+                                  offset)
+                 [(and j (s/kw parser-job)) j]
+                 [(vector j stack) j]))
+             (define stack-to-store
+               (takef jobstack (λ (j) (not (eq? j alt)))))
+             (vector-set! (alt-worker-child-job-vector worker)
+                          offset
+                          (vector-immutable j stack-to-store))
+             (parser-job-push-dependent! dependency (alt-stack-dependent alt offset)))
+           (let loop ()
+             ;; pop the stack back to the top alt
+             (unless (alt-parser-job? (scheduler-peek-job scheduler))
+               (scheduler-pop-job! scheduler)))
+           (define alt (scheduler-peek-job scheduler))
+           (alt-worker-mark-blocked! alt offset)
+           (alt-worker-set-working-child-offset! alt #f)
+           (run-scheduler scheduler)]
+          [blocked-procedure?
+           ;; If the dependency is a procedure that's already blocked, we follow its dependencies up to an alt parser, then we push the dependents to the stack and act like we just got to the alt parser job.
+           ;; If there IS no alt parser job, and instead it is a cycle of procedural jobs, we need to detect the cycle and create a cycle failure.
+           (define dependencies
+             (let loop ([deps (list dependency)])
+               (define new-dep (scheduled-continuation-dependency
+                                (parser-job-continuation/worker (car deps))))
+               (if (not (or (alt-parser-job? new-dep)
+                            (memq deps new-dep)))
+                   (loop (cons new-dep deps))
+                   (cons new-dep deps))))
+           (if (alt-parser-job? (car deps))
+               (begin
+                 (for ([d (reverse (cdr deps))])
+                   (scheduler-push-job! scheduler d))
+                 (reschedule scheduler (cadr deps)))
+               (match deps
+                 [(list one)
+                  (set-scheduled-continuation-dependency!
+                   (parser-job-continuation/worker one)
+                   (cycle-breaker-job one deps))
+                  (scheduler-push-job! one)
+                  (run-scheduler)]
+                 [(list one two others ...)
+                  (set-scheduled-continuation-dependency!
+                   (parser-job-continuation/worker two)
+                   (cycle-breaker-job one deps))
+                  (for ([d (reverse (cons two others))])
+                    (scheduler-push-job! scheduler d))
+                  (run-scheduler scheduler)]))]
+          [else
+           ;; It's just a new job to run
+           (scheduler-push-job! scheduler dependency)
+           (run-scheduler scheduler)])))
 
 (define (ready-dependents! job)
   (for ([dep (parser-job-dependents job)])
