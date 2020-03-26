@@ -631,7 +631,7 @@ The job-cache structure is described by the caching code -- it's a multi-tiered 
   (string? (parser-job-parser j)))
 
 (define (job-immediately-actionable? job)
-  TODO
+  (TODO - maybe rewrite)
   (and (not (job->result job))
        (match job
          [(s/kw parser-job #:continuation/worker c/w)
@@ -1516,9 +1516,9 @@ But I still need to encapsulate the port and give a start position.
                 (define dep-mask (arithmetic-shift 1 (car dep-pair)))
                 (vector-set! job-vector (car dep-pair) dep)
                 (cond [(job->result dep)
-                       (set! reapable-mask (bitwise-or reapable-mask dep-mask))]
+                       (set! reapable-mask (bitwise-ior reapable-mask dep-mask))]
                       [else
-                       (set! workable-mask (bitwise-or workable-mask dep-mask))]))
+                       (set! workable-mask (bitwise-ior workable-mask dep-mask))]))
               (define worker
                 (alt-worker job #f job-vector
                             reapable-mask workable-mask blocked-mask
@@ -1581,12 +1581,12 @@ But I still need to encapsulate the port and give a start position.
                      "Internal error - alt-worker got a non-stream result: ~s"
                      result)])]
           [(not (eq? 0 workable-bitmask))
-           TODO]
+           (TODO - implement)]
           [(not (eq? 0 blocked-bitmask))
            ;; All jobs are blocked by left-recursion cycles.
            ;; If they depend on an alternate higher up the stack, there could be actual progress and they could still succeed.
            ;; If they all depend on this alt, then they need to be fed cycle breaker results.
-           TODO]
+           (TODO - implement)]
           [else
            ;; All dependencies have been finalized, so now we just synthesize the final failure.
            (define result (alt-worker->failure worker))
@@ -1595,11 +1595,40 @@ But I still need to encapsulate the port and give a start position.
            (run-scheduler scheduler)])])]
     [else (error 'run-scheduler "chido parse internal error")]))
 
+(define (bitwise-unset-mask base mask-to-unset)
+  ;; If these were fixed-width uints, I would AND the NOT.  But with these variable width integers this is the best solution I can think of right now.
+  (bitwise-xor (bitwise-ior base
+                            mask-to-unset)
+               base))
+
 (define (ready-dependents! job)
   (for ([dep (parser-job-dependents job)])
     (match dep
-      [(s/kw alt-worker #:ready-jobs ready-jobs)
-       (set-alt-worker-ready-jobs! dep (cons job ready-jobs))]
+      [(s/kw alt-direct-dependent #:worker worker #:offset offset)
+       (define offset-mask (arithmetic-shift 1 offset))
+       (set-alt-worker-reapable-bitmask! worker
+                                         (bitwise-ior
+                                          offset-mask
+                                          (alt-worker-reapable-bitmask worker)))
+       ;; Turn the bit off the other masks
+       (set-alt-worker-workable-bitmask! worker
+                                         (bitwise-unset-mask
+                                          (alt-worker-workable-bitmask worker)
+                                          offset-mask))
+       (set-alt-worker-blocked-bitmask! worker
+                                        (bitwise-unset-mask
+                                         (alt-worker-blocked-bitmask worker)
+                                         offset-mask))]
+      [(s/kw alt-stack-dependent #:worker worker #:offset offset)
+       (define offset-mask (arithmetic-shift 1 offset))
+       (set-alt-worker-workable-bitmask! worker
+                                         (bitwise-ior
+                                          offset-mask
+                                          (alt-worker-workable-bitmask worker)))
+       (set-alt-worker-blocked-bitmask! worker
+                                        (bitwise-unset-mask
+                                         (alt-worker-blocked-bitmask worker)
+                                         offset-mask))]
       [(s/kw scheduled-continuation)
        (set-scheduled-continuation-ready?! dep #t)]))
   (set-parser-job-dependents! job '()))
