@@ -237,21 +237,37 @@
                preserve-prefix? promise-no-left-recursion? use-port?))
 
 (struct alt-parser parser-struct
-  (parsers left-recursive? null? trie)
+  ;; The trie in an alt-parser stores pairs of (parser-index . parser).
+  (parsers left-recursive? null? trie num-parsers)
   #:transparent)
 
 (define (make-alt-parser name parsers)
   (define l-recursive? (ormap parser-potentially-left-recursive? parsers))
   (define null? (ormap parser-potentially-null? parsers))
+  (define parsers-sorted
+    (sort parsers
+          (λ (l r)
+            ;; return true if l should be run before r
+            (define lr-l? (parser-potentially-left-recursive? l))
+            (define lr-r? (parser-potentially-left-recursive? r))
+            (cond
+              [(and (string? l) (not (string? r))) #t]
+              [(and (not lr-l) lr-r) #t]
+              [(and lr-l (not lr-r)) #f]
+              [else (< (string-length (parser-prefix l))
+                       (string-length (parser-prefix r)))]))))
   (define trie (for/fold ([t empty-trie])
-                         ([p parsers])
-                 (trie-add t (parser-prefix p) p)))
+                         ;; The parsers to run first should have the largest numbers
+                         ([p (reverse parsers-sorted)]
+                          [i (in-naturals)])
+                 (trie-add t (parser-prefix p) (cons i p))))
   (define name-use (or name "alt-parser"))
   (alt-parser name-use
-              parsers
+              parsers-sorted
               l-recursive?
               null?
-              trie))
+              trie
+              (length parsers-sorted)))
 (define (make-alt-parser* #:name [name #f] . parsers)
   (make-alt-parser name parsers))
 
@@ -609,6 +625,10 @@ The job-cache structure is described by the caching code -- it's a multi-tiered 
 
 (define (alt-parser-job? j)
   (alt-parser? (parser-job-parser j)))
+(define (proc-parser-job? j)
+  (proc-parser? (parser-job-parser j)))
+(define (string-parser-job? j)
+  (string? (parser-job-parser j)))
 
 (define (job-immediately-actionable? job)
   TODO
@@ -1379,7 +1399,201 @@ But I still need to encapsulate the port and give a start position.
           [else
            ;; It's just a new job to run
            (scheduler-push-job! scheduler dependency)
+           ;; TODO - probably I can just tail call to the running function here
            (run-scheduler scheduler)])))
+
+(define (run-scheduler scheduler)
+  ;; When this function is called, the stack should have at the top either:
+  ;; * a string-job
+  ;; * a proc-job that is ready to run/resume
+  ;; * an alt-job that may be new, ready, OR blocked!
+  (define job (scheduler-peek-job scheduler))
+  (cond
+    [(string-parser-job? job)
+     (define s (parser-job-parser job))
+     (define pb (scheduler-port-broker scheduler))
+     (define match?
+       (port-broker-substring? pb start-position s))
+     (string-job-finalize! scheduler job match?)
+     (scheduler-pop-job! scheduler)
+     (run-scheduler scheduler)]
+    [(proc-parser-job? job)
+     (define sk (parser-job-continuation/worker job))
+     (cond
+       [sk
+        (do-run! scheduler
+                 (scheduled-continuation-k sk)
+                 job
+                 #t
+                 (job->result (scheduled-continuation-dependency sk)))]
+       [(stream? (parser-job-result-stream job))
+        (do-run! scheduler
+                 (λ () (stream-rest result-stream))
+                 job
+                 #f #f)]
+       [(equal? 0 (parser-job-result-index job))
+        (match parser
+          [(s/kw proc-parser
+                 #:name name
+                 #:prefix prefix
+                 #:procedure procedure
+                 #:preserve-prefix? preserve-prefix?
+                 #:use-port? use-port?)
+           (define port-broker (scheduler-port-broker scheduler))
+           (define proc-start-position
+             (if preserve-prefix?
+                 start-position
+                 (+ start-position (string-length prefix))))
+           (define proc-input (if use-port?
+                                  (port-broker->port port-broker
+                                                     proc-start-position)
+                                  (port-broker-wrap port-broker
+                                                    proc-start-position)))
+           (when use-port?
+             (set-parser-job-port! job proc-input))
+           ;; TODO - optimize this peek for alt parsers, at least...
+           (if (port-broker-substring? port-broker start-position prefix)
+               (do-run! scheduler
+                        (λ ()
+                          (parameterize ([current-chido-parse-parameters
+                                          cp-params])
+                            (procedure proc-input)))
+                        job
+                        #f #f)
+               (begin (prefix-fail! scheduler job)
+                      (scheduler-pop-job! scheduler)
+                      (run-scheduler scheduler)))])]
+       [else
+        ;; In this case there has been a result stream but it is dried up.
+        (define pb (scheduler-port-broker scheduler))
+        (define pos (parser-job-start-position job))
+        (let ([end-failure (parse-failure (parser-job-parser job)
+                                          "No more results"
+                                          (port-broker-line pb pos)
+                                          (port-broker-column pb pos)
+                                          pos pos pos
+                                          #f #f #f)])
+          (cache-result-and-ready-dependents! scheduler
+                                              job
+                                              end-failure)
+          (set-parser-job-continuation/worker! job #f)
+          (scheduler-pop-job! scheduler)
+          (run-scheduler scheduler))])]
+    [(alt-parser-job? job)
+     (define worker (parser-job-continuation/worker job))
+     (match worker
+       [#f
+        ;; Fresh alt case
+        (define parser (parser-job-parser job))
+        (define trie (alt-parser-trie parser))
+        (define pb (scheduler-port-broker scheduler))
+        (define (mk-dep p)
+          (define j (get-job-0! scheduler
+                                p
+                                (parser-job-cp-params job)
+                                (parser-job-starte-position job)))
+          (when (string? p) (string-job-finalize! scheduler j #t))
+          j)
+        (define dep-pairs-with-matched-prefixes
+          (let loop ([matches '()]
+                     [t trie]
+                     [pos start-position])
+            (define new-matches (append (trie-values t) matches))
+            (define new-trie (trie-step t (port-broker-char pb pos) #f))
+            (if new-trie
+                (loop new-matches new-trie (add1 pos))
+                new-matches)))
+        (if (null? dep-pairs-with-matched-prefixes)
+            (let ([failure (make-parse-failure
+                            #:message "Alt parser had no prefixes match.")])
+              (cache-result-and-ready-dependents! scheduler job failure))
+            (let* ([job-vector (make-vector (alt-parser-num-parsers parser) #f)]
+                   [reapable-mask 0]
+                   [workable-mask 0]
+                   [blocked-mask 0])
+              (for ([dep-pair dep-pairs-with-matched-prefixes])
+                (define dep (mk-dep (cdr dep-pair)))
+                (define dep-mask (arithmetic-shift 1 (car dep-pair)))
+                (vector-set! job-vector (car dep-pair) dep)
+                (cond [(job->result dep)
+                       (set! reapable-mask (bitwise-or reapable-mask dep-mask))]
+                      [else
+                       (set! workable-mask (bitwise-or workable-mask dep-mask))]))
+              (define worker
+                (alt-worker job #f job-vector
+                            reapable-mask workable-mask blocked-mask
+                            '() #f))
+              (set-parser-job-continuation/worker job worker)
+              ;; the alt-worker is now set up, tail-call back to run-scheduler to start actually working it.
+              (run-scheduler scheduler)))]
+       [(s/kw alt-worker
+              #:working-child-offset offset
+              #:child-job-vector job-vector
+              #:reapable-bitmask reapable-bitmask
+              #:workable-bitmask workable-bitmask
+              #:blocked-bitmask blocked-bitmask
+              #:failures failures
+              #:successful? successful?)
+        (cond
+          [(not (eq? 0 reapable-bitmask))
+           (define ready-job-offset (sub1 (integer-length reapable-bitmask)))
+           (define job-mask (arithmetic-shift 1 ready-job-offset))
+           (set-alt-worker-reapable-bitmask!
+            worker
+            (bitwise-xor reapable-bitmask job-mask))
+           (define ready-job-cell (vector-ref job-vector ready-job-offset))
+           (define ready-job (match ready-job-cell
+                               [(? parser-job?) ready-job-cell]
+                               [(vector job stack) job]))
+           (define result (job->result ready-job))
+           (cond
+             [(parse-failure? result)
+              (set-alt-worker-failures! worker (cons result failures))
+              (vector-set! job-vector ready-job-offset #f)
+              ;; The alt worker has gained a failure, but not made progress on a result...
+              (run-scheduler scheduler)]
+             [(parse-stream? result)
+              (let ([result-contents (stream-first result)]
+                    [this-next-job (get-next-job! job)]
+                    [dep-next-job (get-next-job! ready-job)])
+                (define result-stream
+                  (parse-stream result-contents this-next-job scheduler))
+                (cache-result-and-ready-dependents! scheduler job result-stream)
+                (set-alt-worker-successful?! worker #t)
+                (set-alt-worker-job! worker this-next-job)
+                (set-parser-job-continuation/worker! this-next-job worker)
+                (set-parser-job-continuation/worker! job #f)
+                (if (job->result dep-next-job)
+                    ;; reset the original bitmask, since the next job is still ready.
+                    (alt-worker-set-reapable-bitmask! worker reapable-bitmask)
+                    (begin
+                      (alt-worker-set-workable-bitmask!
+                       worker
+                       (bitwise-and workable-bitmask job-mask))
+                      (push-parser-job-dependent!
+                       dep-next-job
+                       (alt-direct-dependent worker ready-job-offset))))
+                (vector-set! job-vector ready-job-offset dep-next-job))
+              (scheduler-pop-job! scheduler)
+              (run-scheduler scheduler)]
+             [else
+              (error 'chido-parse
+                     "Internal error - alt-worker got a non-stream result: ~s"
+                     result)])]
+          [(not (eq? 0 workable-bitmask))
+           TODO]
+          [(not (eq? 0 blocked-bitmask))
+           ;; All jobs are blocked by left-recursion cycles.
+           ;; If they depend on an alternate higher up the stack, there could be actual progress and they could still succeed.
+           ;; If they all depend on this alt, then they need to be fed cycle breaker results.
+           TODO]
+          [else
+           ;; All dependencies have been finalized, so now we just synthesize the final failure.
+           (define result (alt-worker->failure worker))
+           (cache-result-and-ready-dependents! scheduler job result)
+           (scheduler-pop-job! scheduler)
+           (run-scheduler scheduler)])])]
+    [else (error 'run-scheduler "chido parse internal error")]))
 
 (define (ready-dependents! job)
   (for ([dep (parser-job-dependents job)])
