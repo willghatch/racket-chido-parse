@@ -1415,14 +1415,6 @@ But I still need to encapsulate the port and give a start position.
     new-derivation)
   (parse-inner direct-recursive-parse-core port parser start-use))
 
-#|
-TODO
-|#
-;(define (parse TODO) TODO)
-;(define (parse* TODO) TODO)
-;(define (whole-parse TODO) TODO)
-;(define (whole-parse* TODO) TODO)
-
 
 (module+ test
   (define s1 "aaaaa")
