@@ -506,34 +506,64 @@
 #|
 Schedulers keep track of parse work that needs to be done and have caches of results.
 
-The demand stack can contain:
-* scheduled-continuations, which have an outer job that they represent (or #f for the original outside caller) and a single dependency.
-* alt-workers, which are special workers for alt-parsers.  Alt-workers are spawned instead of normal continuations for alt-parsers.
+job-stacks is a list of vectors of:
+  * position
+  * jobs requested at that position
+  * alt-parser jobs requested at that position (for quick access to just the alts)
 
-The job-cache is a multi-tier hash of parser->extra-args-list->start-position->result-number->parser-job
-The job->result-cache is a map from parser-job structs -> parser-stream OR parse-error
+
+The job-cache structure is described by the caching code -- it's a multi-tiered cache that gets to job objects.
 |#
 (struct scheduler
   ;; TODO - document
-  (port-broker top-job-stack done-k-stack hint-stack-stack job-info->job-cache)
+  (port-broker job-stacks job-info->job-cache)
   #:mutable
   #:transparent)
 (define (make-scheduler port-broker)
-  (scheduler port-broker '() '() '() (make-start-position-cache)))
+  (scheduler port-broker '() (make-start-position-cache)))
+(define (peek-scheduler-job s)
+  (match s
+    [(s/kw scheduler #:job-stacks '()) #f]
+    [(s/kw scheduler #:job-stacks (list (vector pos
+                                                (list j1 js ...)
+                                                altstack)
+                                        vs ...))
+     j1]))
+(define (push-scheduler-job s j)
+  (define jpos (parser-job-start-position j))
+  (define alt? (alt-parser? (parser-job-parser j)))
+  (match s
+    [(s/kw scheduler #:job-stacks (list (and v1 (vector jpos jobstack altstack))
+                                        vs ...))
+     (vector-set! v1 1 (cons j jobstack))
+     (when alt
+       (vector-set! v1 2 (cons j altstack)))]
+    [(s/kw scheduler #:job-stacks (list vs ...))
+     (set-scheduler-job-stacks!
+      s
+      (cons (vector jpos (list j) (if alt? (list j) (list)))
+            vs))]))
+(define (pop-scheduler-job s)
+  (match s
+    [(s/kw scheduler #:job-stacks '())
+     (error 'pop-scheduler "Chido Parse internal error -- job stacks empty")]
+    [(s/kw scheduler #:job-stacks (list (and v1 (vector pos (list one-job) altstack))
+                                        vs ...))
+     (set-scheduler-job-stacks! s vs)
+     one-job]
+    [(s/kw scheduler #:job-stacks (list (and v1 (vector pos jobstack altstack))
+                                        vs ...))
+     (define j (car jobstack))
+     (define alt? (alt-parser? (parser-job-parser j)))
+     (vector-set! v1 1 (cdr jobstack))
+     (when alt?
+       (vector-set! v1 2 (cdr altstack)))
+     j]))
 
-(define (pop-hint! scheduler)
-  (define hss (scheduler-hint-stack-stack scheduler))
-  (set-scheduler-hint-stack-stack! scheduler
-                                   (cons (cdr (car hss)) (cdr hss))))
-(define (push-hint! scheduler hint)
-  (define hss (scheduler-hint-stack-stack scheduler))
-  (set-scheduler-hint-stack-stack! scheduler (cons (cons hint (car hss))
-                                                   (cdr hss))))
 
 (struct parser-job
   ;; TODO - document from notes
   (
-   ;; parser is either a parser struct or an alt-parser struct
    parser
    scheduler
    ;; chido-parse-parameters
@@ -544,7 +574,7 @@ The job->result-cache is a map from parser-job structs -> parser-stream OR parse
    siblings
    [port #:mutable]
    [continuation/worker #:mutable]
-   ;; dependents are scheduled-continuations or alt-workers
+   ;; dependents are scheduled-continuations, or alt-direct-dependents, or alt-stack-dependents
    [dependents #:mutable]
    ;; The actual result.
    [result #:mutable]
@@ -555,6 +585,7 @@ The job->result-cache is a map from parser-job structs -> parser-stream OR parse
   #:transparent)
 
 (define (job-immediately-actionable? job)
+  TODO
   (and (not (job->result job))
        (match job
          [(s/kw parser-job #:continuation/worker c/w)
@@ -578,8 +609,28 @@ The job->result-cache is a map from parser-job structs -> parser-stream OR parse
     [(s/kw parser-job #:result r) r]))
 
 (struct alt-worker
-  (job remaining-jobs ready-jobs failures successful?)
+  #|
+  alt-workers store the working state of alt parsers.
+  They have a vector with one field for each parser in the alternate.
+  Each parser in the alternate has an index, which is its jobs' position in the vector.
+  There are bitmasks for each state a job can be in which tell the states of each vector cell.
+  Each vector cell holds:
+    * #f for dead jobs
+    * a job object if it has not been taken off the work stack due to left-recursion
+    * a vector with the job object, a stack (list) of jobs that had blocked the job if they had been taken off the work stack due to left-recursion
+
+  Alt-workers have a working-child-offset, which is simply the child they are working on.  It is #f if no child has yet been selected, and set to #f when the working child gets blocked by left-recursion.
+
+  States:  Reapable means that the job has a result that can become the result of the alt, workable means that it has a job that is ready to run or whose dependencies have become unblocked (so they can just be pushed back on the work stack again), blocked means blocked by left-recursion (not simply blocked by a chain of proc-parsers that have recurred).
+  |#
+
+  (job working-child-offset child-job-vector reapable-bitmask workable-bitmask blocked-bitmask failures successful?)
   #:mutable #:transparent)
+
+(struct alt-direct-dependent
+  (worker offset))
+(struct alt-stack-dependent
+  (worker offset))
 
 (struct scheduled-continuation
   ;; The dependency is only mutated to break cycles.
@@ -797,8 +848,7 @@ But I still need to encapsulate the port and give a start position.
         (if (and left-recursive? (current-chido-parse-job))
             ;; This is a (potentially left-) recursive call.
             ;; So we de-schedule the current work by capturing its continuation,
-            ;; we schedule its dependency, and then we abort back to the
-            ;; scheduler loop.
+            ;; we mark the dependency, and then we abort back to the scheduler.
             (let ([parent-job (current-chido-parse-job)])
               (inc-potential-left-recursion!)
               (call-with-composable-continuation
@@ -806,7 +856,6 @@ But I still need to encapsulate the port and give a start position.
                  (define sched-k (job->scheduled-continuation parent-job k job))
                  (set-parser-job-continuation/worker! parent-job sched-k)
                  (push-parser-job-dependent! job sched-k)
-                 ;(push-hint! scheduler sched-k)
                  (abort-current-continuation chido-parse-prompt #f))
                chido-parse-prompt))
             ;; This is the original entry into the parser machinery.
@@ -817,31 +866,19 @@ But I still need to encapsulate the port and give a start position.
                   (define k-job (scheduled-continuation #f #f job #f))
                   (push-parser-job-dependent! job k-job)
                   ;; As a fresh entry into the parser, we start a fresh hint stack.
-                  (set-scheduler-hint-stack-stack!
-                   scheduler (cons (list job)
-                                   (scheduler-hint-stack-stack scheduler)))
-                  (set-scheduler-done-k-stack!
-                   scheduler (cons k-job
-                                   (scheduler-done-k-stack scheduler)))
-                  (set-scheduler-top-job-stack!
-                   scheduler (cons job (scheduler-top-job-stack scheduler)))
+                  (scheduler-push-job job)
                   (run-scheduler scheduler)))
               (begin
-                (set-scheduler-done-k-stack!
-                 scheduler (cdr (scheduler-done-k-stack scheduler)))
-                (set-scheduler-top-job-stack!
-                 scheduler (cdr (scheduler-top-job-stack scheduler)))
-                (set-scheduler-hint-stack-stack!
-                 scheduler (cdr (scheduler-hint-stack-stack scheduler)))
+                (scheduler-pop-job)
                 result))))))
 
 
-(define (get-last-alt-stack job-stack)
+#;(define (get-last-alt-stack job-stack)
   (cond [(null? job-stack) #f]
         [(alt-parser? (parser-job-parser (car job-stack))) job-stack]
         [else (get-last-alt-stack (cdr job-stack))]))
 
-(define (find-work s job-stack)
+#;(define (find-work s job-stack)
   ;; Returns a hint stack for an actionable job -- IE a list where the
   ;; first element is an actionable job, the second element is a job
   ;; that depends on the first, etc
@@ -916,7 +953,7 @@ But I still need to encapsulate the port and give a start position.
                                            jstack)])]
                         [#f jstack])])))))
 
-(define (find-and-run-actionable-job s hint-stack using-hint?)
+#;(define (find-and-run-actionable-job s hint-stack using-hint?)
   (define (run-actionable-job? j)
     ;; TODO - this is probably not great, but for now I just want to get things working again...
     (if (job->result j)
@@ -947,7 +984,7 @@ But I still need to encapsulate the port and give a start position.
        (fail-smallest-cycle! s)
        (run-scheduler s)])))
 
-(define (run-scheduler s)
+#;(define (run-scheduler s)
   (define done-k (car (scheduler-done-k-stack s)))
   (define scheduler-done? (scheduled-continuation-ready? done-k))
   (cond
@@ -989,7 +1026,7 @@ But I still need to encapsulate the port and give a start position.
        )]))
 
 
-(define (fail-smallest-cycle! scheduler)
+#;(define (fail-smallest-cycle! scheduler)
   #|
   TODO - better name.
   This isn't failing the smallest cycle necessarily, but it is failing the job in a cycle that first depends back on something earlier in the chain to the root goal.
@@ -1042,7 +1079,7 @@ But I still need to encapsulate the port and give a start position.
                                  #:position start-position))))
      (cache-result-and-ready-dependents! scheduler job result)]))
 
-(define (run-actionable-job scheduler job)
+#;(define (run-actionable-job scheduler job)
   ;(eprintf "running actionable job: ~a\n" (job->display job))
   (when (job->result job)
     (error 'chido-parse
@@ -1225,7 +1262,15 @@ But I still need to encapsulate the port and give a start position.
                           parse*-direct-prompt))))))
   (let flatten-loop ([result result])
     (if (eq? result recursive-enter-flag)
-        (run-scheduler scheduler)
+        (let* ([dependency (scheduled-continuation-dependency
+                            (parser-job-continuation/worker job))]
+               [alt? (alt-parser (parser-job-parser dependency))]
+               [alt-on-stack? TODO]
+               [blocked-procedure? TODO])
+          (TODO "if it's a blocked procedure, we need to check for a pure procedural dependency chain, which implies a stupid cycle with no alts.  It can be failed immediately.")
+          (TODO "if its an otherwise blocked procedure, we need to chase its dependencies to an alt job, push those dependencies on the scheduler's job stack, and act on that alt job.")
+          (TODO "if it's an alt on the stack, we need to mark that alt and all alts above it in the stack that that job path is blocked on `dependency`.  Then we should pop the stack to the top alt and start working on it.")
+          (run-scheduler scheduler))
         (if (and (stream? result)
                  (not (flattened-stream? result))
                  (not (parse-failure? result)))
