@@ -252,8 +252,8 @@
             (define lr-r? (parser-potentially-left-recursive? r))
             (cond
               [(and (string? l) (not (string? r))) #t]
-              [(and (not lr-l) lr-r) #t]
-              [(and lr-l (not lr-r)) #f]
+              [(and (not lr-l?) lr-r?) #t]
+              [(and lr-l? (not lr-r?)) #f]
               [else (< (string-length (parser-prefix l))
                        (string-length (parser-prefix r)))]))))
   (define trie (for/fold ([t empty-trie])
@@ -550,12 +550,12 @@ The job-cache structure is described by the caching code -- it's a multi-tiered 
     (error 'scheduler-push-job! "chido-parse internal error - job marked as already on stack"))
   (set-parser-job-on-scheduler-stack?! j #t)
   (define jpos (parser-job-start-position j))
-  (define alt? (alt-parser? (parser-job-parser j)))
+  (define alt? (alt-parser-job? j))
   (match s
     [(s/kw scheduler #:job-stacks (list (and v1 (vector jpos jobstack altstack))
                                         vs ...))
      (vector-set! v1 1 (cons j jobstack))
-     (when alt
+     (when alt?
        (vector-set! v1 2 (cons j altstack)))]
     [(s/kw scheduler #:job-stacks (list vs ...))
      (set-scheduler-job-stacks!
@@ -581,7 +581,7 @@ The job-cache structure is described by the caching code -- it's a multi-tiered 
        (when alt?
          (vector-set! v1 2 (cdr altstack)))
        j]))
-  (set-parser-job-on-scheduler-stack? j #f)
+  (set-parser-job-on-scheduler-stack?! j #f)
   j)
 (define (scheduler-get-stack-jobs s)
   ;; IE return the job stack for the current position
@@ -629,6 +629,12 @@ The job-cache structure is described by the caching code -- it's a multi-tiered 
   (proc-parser? (parser-job-parser j)))
 (define (string-parser-job? j)
   (string? (parser-job-parser j)))
+
+(define (proc-parser-job-actionable? job)
+  (and (proc-parser-job? job)
+       (or (not (parser-job-continuation/worker job))
+           (job->result (scheduled-continuation-dependency
+                         (parser-job-continuation/worker job))))))
 
 #;(define (job-immediately-actionable? job)
   (TODO - maybe rewrite)
@@ -681,6 +687,16 @@ The job-cache structure is described by the caching code -- it's a multi-tiered 
 
 (define (alt-mask->first-offset mask)
   (sub1 (integer-length mask)))
+(define (alt-offset->mask-bit offset)
+  (arithmetic-shift 1 offset))
+(define (alt-worker-mark-blocked! worker offset)
+  (define mask-bit (alt-offset->mask-bit offset))
+  (set-alt-worker-workable-bitmask!
+   worker
+   (bitwise-unset-mask (alt-worker-workable-bitmask worker) mask-bit))
+  (set-alt-worker-blocked-bitmask!
+   worker
+   (bitwise-ior (alt-worker-blocked-bitmask worker) mask-bit)))
 
 (struct scheduled-continuation
   ;; The dependency is only mutated to break cycles.
@@ -916,7 +932,7 @@ But I still need to encapsulate the port and give a start position.
                   (define k-job (scheduled-continuation #f #f job #f))
                   (push-parser-job-dependent! job k-job)
                   ;; As a fresh entry into the parser, we start a fresh hint stack.
-                  (scheduler-push-job! job)
+                  (scheduler-push-job! scheduler job)
                   (run-scheduler scheduler)))
               (begin
                 (scheduler-pop-job!)
@@ -1333,8 +1349,8 @@ But I still need to encapsulate the port and give a start position.
                       (parser-job-continuation/worker job))]
          [dep-on-stack? (parser-job-on-scheduler-stack? dependency)]
          [alt? (alt-parser (parser-job-parser dependency))]
-         [blocked-procedure? (and (proc-parser? (parser-job-parser dependency))
-                                  (not (job-actionable? dependency)))])
+         [blocked-procedure? (and (proc-parser-job? dependency)
+                                  (not (proc-parser-job-actionable? dependency)))])
     (cond [(and dep-on-stack? alt?)
            ;; If it's an alt job on the stack, we've detected a left-recursion cycle.
            ;; In that case, for each alt on the stack between the new dependency and itself (inclusive), we mark its working-child-job with the slice of the stack on top of it.
@@ -1360,15 +1376,16 @@ But I still need to encapsulate the port and give a start position.
                (takef jobstack (λ (j) (not (eq? j alt)))))
              (vector-set! (alt-worker-child-job-vector worker)
                           offset
-                          (vector-immutable j stack-to-store))
-             (parser-job-push-dependent! dependency (alt-stack-dependent alt offset)))
+                          (vector-immutable job stack-to-store))
+             (push-parser-job-dependent! dependency (alt-stack-dependent alt offset)))
            (let loop ()
              ;; pop the stack back to the top alt
              (unless (alt-parser-job? (scheduler-peek-job scheduler))
                (scheduler-pop-job! scheduler)))
            (define alt (scheduler-peek-job scheduler))
-           (alt-worker-mark-blocked! alt offset)
-           (alt-worker-set-working-child-offset! alt #f)
+           (define worker (parser-job-continuation/worker alt))
+           (alt-worker-mark-blocked! worker (alt-worker-working-child-offset worker))
+           (set-alt-worker-working-child-offset! alt #f)
            (run-scheduler scheduler)]
           [blocked-procedure?
            ;; If the dependency is a procedure that's already blocked, we follow its dependencies up to an alt parser, then we push the dependents to the stack and act like we just got to the alt parser job.
@@ -1381,22 +1398,22 @@ But I still need to encapsulate the port and give a start position.
                             (memq deps new-dep)))
                    (loop (cons new-dep deps))
                    (cons new-dep deps))))
-           (if (alt-parser-job? (car deps))
+           (if (alt-parser-job? (car dependencies))
                (begin
-                 (for ([d (reverse (cdr deps))])
+                 (for ([d (reverse (cdr dependencies))])
                    (scheduler-push-job! scheduler d))
-                 (reschedule scheduler (cadr deps)))
-               (match deps
+                 (reschedule scheduler (cadr dependencies)))
+               (match dependencies
                  [(list one)
                   (set-scheduled-continuation-dependency!
                    (parser-job-continuation/worker one)
-                   (cycle-breaker-job one deps))
-                  (scheduler-push-job! one)
+                   (cycle-breaker-job one dependencies))
+                  (scheduler-push-job! scheduler one)
                   (run-scheduler)]
                  [(list one two others ...)
                   (set-scheduled-continuation-dependency!
                    (parser-job-continuation/worker two)
-                   (cycle-breaker-job one deps))
+                   (cycle-breaker-job one dependencies))
                   (for ([d (reverse (cons two others))])
                     (scheduler-push-job! scheduler d))
                   (run-scheduler scheduler)]))]
@@ -1418,7 +1435,7 @@ But I still need to encapsulate the port and give a start position.
      (define s (parser-job-parser job))
      (define pb (scheduler-port-broker scheduler))
      (define match?
-       (port-broker-substring? pb start-position s))
+       (port-broker-substring? pb (parser-job-start-position job) s))
      (string-job-finalize! scheduler job match?)
      (scheduler-pop-job! scheduler)
      (run-scheduler scheduler)]
@@ -1439,11 +1456,11 @@ But I still need to encapsulate the port and give a start position.
               (run-scheduler scheduler)))]
        [(stream? (parser-job-result-stream job))
         (do-run! scheduler
-                 (λ () (stream-rest result-stream))
+                 (λ () (stream-rest (parser-job-result-stream job)))
                  job
                  #f #f)]
        [(equal? 0 (parser-job-result-index job))
-        (match parser
+        (match (parser-job-parser job)
           [(s/kw proc-parser
                  #:name name
                  #:prefix prefix
@@ -1451,6 +1468,7 @@ But I still need to encapsulate the port and give a start position.
                  #:preserve-prefix? preserve-prefix?
                  #:use-port? use-port?)
            (define port-broker (scheduler-port-broker scheduler))
+           (define start-position (parser-job-start-position job))
            (define proc-start-position
              (if preserve-prefix?
                  start-position
@@ -1462,6 +1480,7 @@ But I still need to encapsulate the port and give a start position.
                                                     proc-start-position)))
            (when use-port?
              (set-parser-job-port! job proc-input))
+           (define cp-params (parser-job-cp-params job))
            ;; TODO - optimize this peek for alt parsers, at least...
            (if (port-broker-substring? port-broker start-position prefix)
                (do-run! scheduler
@@ -1502,13 +1521,13 @@ But I still need to encapsulate the port and give a start position.
           (define j (get-job-0! scheduler
                                 p
                                 (parser-job-cp-params job)
-                                (parser-job-starte-position job)))
+                                (parser-job-start-position job)))
           (when (string? p) (string-job-finalize! scheduler j #t))
           j)
         (define dep-pairs-with-matched-prefixes
           (let loop ([matches '()]
                      [t trie]
-                     [pos start-position])
+                     [pos (parser-job-start-position job)])
             (define new-matches (append (trie-values t) matches))
             (define new-trie (trie-step t (port-broker-char pb pos) #f))
             (if new-trie
@@ -1534,7 +1553,7 @@ But I still need to encapsulate the port and give a start position.
                 (alt-worker job #f job-vector
                             reapable-mask workable-mask blocked-mask
                             '() #f))
-              (set-parser-job-continuation/worker job worker)
+              (set-parser-job-continuation/worker! job worker)
               ;; the alt-worker is now set up, tail-call back to run-scheduler to start actually working it.
               (run-scheduler scheduler)))]
        [(s/kw alt-worker
@@ -1576,9 +1595,9 @@ But I still need to encapsulate the port and give a start position.
                 (set-parser-job-continuation/worker! job #f)
                 (if (job->result dep-next-job)
                     ;; reset the original bitmask, since the next job is still ready.
-                    (alt-worker-set-reapable-bitmask! worker reapable-bitmask)
+                    (set-alt-worker-reapable-bitmask! worker reapable-bitmask)
                     (begin
-                      (alt-worker-set-workable-bitmask!
+                      (set-alt-worker-workable-bitmask!
                        worker
                        (bitwise-and workable-bitmask job-mask))
                       (push-parser-job-dependent!
@@ -1599,9 +1618,9 @@ But I still need to encapsulate the port and give a start position.
              (match workable-job-cell
                [(? parser-job?) (values workable-job-cell #f)]
                [(vector job stack) (values job stack)]))
-           (if stack
+           (if workable-job-stack
                (begin
-                 (for ([j stack])
+                 (for ([j workable-job-stack])
                    (scheduler-push-job! scheduler j))
                  (run-scheduler scheduler))
                (begin
@@ -1625,10 +1644,10 @@ But I still need to encapsulate the port and give a start position.
                (define could-make-progress?
                  (and (not (eq? blocker job))
                       (let ([blocker-worker (parser-job-continuation/worker blocker)])
-                        (or (not (eq? 0 (alt-worker-reapable-mask blocker-worker)))
-                            (not (eq? 0 (alt-worker-workable-mask blocker-worker)))))))
+                        (or (not (eq? 0 (alt-worker-reapable-bitmask blocker-worker)))
+                            (not (eq? 0 (alt-worker-workable-bitmask blocker-worker)))))))
                (when could-make-progress? (set! progress-possible? #t))
-               (list could-make-progress stack)))
+               (list could-make-progress? stack)))
            (if progress-possible?
                ;; If progress is possible on another alt, we want to find the highest alt in the stack that has workable jobs, and then we want to pop the stack back to that alt.
                (let* ([workable-alts (filter (λ (b) (match b
@@ -1642,9 +1661,11 @@ But I still need to encapsulate the port and give a start position.
                           ;; Pop the current alt-job from the stack, then pop until we get to the next one.
                           ;; Then we can start working on some path in it.
                           (scheduler-pop-job! scheduler)
-                          (while (not (alt-parser-job?
-                                       (scheduler-peek-job scheduler)))
-                            (scheduler-pop-job! scheduler))]
+                          (let pop-loop ()
+                            (when (not (alt-parser-job?
+                                        (scheduler-peek-job scheduler)))
+                              (scheduler-pop-job! scheduler)
+                              (pop-loop)))]
                          [else (loop (cdr altstack))])))
                ;; No progress is possible in another alt, so we just cycle fail the job paths we have left.
                (let ([b1 (car blocked)])
@@ -1664,8 +1685,8 @@ But I still need to encapsulate the port and give a start position.
                  (for ([j (match b1 [(list progress-not stack)
                                      (reverse (cdr stack))])])
                    (scheduler-push-job! scheduler b1))
-                 (set-alt-worker-workable-mask! worker blocked-bitmask)
-                 (set-alt-worker-blocked-mask! worker 0)
+                 (set-alt-worker-workable-bitmask! worker blocked-bitmask)
+                 (set-alt-worker-blocked-bitmask! worker 0)
                  ;; Now just start running again and let those failures cascade!
                  (run-scheduler scheduler)))]
           [else
