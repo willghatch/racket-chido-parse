@@ -532,11 +532,11 @@ The job-cache structure is described by the caching code -- it's a multi-tiered 
 |#
 (struct scheduler
   ;; TODO - document
-  (port-broker job-stacks job-info->job-cache)
+  (port-broker job-stacks original-request-stack job-info->job-cache)
   #:mutable
   #:transparent)
 (define (make-scheduler port-broker)
-  (scheduler port-broker '() (make-start-position-cache)))
+  (scheduler port-broker '() '() (make-start-position-cache)))
 (define (scheduler-peek-job s)
   (match s
     [(s/kw scheduler #:job-stacks '()) #f]
@@ -927,6 +927,9 @@ But I still need to encapsulate the port and give a start position.
             ;; This is the original entry into the parser machinery.
             ;; Or a recursive call that isn't a left-recursion.
             (let ()
+              (set-scheduler-original-request-stack!
+               scheduler
+               (cons job (scheduler-original-request-stack scheduler)))
               (define result
                 (let ()
                   (define k-job (scheduled-continuation #f #f job #f))
@@ -935,7 +938,7 @@ But I still need to encapsulate the port and give a start position.
                   (scheduler-push-job! scheduler job)
                   (run-scheduler scheduler)))
               (begin
-                (scheduler-pop-job!)
+                ;(scheduler-pop-job! scheduler)
                 result))))))
 
 
@@ -1427,6 +1430,16 @@ But I still need to encapsulate the port and give a start position.
            (run-scheduler scheduler)])))
 
 (define (run-scheduler scheduler)
+  (define done?/result
+    (job->result (car (scheduler-original-request-stack scheduler))))
+  (if done?/result
+      (begin
+        (set-scheduler-original-request-stack!
+         scheduler
+         (cdr (scheduler-original-request-stack scheduler)))
+        done?/result)
+      (run-scheduler/real scheduler)))
+(define (run-scheduler/real scheduler)
   ;; When this function is called, the stack should have at the top either:
   ;; * a string-job
   ;; * a proc-job that is ready to run/resume
