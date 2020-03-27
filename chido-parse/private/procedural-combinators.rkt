@@ -459,7 +459,7 @@
   (define aBcp (sequence #:name "aBc"
                          #:result/bare string-append
                          ap Bp cp))
-  (define BaBcp (sequence #:name "aBc"
+  (define BaBcp (sequence #:name "BaBc"
                           #:result/bare string-append
                           Bp ap Bp cp))
 

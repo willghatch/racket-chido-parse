@@ -1135,7 +1135,7 @@ But I still need to encapsulate the port and give a start position.
 
 (define (string-job-finalize! scheduler job match?)
   (match job
-    [(s/kw parser-job #:parser s #:start-position start-position)
+    [(s/kw parser-job #:parser s #:start-position start-position #:result-index 0)
      (define result
        (parameterize ([current-chido-parse-job job])
          (if match?
@@ -1448,12 +1448,21 @@ But I still need to encapsulate the port and give a start position.
   (define job (scheduler-peek-job scheduler))
   ;(eprintf "in run-scheduler with job: ~v\n" (job->display job))
   (cond
-    [(string-parser-job? job)
+    [(and (string-parser-job? job)
+          (eq? 0 (parser-job-result-index job)))
      (define s (parser-job-parser job))
      (define pb (scheduler-port-broker scheduler))
      (define match?
        (port-broker-substring? pb (parser-job-start-position job) s))
      (string-job-finalize! scheduler job match?)
+     (scheduler-pop-job! scheduler)
+     (run-scheduler scheduler)]
+    [(string-parser-job? job)
+     (cache-result-and-ready-dependents!
+      scheduler
+      job
+      (parameterize ([current-chido-parse-job job])
+        (make-parse-failure #:message "strings only have one result")))
      (scheduler-pop-job! scheduler)
      (run-scheduler scheduler)]
     [(proc-parser-job? job)
