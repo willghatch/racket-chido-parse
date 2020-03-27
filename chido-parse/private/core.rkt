@@ -630,7 +630,7 @@ The job-cache structure is described by the caching code -- it's a multi-tiered 
 (define (string-parser-job? j)
   (string? (parser-job-parser j)))
 
-(define (job-immediately-actionable? job)
+#;(define (job-immediately-actionable? job)
   (TODO - maybe rewrite)
   (and (not (job->result job))
        (match job
@@ -660,6 +660,7 @@ The job-cache structure is described by the caching code -- it's a multi-tiered 
   They have a vector with one field for each parser in the alternate.
   Each parser in the alternate has an index, which is its jobs' position in the vector.
   There are bitmasks for each state a job can be in which tell the states of each vector cell.
+  IE each  bit in the masks corresponds to a cell in the vector.
   Each vector cell holds:
     * #f for dead jobs
     * a job object if it has not been taken off the work stack due to left-recursion
@@ -677,6 +678,9 @@ The job-cache structure is described by the caching code -- it's a multi-tiered 
   (worker offset))
 (struct alt-stack-dependent
   (worker offset))
+
+(define (alt-mask->first-offset mask)
+  (sub1 (integer-length mask)))
 
 (struct scheduled-continuation
   ;; The dependency is only mutated to break cycles.
@@ -1407,6 +1411,7 @@ But I still need to encapsulate the port and give a start position.
   ;; * a string-job
   ;; * a proc-job that is ready to run/resume
   ;; * an alt-job that may be new, ready, OR blocked!
+  ;; * a proc-job that is blocked because an alt-job was constructed with a pre-blocked dependency path.
   (define job (scheduler-peek-job scheduler))
   (cond
     [(string-parser-job? job)
@@ -1421,11 +1426,17 @@ But I still need to encapsulate the port and give a start position.
      (define sk (parser-job-continuation/worker job))
      (cond
        [sk
-        (do-run! scheduler
-                 (scheduled-continuation-k sk)
-                 job
-                 #t
-                 (job->result (scheduled-continuation-dependency sk)))]
+        (define dep-result (job->result (scheduled-continuation-dependency sk)))
+        (if dep-result
+            (do-run! scheduler
+                     (scheduled-continuation-k sk)
+                     job
+                     #t
+                     (job->result (scheduled-continuation-dependency sk)))
+            (let ()
+              ;; This can happen when I create an alt-worker that STARTS with a blocked path -- I don't eagerly check whether they are blocked, I just let it come to this state.
+              (scheduler-push-job! scheduler (scheduled-continuation-dependency sk))
+              (run-scheduler scheduler)))]
        [(stream? (parser-job-result-stream job))
         (do-run! scheduler
                  (λ () (stream-rest result-stream))
@@ -1536,7 +1547,7 @@ But I still need to encapsulate the port and give a start position.
               #:successful? successful?)
         (cond
           [(not (eq? 0 reapable-bitmask))
-           (define ready-job-offset (sub1 (integer-length reapable-bitmask)))
+           (define ready-job-offset (alt-mask->first-offset reapable-bitmask))
            (define job-mask (arithmetic-shift 1 ready-job-offset))
            (set-alt-worker-reapable-bitmask!
             worker
@@ -1581,12 +1592,82 @@ But I still need to encapsulate the port and give a start position.
                      "Internal error - alt-worker got a non-stream result: ~s"
                      result)])]
           [(not (eq? 0 workable-bitmask))
-           (TODO - implement)]
+           (define offset (alt-mask->first-offset workable-bitmask))
+           (define job-mask (arithmetic-shift 1 offset))
+           (define workable-job-cell (vector-ref job-vector offset))
+           (define-values (workable-job workable-job-stack)
+             (match workable-job-cell
+               [(? parser-job?) (values workable-job-cell #f)]
+               [(vector job stack) (values job stack)]))
+           (if stack
+               (begin
+                 (for ([j stack])
+                   (scheduler-push-job! scheduler j))
+                 (run-scheduler scheduler))
+               (begin
+                 (scheduler-push-job! scheduler workable-job)
+                 (run-scheduler scheduler)))]
           [(not (eq? 0 blocked-bitmask))
            ;; All jobs are blocked by left-recursion cycles.
            ;; If they depend on an alternate higher up the stack, there could be actual progress and they could still succeed.
            ;; If they all depend on this alt, then they need to be fed cycle breaker results.
-           (TODO - implement)]
+
+           ;; TODO - I should find a way to write this without doing any search.  But for now I'll just do a search.
+           (define progress-possible? #f)
+           (define blocked
+             (for/list ([mask blocked-bitmask])
+               (define offset (alt-mask->first-offset mask))
+               (define cell (vector-ref job-vector offset))
+               (define-values (blocked-job stack)
+                 (match cell
+                   [(vector blocked-job stack) (values blocked-job stack)]))
+               (define blocker (car stack))
+               (define could-make-progress?
+                 (and (not (eq? blocker job))
+                      (let ([blocker-worker (parser-job-continuation/worker blocker)])
+                        (or (not (eq? 0 (alt-worker-reapable-mask blocker-worker)))
+                            (not (eq? 0 (alt-worker-workable-mask blocker-worker)))))))
+               (when could-make-progress? (set! progress-possible? #t))
+               (list could-make-progress stack)))
+           (if progress-possible?
+               ;; If progress is possible on another alt, we want to find the highest alt in the stack that has workable jobs, and then we want to pop the stack back to that alt.
+               (let* ([workable-alts (filter (λ (b) (match b
+                                                      [(list #t stack) b]
+                                                      [else #f]))
+                                             blocked)]
+                      [just-the-alts (map caadr workable-alts)])
+                 (let loop ([altstack (scheduler-get-stack-alts scheduler)])
+                   (cond [(null? altstack) (error 'chido-parse "internal error - this shouldn't happen - altstack empty in loop")]
+                         [(memq (car altstack) just-the-alts)
+                          ;; Pop the current alt-job from the stack, then pop until we get to the next one.
+                          ;; Then we can start working on some path in it.
+                          (scheduler-pop-job! scheduler)
+                          (while (not (alt-parser-job?
+                                       (scheduler-peek-job scheduler)))
+                            (scheduler-pop-job! scheduler))]
+                         [else (loop (cdr altstack))])))
+               ;; No progress is possible in another alt, so we just cycle fail the job paths we have left.
+               (let ([b1 (car blocked)])
+                 (for ([b blocked])
+                   (match b
+                     [(list progress-maybe?
+                            (and stack
+                                 (list some-alt dep-before-alt rest-of-the-stack ...)))
+                      (match dep-before-alt
+                        [(s/kw parser-job #:continuation/worker k/w)
+                         (match k/w
+                           [(s/kw scheduled-continuation)
+                            (set-scheduled-continuation-dependency!
+                             k/w (cycle-breaker-job some-alt stack))]
+                           [(s/kw alt-worker)
+                            (error 'scheduler "TODO chido parse internal error - haven't yet implemented handling for cycle when alt-workers directly depend on other alt-workers.")])])]))
+                 (for ([j (match b1 [(list progress-not stack)
+                                     (reverse (cdr stack))])])
+                   (scheduler-push-job! scheduler b1))
+                 (set-alt-worker-workable-mask! worker blocked-bitmask)
+                 (set-alt-worker-blocked-mask! worker 0)
+                 ;; Now just start running again and let those failures cascade!
+                 (run-scheduler scheduler)))]
           [else
            ;; All dependencies have been finalized, so now we just synthesize the final failure.
            (define result (alt-worker->failure worker))
