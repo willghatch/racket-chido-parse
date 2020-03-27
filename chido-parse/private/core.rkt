@@ -1348,7 +1348,7 @@ But I still need to encapsulate the port and give a start position.
   (let* ([dependency (scheduled-continuation-dependency
                       (parser-job-continuation/worker job))]
          [dep-on-stack? (parser-job-on-scheduler-stack? dependency)]
-         [alt? (alt-parser (parser-job-parser dependency))]
+         [alt? (alt-parser-job? dependency)]
          [blocked-procedure? (and (proc-parser-job? dependency)
                                   (not (proc-parser-job-actionable? dependency)))])
     (cond [(and dep-on-stack? alt?)
@@ -1373,7 +1373,8 @@ But I still need to encapsulate the port and give a start position.
                  [(and j (s/kw parser-job)) j]
                  [(vector j stack) j]))
              (define stack-to-store
-               (takef jobstack (λ (j) (not (eq? j alt)))))
+               (cons dependency
+                     (takef jobstack (λ (j) (not (eq? j alt))))))
              (vector-set! (alt-worker-child-job-vector worker)
                           offset
                           (vector-immutable job stack-to-store))
@@ -1385,7 +1386,7 @@ But I still need to encapsulate the port and give a start position.
            (define alt (scheduler-peek-job scheduler))
            (define worker (parser-job-continuation/worker alt))
            (alt-worker-mark-blocked! worker (alt-worker-working-child-offset worker))
-           (set-alt-worker-working-child-offset! alt #f)
+           (set-alt-worker-working-child-offset! worker #f)
            (run-scheduler scheduler)]
           [blocked-procedure?
            ;; If the dependency is a procedure that's already blocked, we follow its dependencies up to an alt parser, then we push the dependents to the stack and act like we just got to the alt parser job.
@@ -1612,6 +1613,7 @@ But I still need to encapsulate the port and give a start position.
                      result)])]
           [(not (eq? 0 workable-bitmask))
            (define offset (alt-mask->first-offset workable-bitmask))
+           (set-alt-worker-working-child-offset! worker offset)
            (define job-mask (arithmetic-shift 1 offset))
            (define workable-job-cell (vector-ref job-vector offset))
            (define-values (workable-job workable-job-stack)
@@ -1634,7 +1636,14 @@ But I still need to encapsulate the port and give a start position.
            ;; TODO - I should find a way to write this without doing any search.  But for now I'll just do a search.
            (define progress-possible? #f)
            (define blocked
-             (for/list ([mask blocked-bitmask])
+             (for/list ([mask (let mask-loop ([one-bit-masks '()]
+                                              [mask blocked-bitmask])
+                                (define offset (alt-mask->first-offset mask))
+                                (define mask-bit (alt-offset->mask-bit offset))
+                                (if (eq? 0 mask)
+                                    one-bit-masks
+                                    (mask-loop (cons mask-bit one-bit-masks)
+                                               (bitwise-xor mask mask-bit))))])
                (define offset (alt-mask->first-offset mask))
                (define cell (vector-ref job-vector offset))
                (define-values (blocked-job stack)
@@ -1684,7 +1693,7 @@ But I still need to encapsulate the port and give a start position.
                             (error 'scheduler "TODO chido parse internal error - haven't yet implemented handling for cycle when alt-workers directly depend on other alt-workers.")])])]))
                  (for ([j (match b1 [(list progress-not stack)
                                      (reverse (cdr stack))])])
-                   (scheduler-push-job! scheduler b1))
+                   (scheduler-push-job! scheduler j))
                  (set-alt-worker-workable-bitmask! worker blocked-bitmask)
                  (set-alt-worker-blocked-bitmask! worker 0)
                  ;; Now just start running again and let those failures cascade!
