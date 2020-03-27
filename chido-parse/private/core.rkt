@@ -1562,7 +1562,8 @@ But I still need to encapsulate the port and give a start position.
         (if (null? dep-pairs-with-matched-prefixes)
             (let ([failure (make-parse-failure
                             #:message "Alt parser had no prefixes match.")])
-              (cache-result-and-ready-dependents! scheduler job failure))
+              (cache-result-and-ready-dependents! scheduler job failure)
+              (run-scheduler scheduler))
             (let* ([job-vector (make-vector (alt-parser-num-parsers parser) #f)])
               (define worker
                 (alt-worker job #f job-vector
