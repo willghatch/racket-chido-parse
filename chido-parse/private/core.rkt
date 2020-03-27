@@ -1618,11 +1618,14 @@ But I still need to encapsulate the port and give a start position.
                 (set-parser-job-continuation/worker! job #f)
                 (if (job->result dep-next-job)
                     ;; reset the original bitmask, since the next job is still ready.
-                    (set-alt-worker-reapable-bitmask! worker reapable-bitmask)
+                    (set-alt-worker-reapable-bitmask!
+                     worker
+                     (bitwise-ior (alt-worker-reapable-bitmask worker)
+                                  job-mask))
                     (begin
                       (set-alt-worker-workable-bitmask!
                        worker
-                       (bitwise-ior workable-bitmask job-mask))
+                       (bitwise-ior (alt-worker-workable-bitmask worker) job-mask))
                       (push-parser-job-dependent!
                        dep-next-job
                        (alt-direct-dependent worker ready-job-offset))))
