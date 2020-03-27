@@ -1443,7 +1443,7 @@ But I still need to encapsulate the port and give a start position.
                  (takef jobstack (λ (j) (not (eq? j alt))))))
          (vector-set! (alt-worker-child-job-vector worker)
                       offset
-                      (vector-immutable input-job stack-to-store))
+                      (vector-immutable worker-child-job stack-to-store))
          (alt-worker-mark-blocked! worker offset)
          (set-alt-worker-working-child-offset! worker #f)
          (push-parser-job-dependent! dependency
@@ -1677,7 +1677,9 @@ But I still need to encapsulate the port and give a start position.
               (run-scheduler scheduler)]
              [else
               (error 'chido-parse
-                     "Internal error - alt-worker got a non-stream result: ~s"
+                     "Internal error - alt-worker for ~a got a non-stream result for dependency ~a: ~s"
+                     (job->display job)
+                     (job->display ready-job)
                      result)])]
           [(not (eq? 0 workable-bitmask))
            (define offset (alt-mask->first-offset workable-bitmask))
