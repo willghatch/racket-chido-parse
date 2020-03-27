@@ -1356,105 +1356,111 @@ But I still need to encapsulate the port and give a start position.
                    (scheduler-pop-job! scheduler)
                    (run-scheduler scheduler))))))
 
-(define (reschedule scheduler job)
+(define (reschedule scheduler input-job #:mid-chain-blocked? [mid-chain-blocked? #f])
   ;; This is only run when a job just had its continuation captured.
   ;; We need to check on the stack to see if we have actually created a cycle.
   (let* ([dependency (scheduled-continuation-dependency
-                      (parser-job-continuation/worker job))]
+                      (parser-job-continuation/worker input-job))]
          [dep-on-stack? (parser-job-on-scheduler-stack? dependency)]
          [alt? (alt-parser-job? dependency)]
          [blocked-procedure? (and (proc-parser-job? dependency)
                                   (not (proc-parser-job-actionable? dependency)))])
-    (cond [(and dep-on-stack? alt?)
-           ;; If it's an alt job on the stack, we've detected a left-recursion cycle.
-           ;; In that case, for each alt on the stack between the new dependency and itself (inclusive), we mark its working-child-job with the slice of the stack on top of it.
-           ;; Then we pop the stack up to the top alt job, so the scheduler can try a different path with it.
-           ;; For the top alt job, we also mark the working-child-job as blocked, and set the working-child-offset to #f.
-           (define alts-in-cycle
-             (let loop ([in-cycle '()]
-                        [alts (scheduler-get-stack-alts scheduler)])
-               (define new-in-cycle (cons (car alts) in-cycle))
-               (if (eq? (car alts) dependency)
-                   new-in-cycle
-                   (loop new-in-cycle (cdr alts)))))
-           (define jobstack (scheduler-get-stack-jobs scheduler))
-           (for ([alt alts-in-cycle])
-             (define worker (parser-job-continuation/worker alt))
-             (define offset-stored (alt-worker-working-child-offset worker))
-             ;; TODO - I should set the current better when replacing things on the stack due to left-recursion shuffling.  But for now let's just search.
-             (define offset
-               (or offset-stored
-                   (let* ([one-bit-masks (bitmask->1-bit-masks
-                                          (alt-worker-blocked-bitmask worker))])
-                     (let loop ([masks one-bit-masks])
-                       (if (null? masks)
-                           (error 'chido-parse "internal error - couldn't find working offset for alt-worker")
-                           (let ([offset (alt-mask->first-offset (car masks))])
-                             (match (vector-ref (alt-worker-child-job-vector worker)
-                                                offset)
-                               [(vector (s/kw parser-job #:on-scheduler-stack? #t)
-                                        stack)
-                                (set-alt-worker-working-child-offset! worker offset)
-                                offset]
-                               [else (loop (cdr masks))])))))))
-             (define worker-child-job
-               (match (vector-ref (alt-worker-child-job-vector worker)
-                                  offset)
-                 [(and j (s/kw parser-job)) j]
-                 [(vector j stack) j]))
-             (define stack-to-store
-               (cons dependency
-                     (takef jobstack (λ (j) (not (eq? j alt))))))
-             (vector-set! (alt-worker-child-job-vector worker)
-                          offset
-                          (vector-immutable job stack-to-store))
-             (push-parser-job-dependent! dependency
-                                         (alt-stack-dependent worker offset)))
-           (let loop ()
-             ;; pop the stack back to the top alt
-             (unless (alt-parser-job? (scheduler-peek-job scheduler))
-               (scheduler-pop-job! scheduler)))
-           (define worker (parser-job-continuation/worker dependency))
-           (alt-worker-mark-blocked! worker (alt-worker-working-child-offset worker))
-           (set-alt-worker-working-child-offset! worker #f)
-           (run-scheduler scheduler)]
-          [blocked-procedure?
-           ;; If the dependency is a procedure that's already blocked, we follow its dependencies up to an alt parser, then we push the dependents to the stack and act like we just got to the alt parser job.
-           ;; If there IS no alt parser job, and instead it is a cycle of procedural jobs, we need to detect the cycle and create a cycle failure.
-           (define dependencies
-             (let loop ([deps (list dependency)])
-               (define new-dep (scheduled-continuation-dependency
-                                (parser-job-continuation/worker (car deps))))
-               (if (not (or (alt-parser-job? new-dep)
-                            (memq new-dep deps)))
-                   (loop (cons new-dep deps))
-                   (cons new-dep deps))))
-           (if (alt-parser-job? (car dependencies))
-               (begin
-                 (for ([d (reverse (cdr dependencies))])
-                   (when (not (parser-job-on-scheduler-stack? d))
-                     (scheduler-push-job! scheduler d)))
-                 (reschedule scheduler (cadr dependencies)))
-               (match dependencies
-                 [(list one)
-                  (set-scheduled-continuation-dependency!
-                   (parser-job-continuation/worker one)
-                   (cycle-breaker-job one dependencies))
-                  (scheduler-push-job! scheduler one)
-                  (run-scheduler)]
-                 [(list one two others ...)
-                  (set-scheduled-continuation-dependency!
-                   (parser-job-continuation/worker two)
-                   (cycle-breaker-job one dependencies))
-                  (for ([d (reverse (cons two others))])
-                    (when (not (parser-job-on-scheduler-stack? d))
-                      (scheduler-push-job! scheduler d)))
-                  (run-scheduler scheduler)]))]
-          [else
-           ;; It's just a new job to run
-           (scheduler-push-job! scheduler dependency)
-           ;; TODO - probably I can just tail call to the running function here
-           (run-scheduler scheduler)])))
+    (cond
+      [(or mid-chain-blocked? blocked-procedure?)
+       ;; If the dependency is a procedure that's already blocked, we follow its dependencies up to an alt parser, then we push the dependents to the stack and act like we just got to the alt parser job.
+       ;; If there IS no alt parser job, and instead it is a cycle of procedural jobs, we need to detect the cycle and create a cycle failure.
+       (define dependencies
+         (let loop ([deps (list dependency)])
+           (define new-dep (scheduled-continuation-dependency
+                            (parser-job-continuation/worker (car deps))))
+           (if (not (or (alt-parser-job? new-dep)
+                        (memq new-dep deps)))
+               (loop (cons new-dep deps))
+               (cons new-dep deps))))
+       (if (alt-parser-job? (car dependencies))
+           (begin
+             (for ([d (reverse (cdr dependencies))])
+               (when (not (parser-job-on-scheduler-stack? d))
+                 (scheduler-push-job! scheduler d)))
+             (reschedule scheduler (cadr dependencies)))
+           (match dependencies
+             [(list one)
+              (set-scheduled-continuation-dependency!
+               (parser-job-continuation/worker one)
+               (cycle-breaker-job one dependencies))
+              (scheduler-push-job! scheduler one)
+              (run-scheduler)]
+             [(list one two others ...)
+              (set-scheduled-continuation-dependency!
+               (parser-job-continuation/worker two)
+               (cycle-breaker-job one dependencies))
+              (for ([d (reverse (cons two others))])
+                (when (not (parser-job-on-scheduler-stack? d))
+                  (scheduler-push-job! scheduler d)))
+              (run-scheduler scheduler)]))]
+      [(and dep-on-stack? alt?)
+       ;; If it's an alt job on the stack, we've detected a left-recursion cycle.
+       ;; In that case, for each alt on the stack between the new dependency and itself (inclusive), we mark its working-child-job with the slice of the stack on top of it.
+       ;; Then we pop the stack up to the top alt job, so the scheduler can try a different path with it.
+       ;; For the top alt job, we also mark the working-child-job as blocked, and set the working-child-offset to #f.
+       (define alts-in-cycle
+         (let loop ([in-cycle '()]
+                    [alts (scheduler-get-stack-alts scheduler)])
+           (define new-in-cycle (cons (car alts) in-cycle))
+           (if (eq? (car alts) dependency)
+               new-in-cycle
+               (loop new-in-cycle (cdr alts)))))
+       (define jobstack (scheduler-get-stack-jobs scheduler))
+       (for ([alt alts-in-cycle])
+         (define worker (parser-job-continuation/worker alt))
+         (define offset-stored (alt-worker-working-child-offset worker))
+         ;; TODO - I should set the current better when replacing things on the stack due to left-recursion shuffling.  But for now let's just search.
+         (define offset
+           (or offset-stored
+               (let* ([one-bit-masks (append
+                                      (bitmask->1-bit-masks
+                                       (alt-worker-workable-bitmask worker))
+                                      (bitmask->1-bit-masks
+                                       (alt-worker-blocked-bitmask worker)))])
+                 (let loop ([masks one-bit-masks])
+                   (if (null? masks)
+                       (error 'chido-parse "internal error - couldn't find working offset for alt-worker")
+                       (let ([offset (alt-mask->first-offset (car masks))])
+                         (match (vector-ref (alt-worker-child-job-vector worker)
+                                            offset)
+                           [(vector (s/kw parser-job #:on-scheduler-stack? #t)
+                                    stack)
+                            ;(set-alt-worker-working-child-offset! worker offset)
+                            offset]
+                           [else (loop (cdr masks))])))))))
+         (define worker-child-job
+           (match (vector-ref (alt-worker-child-job-vector worker)
+                              offset)
+             [(and j (s/kw parser-job)) j]
+             [(vector j stack) j]))
+         (define stack-to-store
+           (cons dependency
+                 (takef jobstack (λ (j) (not (eq? j alt))))))
+         (vector-set! (alt-worker-child-job-vector worker)
+                      offset
+                      (vector-immutable input-job stack-to-store))
+         (alt-worker-mark-blocked! worker offset)
+         (set-alt-worker-working-child-offset! worker #f)
+         (push-parser-job-dependent! dependency
+                                     (alt-stack-dependent worker offset)))
+       (let loop ()
+         ;; pop the stack back to the top alt
+         (unless (alt-parser-job? (scheduler-peek-job scheduler))
+           (scheduler-pop-job! scheduler)
+           (loop)))
+       (define worker (parser-job-continuation/worker dependency))
+       (set-alt-worker-working-child-offset! worker #f)
+       (run-scheduler scheduler)]
+      [else
+       ;; It's just a new job to run
+       (scheduler-push-job! scheduler dependency)
+       ;; TODO - probably I can just tail call to the running function here
+       (run-scheduler scheduler)])))
 
 (define (run-scheduler scheduler)
   (define done?/result
@@ -1506,7 +1512,7 @@ But I still need to encapsulate the port and give a start position.
             (let ()
               ;; This can happen when I create an alt-worker that STARTS with a blocked path -- I don't eagerly check whether they are blocked, I just let it come to this state, OR if a procedural parser happens to recur into a procedure that was already blocked.
               ;; In this case I need to build the dependency chain up to an alt, then use that to give a stack to the top alt, and pop back to it.  IE the stuff that's done in `reschedule`.
-              (reschedule scheduler job)))]
+              (reschedule scheduler job #:mid-chain-blocked? #t)))]
        [(stream? (parser-job-result-stream job))
         (do-run! scheduler
                  (λ () (stream-rest (parser-job-result-stream job)))
@@ -1598,7 +1604,7 @@ But I still need to encapsulate the port and give a start position.
                             '() #f))
               (for ([dep-pair dep-pairs-with-matched-prefixes])
                 (define dep (mk-dep (cdr dep-pair)))
-                (define dep-mask (arithmetic-shift 1 (car dep-pair)))
+                (define dep-mask (alt-offset->mask-bit (car dep-pair)))
                 (vector-set! job-vector (car dep-pair) dep)
                 (cond [(job->result dep)
                        (set-alt-worker-reapable-bitmask!
@@ -1627,7 +1633,7 @@ But I still need to encapsulate the port and give a start position.
         (cond
           [(not (eq? 0 reapable-bitmask))
            (define ready-job-offset (alt-mask->first-offset reapable-bitmask))
-           (define job-mask (arithmetic-shift 1 ready-job-offset))
+           (define job-mask (alt-offset->mask-bit ready-job-offset))
            (set-alt-worker-reapable-bitmask!
             worker
             (bitwise-xor reapable-bitmask job-mask))
@@ -1676,7 +1682,7 @@ But I still need to encapsulate the port and give a start position.
           [(not (eq? 0 workable-bitmask))
            (define offset (alt-mask->first-offset workable-bitmask))
            (set-alt-worker-working-child-offset! worker offset)
-           (define job-mask (arithmetic-shift 1 offset))
+           (define job-mask (alt-offset->mask-bit offset))
            (define workable-job-cell (vector-ref job-vector offset))
            (define-values (workable-job workable-job-stack)
              (match workable-job-cell
@@ -1774,7 +1780,7 @@ But I still need to encapsulate the port and give a start position.
   (for ([dep (parser-job-dependents job)])
     (match dep
       [(s/kw alt-direct-dependent #:worker worker #:offset offset)
-       (define offset-mask (arithmetic-shift 1 offset))
+       (define offset-mask (alt-offset->mask-bit offset))
        (set-alt-worker-reapable-bitmask! worker
                                          (bitwise-ior
                                           offset-mask
@@ -1789,7 +1795,7 @@ But I still need to encapsulate the port and give a start position.
                                          (alt-worker-blocked-bitmask worker)
                                          offset-mask))]
       [(s/kw alt-stack-dependent #:worker worker #:offset offset)
-       (define offset-mask (arithmetic-shift 1 offset))
+       (define offset-mask (alt-offset->mask-bit offset))
        (set-alt-worker-workable-bitmask! worker
                                          (bitwise-ior
                                           offset-mask
