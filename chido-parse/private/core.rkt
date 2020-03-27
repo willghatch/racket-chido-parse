@@ -844,7 +844,7 @@ The job cache is a multi-level dictionary with the following keys / implementati
      (if (< next-index (gvector-count siblings))
          (gvector-ref siblings next-index)
          (let ([new-job (parser-job parser scheduler cp-params start-position
-                                    next-index siblings port #f '() #f #f)])
+                                    next-index siblings port #f '() #f #f #f)])
            (gvector-add! siblings new-job)
            new-job))]))
 
@@ -1340,6 +1340,7 @@ But I still need to encapsulate the port and give a start position.
               chido-parse-prompt
               result-loop))
             (begin (cache-result-and-ready-dependents! scheduler job result)
+                   (scheduler-pop-job! scheduler)
                    (run-scheduler scheduler))))))
 
 (define (reschedule scheduler job)
@@ -1378,7 +1379,8 @@ But I still need to encapsulate the port and give a start position.
              (vector-set! (alt-worker-child-job-vector worker)
                           offset
                           (vector-immutable job stack-to-store))
-             (push-parser-job-dependent! dependency (alt-stack-dependent alt offset)))
+             (push-parser-job-dependent! dependency
+                                         (alt-stack-dependent worker offset)))
            (let loop ()
              ;; pop the stack back to the top alt
              (unless (alt-parser-job? (scheduler-peek-job scheduler))
@@ -1431,6 +1433,7 @@ But I still need to encapsulate the port and give a start position.
   ;; * an alt-job that may be new, ready, OR blocked!
   ;; * a proc-job that is blocked because an alt-job was constructed with a pre-blocked dependency path.
   (define job (scheduler-peek-job scheduler))
+  ;(eprintf "in run-scheduler with job: ~v\n" (job->display job))
   (cond
     [(string-parser-job? job)
      (define s (parser-job-parser job))
@@ -1450,7 +1453,7 @@ But I still need to encapsulate the port and give a start position.
                      (scheduled-continuation-k sk)
                      job
                      #t
-                     (job->result (scheduled-continuation-dependency sk)))
+                     dep-result)
             (let ()
               ;; This can happen when I create an alt-worker that STARTS with a blocked path -- I don't eagerly check whether they are blocked, I just let it come to this state.
               (scheduler-push-job! scheduler (scheduled-continuation-dependency sk))
@@ -1538,22 +1541,28 @@ But I still need to encapsulate the port and give a start position.
             (let ([failure (make-parse-failure
                             #:message "Alt parser had no prefixes match.")])
               (cache-result-and-ready-dependents! scheduler job failure))
-            (let* ([job-vector (make-vector (alt-parser-num-parsers parser) #f)]
-                   [reapable-mask 0]
-                   [workable-mask 0]
-                   [blocked-mask 0])
+            (let* ([job-vector (make-vector (alt-parser-num-parsers parser) #f)])
+              (define worker
+                (alt-worker job #f job-vector
+                            0 0 0
+                            '() #f))
               (for ([dep-pair dep-pairs-with-matched-prefixes])
                 (define dep (mk-dep (cdr dep-pair)))
                 (define dep-mask (arithmetic-shift 1 (car dep-pair)))
                 (vector-set! job-vector (car dep-pair) dep)
                 (cond [(job->result dep)
-                       (set! reapable-mask (bitwise-ior reapable-mask dep-mask))]
+                       (set-alt-worker-reapable-bitmask!
+                        worker
+                        (bitwise-ior (alt-worker-reapable-bitmask worker)
+                                     dep-mask))]
                       [else
-                       (set! workable-mask (bitwise-ior workable-mask dep-mask))]))
-              (define worker
-                (alt-worker job #f job-vector
-                            reapable-mask workable-mask blocked-mask
-                            '() #f))
+                       (push-parser-job-dependent!
+                       dep
+                       (alt-direct-dependent worker (car dep-pair)))
+                       (set-alt-worker-workable-bitmask!
+                        worker
+                        (bitwise-ior (alt-worker-workable-bitmask worker)
+                                     dep-mask))]))
               (set-parser-job-continuation/worker! job worker)
               ;; the alt-worker is now set up, tail-call back to run-scheduler to start actually working it.
               (run-scheduler scheduler)))]
@@ -1600,7 +1609,7 @@ But I still need to encapsulate the port and give a start position.
                     (begin
                       (set-alt-worker-workable-bitmask!
                        worker
-                       (bitwise-and workable-bitmask job-mask))
+                       (bitwise-ior workable-bitmask job-mask))
                       (push-parser-job-dependent!
                        dep-next-job
                        (alt-direct-dependent worker ready-job-offset))))
@@ -1622,7 +1631,7 @@ But I still need to encapsulate the port and give a start position.
                [(vector job stack) (values job stack)]))
            (if workable-job-stack
                (begin
-                 (for ([j workable-job-stack])
+                 (for ([j (reverse (cdr workable-job-stack))])
                    (scheduler-push-job! scheduler j))
                  (run-scheduler scheduler))
                (begin
@@ -1680,7 +1689,7 @@ But I still need to encapsulate the port and give a start position.
                (let ([b1 (car blocked)])
                  (for ([b blocked])
                    (match b
-                     [(list progress-maybe?
+                     [(list #f
                             (and stack
                                  (list some-alt dep-before-alt rest-of-the-stack ...)))
                       (match dep-before-alt
@@ -1710,7 +1719,10 @@ But I still need to encapsulate the port and give a start position.
   ;; If these were fixed-width uints, I would AND the NOT.  But with these variable width integers this is the best solution I can think of right now.
   (bitwise-xor (bitwise-ior base
                             mask-to-unset)
-               base))
+               mask-to-unset))
+(module+ test
+  (check-equal? (bitwise-unset-mask 7 8) 7)
+  (check-equal? (bitwise-unset-mask 7 2) 5))
 
 (define (ready-dependents! job)
   (for ([dep (parser-job-dependents job)])
