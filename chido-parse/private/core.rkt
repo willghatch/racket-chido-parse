@@ -547,7 +547,7 @@ The job-cache structure is described by the caching code -- it's a multi-tiered 
      j1]))
 (define (scheduler-push-job! s j)
   (when (parser-job-on-scheduler-stack? j)
-    (error 'scheduler-push-job! "chido-parse internal error - job marked as already on stack"))
+    (error 'scheduler-push-job! "chido-parse internal error - job marked as already on stack ~v" (job->display j)))
   (set-parser-job-on-scheduler-stack?! j #t)
   (define jpos (parser-job-start-position j))
   (define alt? (alt-parser-job? j))
@@ -1388,8 +1388,7 @@ But I still need to encapsulate the port and give a start position.
              ;; pop the stack back to the top alt
              (unless (alt-parser-job? (scheduler-peek-job scheduler))
                (scheduler-pop-job! scheduler)))
-           (define alt (scheduler-peek-job scheduler))
-           (define worker (parser-job-continuation/worker alt))
+           (define worker (parser-job-continuation/worker dependency))
            (alt-worker-mark-blocked! worker (alt-worker-working-child-offset worker))
            (set-alt-worker-working-child-offset! worker #f)
            (run-scheduler scheduler)]
@@ -1401,7 +1400,7 @@ But I still need to encapsulate the port and give a start position.
                (define new-dep (scheduled-continuation-dependency
                                 (parser-job-continuation/worker (car deps))))
                (if (not (or (alt-parser-job? new-dep)
-                            (memq deps new-dep)))
+                            (memq new-dep deps)))
                    (loop (cons new-dep deps))
                    (cons new-dep deps))))
            (if (alt-parser-job? (car dependencies))
