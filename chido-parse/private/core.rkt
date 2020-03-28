@@ -111,6 +111,15 @@
    rackunit
    ))
 
+(require
+ (only-in racket/base (car r:car)))
+(define-syntax (car stx)
+  (syntax-parse stx
+    [(_ arg)
+     #`(let ([a arg])
+         (if (pair? a)
+             (r:car a)
+             (error 'car "not a pair ~v, at line ~v" a '#,(syntax-line stx))))]))
 
 ;; TODO - explanation from notes about the big picture of how this parsing library works
 
@@ -553,7 +562,9 @@ The job-cache structure is described by the caching code -- it's a multi-tiered 
   (define jpos (parser-job-start-position j))
   (define alt? (alt-parser-job? j))
   (match s
-    [(s/kw scheduler #:job-stacks (list (and v1 (vector jpos jobstack altstack))
+    [(s/kw scheduler #:job-stacks (list (and v1 (vector (? (λ (x) (equal? jpos x)))
+                                                        jobstack
+                                                        altstack))
                                         vs ...))
      (vector-set! v1 1 (cons j jobstack))
      (when alt?
@@ -589,15 +600,28 @@ The job-cache structure is described by the caching code -- it's a multi-tiered 
   (match s
     [(s/kw scheduler #:job-stacks '())
      (error 'scheduler-get-stack-jobs "chido parse internal error")]
-    [(s/kw scheduler #:job-stacks (list (vector pos jobstack altstack)))
+    [(s/kw scheduler #:job-stacks (list (vector pos jobstack altstack) more ...))
      jobstack]))
 (define (scheduler-get-stack-alts s)
   ;; IE return the job stack for the current position
   (match s
     [(s/kw scheduler #:job-stacks '())
      (error 'scheduler-get-stack-jobs "chido parse internal error")]
-    [(s/kw scheduler #:job-stacks (list (vector pos jobstack altstack)))
+    [(s/kw scheduler #:job-stacks (list (vector pos jobstack altstack) more ...))
      altstack]))
+(define (scheduler-get-positions-on-stack s)
+  (match s
+    [(s/kw scheduler #:job-stacks (list (vector pos _ _) ...))
+     pos]))
+(define (scheduler-get-full-stack-view s)
+  (match (scheduler-job-stacks s)
+    [(list (vector pos jobs alts) ...)
+     (map list
+          pos
+          (map (λ (v) (map job->display v))
+               jobs)
+          (map (λ (v) (map job->display v))
+               alts))]))
 
 
 (struct parser-job
@@ -1385,15 +1409,18 @@ But I still need to encapsulate the port and give a start position.
              (reschedule scheduler (cadr dependencies)))
            (match dependencies
              [(list one)
+              (define sk (parser-job-continuation/worker one))
               (set-scheduled-continuation-dependency!
-               (parser-job-continuation/worker one)
-               (cycle-breaker-job one dependencies))
+               sk (cycle-breaker-job one dependencies))
+              (set-scheduled-continuation-ready?! sk #t)
               (scheduler-push-job! scheduler one)
               (run-scheduler)]
              [(list one two others ...)
+              (define sk (parser-job-continuation/worker two))
               (set-scheduled-continuation-dependency!
-               (parser-job-continuation/worker two)
+               sk
                (cycle-breaker-job one dependencies))
+              (set-scheduled-continuation-ready?! sk #t)
               (for ([d (reverse (cons two others))])
                 (when (not (parser-job-on-scheduler-stack? d))
                   (scheduler-push-job! scheduler d)))
@@ -1406,11 +1433,24 @@ But I still need to encapsulate the port and give a start position.
        (define alts-in-cycle
          (let loop ([in-cycle '()]
                     [alts (scheduler-get-stack-alts scheduler)])
+           (eprintf "alts: ~v\n" (map job->display alts))
+           (eprintf "stack: ~v\n" (map job->display (scheduler-get-stack-jobs scheduler)))
+           (eprintf "positions: ~v\n" (scheduler-get-positions-on-stack scheduler))
+           (eprintf "\nfullstack: ~v\n" (match (scheduler-job-stacks scheduler)
+                                          [(list (vector pos jobs alts) ...)
+                                           (map list
+                                                pos
+                                                (map (λ (v) (map job->display v))
+                                                     jobs)
+                                                (map (λ (v) (map job->display v))
+                                                     alts))]))
            (define new-in-cycle (cons (car alts) in-cycle))
            (if (eq? (car alts) dependency)
-               new-in-cycle
+               (reverse new-in-cycle)
                (loop new-in-cycle (cdr alts)))))
        (define jobstack (scheduler-get-stack-jobs scheduler))
+       ;; We go down the stack of alts, and as soon as one has other alts workable we set all-blocked? to #f.  While all-blocked is #t, any alt that doesn't have other alts will get the current alt marked as blocked.
+       (define all-blocked? #t)
        (for ([alt alts-in-cycle])
          (define worker (parser-job-continuation/worker alt))
          (define offset-stored (alt-worker-working-child-offset worker))
@@ -1444,8 +1484,17 @@ But I still need to encapsulate the port and give a start position.
          (vector-set! (alt-worker-child-job-vector worker)
                       offset
                       (vector-immutable worker-child-job stack-to-store))
-         (alt-worker-mark-blocked! worker offset)
-         (set-alt-worker-working-child-offset! worker #f)
+         (define all-blocked-in-this-alt?
+           (eq? 0 (bitwise-unset-mask
+                   (bitwise-ior (alt-worker-reapable-bitmask worker)
+                                (alt-worker-reapable-bitmask worker))
+                   (alt-offset->mask-bit offset))))
+         (when (and all-blocked?
+                    all-blocked-in-this-alt?)
+           (alt-worker-mark-blocked! worker offset)
+           (set-alt-worker-working-child-offset! worker #f))
+         (when (not all-blocked-in-this-alt?)
+           (set! all-blocked? #f))
          (push-parser-job-dependent! dependency
                                      (alt-stack-dependent worker offset)))
        (let loop ()
@@ -1749,15 +1798,27 @@ But I still need to encapsulate the port and give a start position.
                       (match dep-before-alt
                         [(s/kw parser-job #:continuation/worker k/w)
                          (match k/w
+                           [#f
+                            (eprintf "job: ~v\n" (job->display dep-before-alt))
+                            (eprintf "result: ~v\n" (job->result dep-before-alt))
+                            (eprintf "stack: ~v\n" (map job->display
+                                                        (vector-ref
+                                                         (car
+                                                          (scheduler-job-stacks scheduler))
+                                                         1)))
+                            (eprintf "stack try 2: ~v\n" (map job->display (scheduler-get-stack-jobs scheduler)))
+                            (error 'chido-parse "internal error - I don't know what's wrong here")]
                            [(s/kw scheduled-continuation)
                             (set-scheduled-continuation-dependency!
-                             k/w (cycle-breaker-job some-alt stack))]
+                             k/w (cycle-breaker-job some-alt stack))
+                            (set-scheduled-continuation-ready?! k/w #t)]
                            [(s/kw alt-worker)
                             (error 'scheduler "TODO chido parse internal error - haven't yet implemented handling for cycle when alt-workers directly depend on other alt-workers.")])])]))
                  (for ([j (match b1 [(list progress-not stack)
                                      (reverse (cdr stack))])])
                    (scheduler-push-job! scheduler j))
-                 (set-alt-worker-workable-bitmask! worker blocked-bitmask)
+                 (set-alt-worker-workable-bitmask!
+                  worker (alt-worker-blocked-bitmask worker))
                  (set-alt-worker-blocked-bitmask! worker 0)
                  ;; Now just start running again and let those failures cascade!
                  (run-scheduler scheduler)))]
