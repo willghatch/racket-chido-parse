@@ -15,16 +15,16 @@
   (define my-s-exp-readtable
     (extend-chido-readtable*
      (chido-readtable-add-list-parser
+      "{" "}"
       (chido-readtable-add-list-parser
-       (chido-readtable-add-list-parser empty-chido-readtable "(" ")")
-       "[" "]")
-      "{" "}")
+       "[" "]"
+       (chido-readtable-add-list-parser "(" ")" empty-chido-readtable)))
      'nonterminating hash-t-parser
      'nonterminating hash-f-parser
      'terminating racket-style-string-parser
-     'layout " "
-     'layout "\n"
-     'layout "\t"))
+     'terminating-layout " "
+     'terminating-layout "\n"
+     'terminating-layout "\t"))
   (define my-parser (chido-readtable->read1 my-s-exp-readtable))
 
   (define f (command-line #:args (filename) filename))
