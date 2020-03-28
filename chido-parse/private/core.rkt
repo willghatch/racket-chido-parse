@@ -562,7 +562,7 @@ The job-cache structure is described by the caching code -- it's a multi-tiered 
   (define jpos (parser-job-start-position j))
   (define alt? (alt-parser-job? j))
   (match s
-    [(s/kw scheduler #:job-stacks (list (and v1 (vector (? (λ (x) (equal? jpos x)))
+    [(s/kw scheduler #:job-stacks (list (and v1 (vector (? (λ (x) #t #;(equal? jpos x)))
                                                         jobstack
                                                         altstack))
                                         vs ...))
@@ -1433,17 +1433,6 @@ But I still need to encapsulate the port and give a start position.
        (define alts-in-cycle
          (let loop ([in-cycle '()]
                     [alts (scheduler-get-stack-alts scheduler)])
-           (eprintf "alts: ~v\n" (map job->display alts))
-           (eprintf "stack: ~v\n" (map job->display (scheduler-get-stack-jobs scheduler)))
-           (eprintf "positions: ~v\n" (scheduler-get-positions-on-stack scheduler))
-           (eprintf "\nfullstack: ~v\n" (match (scheduler-job-stacks scheduler)
-                                          [(list (vector pos jobs alts) ...)
-                                           (map list
-                                                pos
-                                                (map (λ (v) (map job->display v))
-                                                     jobs)
-                                                (map (λ (v) (map job->display v))
-                                                     alts))]))
            (define new-in-cycle (cons (car alts) in-cycle))
            (if (eq? (car alts) dependency)
                (reverse new-in-cycle)
@@ -1799,15 +1788,10 @@ But I still need to encapsulate the port and give a start position.
                         [(s/kw parser-job #:continuation/worker k/w)
                          (match k/w
                            [#f
-                            (eprintf "job: ~v\n" (job->display dep-before-alt))
-                            (eprintf "result: ~v\n" (job->result dep-before-alt))
-                            (eprintf "stack: ~v\n" (map job->display
-                                                        (vector-ref
-                                                         (car
-                                                          (scheduler-job-stacks scheduler))
-                                                         1)))
-                            (eprintf "stack try 2: ~v\n" (map job->display (scheduler-get-stack-jobs scheduler)))
-                            (error 'chido-parse "internal error - I don't know what's wrong here")]
+                            ;(eprintf "job: ~v\n" (job->display dep-before-alt))
+                            ;(eprintf "result: ~v\n" (job->result dep-before-alt))
+                            (void)
+                            #;(error 'chido-parse "internal error - I don't know what's wrong here")]
                            [(s/kw scheduled-continuation)
                             (set-scheduled-continuation-dependency!
                              k/w (cycle-breaker-job some-alt stack))
