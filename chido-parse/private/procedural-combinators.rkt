@@ -718,7 +718,7 @@ TODO - I need a parse stream object that is lazy and holds on to errors so that 
 
 TODO - what kind of filters do I need?
 * simple predicate filters
-** I think simple predicates are enough for precidence and associativity filters...
+** I think simple predicates are enough for precedence and associativity filters...
 * filters that read more of the port
 ** needed for follow filters
 * ? filters that compare multiple elements of a stream (eg. a filter that only gives the largest among multiple parses?)

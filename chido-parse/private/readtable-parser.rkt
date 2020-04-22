@@ -2,7 +2,7 @@
 
 #|
 Arguably the point of Racket's readtable is to have an extensible alternate parser that has a built-in symbol parser that is affected by each added alternate.
-This is an implementation of the same idea, but also adding support for operators with declarative precidence and associativity and potentially other extra features.
+This is an implementation of the same idea, but also adding support for operators with declarative precedence and associativity and potentially other extra features.
 |#
 
 (require racket/contract/base)
@@ -21,8 +21,8 @@ This is an implementation of the same idea, but also adding support for operator
          any/c
          chido-readtable?)
         (#:operator (or/c #f 'infix 'prefix 'postfix)
-         #:precidence-less-than (or/c any/c (listof any/c))
-         #:precidence-greater-than (or/c any/c (listof any/c))
+         #:precedence-less-than (or/c any/c (listof any/c))
+         #:precedence-greater-than (or/c any/c (listof any/c))
          #:associativity (or/c 'left 'right #f)
          ;#:symbol-blacklist (listof (or/c symbol? string?))
          )
@@ -56,8 +56,8 @@ This is an implementation of the same idea, but also adding support for operator
   [chido-readtable-add-mixfix-operator
    (->* ((or/c symbol? string?) chido-readtable?)
         (#:layout (or/c 'required 'optional 'none)
-         #:precidence-greater-than (or/c any/c (listof any/c))
-         #:precidence-less-than (or/c any/c (listof any/c))
+         #:precedence-greater-than (or/c any/c (listof any/c))
+         #:precedence-less-than (or/c any/c (listof any/c))
          #:associativity (or/c 'left 'right #f))
         any/c)]
   )
@@ -113,7 +113,7 @@ This is an implementation of the same idea, but also adding support for operator
    ;; If symbol support is off, then terminating, soft-terminating, and nonterminating parsers are indistinguishable.  The difference is only how it affects the built-in symbol parser.
    ;; For readtable-style extension, symbols need to be built-in so adding parsers affects the symbol parser implicitly.
    ;; TODO - I should add more ways to affect the built-in symbol parser.  Eg. maybe soft-terminating-failure and nonterminating-failure parsers, which delimit symbols a la soft-terminating and nonterminating, making the symbol parser fail or not run when they succeed, but that don't create a derivation.  IE they make the symbol parser fail with a message saying that the other parser succeeded.  Basically programatic filters for symbols beyond just having a blacklist.  Eg. this would allow a convention for operator names (eg. they must be in <> like <+>, or they must be in : like :+: or :where:, etc, then fail symbols that match that pattern.)
-   ;; TODO - operator precidence programability -- if you have an operator family, such as an operator that reads the operator string as some family of symbols like :+:, :where:, etc, does it make sense to have some more complicated and programmable way of doing precidence and associativity?
+   ;; TODO - operator precedence programability -- if you have an operator family, such as an operator that reads the operator string as some family of symbols like :+:, :where:, etc, does it make sense to have some more complicated and programmable way of doing precedence and associativity?
    symbol-support?
    symbol-result-transformer
    literal-left-delimiter
@@ -127,12 +127,12 @@ This is an implementation of the same idea, but also adding support for operator
 
    ;;; operator info
 
-   ;; TODO - add numeric precidence in addition to relative precidence.  Then users can choose one way or the other.  If both are used, make them separate -- IE compare precidence based on lattice and based on number, don't make the number operator transitive with the lattice operator.  Maybe also error if there is a relationship both ways?  Or maybe error when a readtable has both numeric and relative precidence?
-   ;; TODO - the current design makes all precidence relationships transitive.  Maybe both transitive and intransitive relationships should be allowed?
-   ;; hash from parser to set of parsers that are immediately above the key parser in the precidence lattice
-   precidence-immediate-greater-relations
-   ;; hash from parser to set of parsers that are immediately below the key parser in the precidence lattice
-   precidence-immediate-lesser-relations
+   ;; TODO - add numeric precedence in addition to relative precedence.  Then users can choose one way or the other.  If both are used, make them separate -- IE compare precedence based on lattice and based on number, don't make the number operator transitive with the lattice operator.  Maybe also error if there is a relationship both ways?  Or maybe error when a readtable has both numeric and relative precedence?
+   ;; TODO - the current design makes all precedence relationships transitive.  Maybe both transitive and intransitive relationships should be allowed?
+   ;; hash from parser to set of parsers that are immediately above the key parser in the precedence lattice
+   precedence-immediate-greater-relations
+   ;; hash from parser to set of parsers that are immediately below the key parser in the precedence lattice
+   precedence-immediate-lesser-relations
 
    ;; lists of parsers that are marked as these things
    prefix-operators
@@ -166,8 +166,8 @@ This is an implementation of the same idea, but also adding support for operator
    [read*-parser #:mutable]
    [read+-parser #:mutable]
 
-   ;; To cache precidence lattice traversal and cycle detection
-   [precidence-transitive-greater-relations #:mutable]
+   ;; To cache precedence lattice traversal and cycle detection
+   [precedence-transitive-greater-relations #:mutable]
    )
   #:property prop:custom-parser
   (λ (self) (chido-readtable->read1 self))
@@ -209,9 +209,9 @@ This is an implementation of the same idea, but also adding support for operator
 
    ;;; operator stuff
 
-   ;; precidence-immediate-greater-relations
+   ;; precedence-immediate-greater-relations
    (hash)
-   ;; precidence-immediate-lesser-relations
+   ;; precedence-immediate-lesser-relations
    (hash)
    ;; prefix-operators
    '()
@@ -238,7 +238,7 @@ This is an implementation of the same idea, but also adding support for operator
    empty-trie
    ;; parsers
    #f #f #f #f #f #f #f #f
-   ;; precidence-transitive-greater-relations
+   ;; precedence-transitive-greater-relations
    (hash)
    ))
 
@@ -252,15 +252,15 @@ This is an implementation of the same idea, but also adding support for operator
 (define (extend-chido-readtable symbol-affect parser rt
                                 ;; TODO - better name for symbol-affect, and make it a keyword argument.
                                 #:operator [operator #f]
-                                #:precidence-less-than [precidence-less-than '()]
-                                #:precidence-greater-than [precidence-greater-than '()]
+                                #:precedence-less-than [precedence-less-than '()]
+                                #:precedence-greater-than [precedence-greater-than '()]
                                 #:associativity [associativity #f]
                                 #:symbol-blacklist [symbol-blacklist #f]
                                 )
   ;; symbol-affect is 'terminating, 'soft-terminating, 'nonterminating, 'left-recursive-nonterminating,  'terminating-layout, 'soft-terminating-layout, or 'nonterminating-layout
   ;; operator is #f, 'infix, 'prefix, or 'postfix
   ;; associativity is #f, 'left, or 'right
-  ;; precidence lists are for names of other operators that are immediately greater or lesser in the precidence lattice.
+  ;; precedence lists are for names of other operators that are immediately greater or lesser in the precedence lattice.
   ;; symbol-blacklist can be #f to do nothing, #t to add the parser name to the symbol blacklist (for the common case that the operator name is the parser name), or a list of symbols or strings to blacklist.
   ;; TODO - maybe symbol-blacklist doesn't belong here, but its primary motivation is to blacklist operator names...
 
@@ -347,7 +347,7 @@ This is an implementation of the same idea, but also adding support for operator
           [(parser? op-or-name) op-or-name]
           [else (err)]))
 
-  (define (precidence->list prec)
+  (define (precedence->list prec)
     (cond [(not prec) '()]
           [(list? prec) prec]
           [else (list prec)]))
@@ -372,16 +372,16 @@ This is an implementation of the same idea, but also adding support for operator
                                 [postfix-operators
                                  (cons parser
                                        (chido-readtable-postfix-operators rt))])])
-       [precidence-immediate-greater-relations
+       [precedence-immediate-greater-relations
         (dict-set
-         (chido-readtable-precidence-immediate-greater-relations rt)
+         (chido-readtable-precedence-immediate-greater-relations rt)
          parser
-         (map op-resolve (precidence->list precidence-less-than)))]
-       [precidence-immediate-lesser-relations
+         (map op-resolve (precedence->list precedence-less-than)))]
+       [precedence-immediate-lesser-relations
         (dict-set
-         (chido-readtable-precidence-immediate-lesser-relations rt)
+         (chido-readtable-precedence-immediate-lesser-relations rt)
          parser
-         (map op-resolve (precidence->list precidence-greater-than)))]
+         (map op-resolve (precedence->list precedence-greater-than)))]
        [operator-name->operator
         (dict-set op-name->op (parser-name parser) parser)])
       pre-op))
@@ -545,12 +545,12 @@ This is an implementation of the same idea, but also adding support for operator
        (make-alt-parser (format "chido-readtable~aread*" name-format)
                         (list with-content-parser no-content-parser))))
 
-    ;;; Set transitive operator precidence hash
+    ;;; Set transitive operator precedence hash
 
     (define all-direct-greaters
-      ;; Because precidence can be declared by a greater than or less than relation,
+      ;; Because precedence can be declared by a greater than or less than relation,
       ;; I need to reverse one side to get all one relation.
-      (for/fold ([ghash (chido-readtable-precidence-immediate-greater-relations rt)])
+      (for/fold ([ghash (chido-readtable-precedence-immediate-greater-relations rt)])
                 ([op (append (chido-readtable-prefix-operators rt)
                              (chido-readtable-postfix-operators rt)
                              (dict-keys
@@ -558,14 +558,14 @@ This is an implementation of the same idea, but also adding support for operator
         (for/fold ([ghash ghash])
                   ([lesser-op
                     (dict-ref
-                     (chido-readtable-precidence-immediate-lesser-relations rt)
+                     (chido-readtable-precedence-immediate-lesser-relations rt)
                      op)])
           (dict-set ghash lesser-op (cons op (dict-ref ghash lesser-op '()))))))
     (define (compute-transitive-greaters orig-op work-set done-set greater-set)
       (if (set-empty? work-set)
           (if (set-member? greater-set orig-op)
               (error 'chido-readtable
-                     "Circular operator precidence detected for: ~a"
+                     "Circular operator precedence detected for: ~a"
                      (parser-name orig-op))
               greater-set)
           (let* ([new-greaters
@@ -579,7 +579,7 @@ This is an implementation of the same idea, but also adding support for operator
                                          new-work-set
                                          new-done-set
                                          new-greater-set))))
-    (set-chido-readtable-precidence-transitive-greater-relations!
+    (set-chido-readtable-precedence-transitive-greater-relations!
      rt
      (for/hash ([op (dict-keys all-direct-greaters)])
        (values op (compute-transitive-greaters op (list op) '() '()))))
@@ -734,7 +734,7 @@ This is an implementation of the same idea, but also adding support for operator
   (chido-readtable-populate-cache! readtable)
   (member moreparser
           (dict-ref
-           (chido-readtable-precidence-transitive-greater-relations readtable)
+           (chido-readtable-precedence-transitive-greater-relations readtable)
            lessparser
            '())))
 
@@ -758,16 +758,16 @@ This is an implementation of the same idea, but also adding support for operator
        [#f (or (parse-derivation-parser? lderiv dparser)
                (parse-derivation-parser? rderiv dparser))])
 
-     ;; direct precidence violation
+     ;; direct precedence violation
      ;; IE low-priority binary operator on either side
      (or (and (infix-operator? readtab ldparser)
               (operator-priority-< readtab ldparser dparser))
          (and (infix-operator? readtab rdparser)
               (operator-priority-< readtab rdparser dparser)))
 
-     ;; direct precidence violation by non-relation
+     ;; direct precedence violation by non-relation
      ;; IE operators don't have a relationship.
-     ;; TODO - this code is wrong, because it includes equal precidence...
+     ;; TODO - this code is wrong, because it includes equal precedence...
      #;(or (and (infix-operator? readtab ldparser)
               (not (operator-priority-< readtab ldparser dparser))
               (not (operator-priority-< readtab dparser ldparser)))
@@ -775,7 +775,7 @@ This is an implementation of the same idea, but also adding support for operator
               (not (operator-priority-< readtab rdparser dparser))
               (not (operator-priority-< readtab dparser rdparser))))
 
-     ;; deep precidence violation
+     ;; deep precedence violation
      ;; IE
      ;; * low-priority prefix operator on right of left side, recursively
      ;; * low-priority postfix operator on left of right side, recursively
@@ -811,7 +811,7 @@ This is an implementation of the same idea, but also adding support for operator
   (define dparser (parse-derivation-parser derivation))
   (define rderiv (parse-derivation-right-most-subderivation derivation))
   (define filter-out?
-    ;; direct precidence violation
+    ;; direct precedence violation
     ;; IE low-priority binary operator on either side
     (and (infix-operator? readtab (parse-derivation-parser rderiv))
          (operator-priority-< readtab (parse-derivation-parser rderiv) dparser)))
@@ -824,7 +824,7 @@ This is an implementation of the same idea, but also adding support for operator
   (define dparser (parse-derivation-parser derivation))
   (define lderiv (parse-derivation-left-most-subderivation derivation))
   (define filter-out?
-    ;; direct precidence violation
+    ;; direct precedence violation
     ;; IE low-priority binary operator on either side
     (and (infix-operator? readtab (parse-derivation-parser lderiv))
          (operator-priority-< readtab (parse-derivation-parser lderiv) dparser)))
@@ -1119,8 +1119,8 @@ This is an implementation of the same idea, but also adding support for operator
 (define (chido-readtable-add-mixfix-operator
          name-strsym rt
          #:layout [layout 'required]
-         #:precidence-greater-than [precidence-greater-than '()]
-         #:precidence-less-than [precidence-less-than '()]
+         #:precedence-greater-than [precedence-greater-than '()]
+         #:precedence-less-than [precedence-less-than '()]
          #:associativity [associativity #f])
   (define name-str (cond [(string? name-strsym) name-strsym]
                          [(symbol? name-strsym) (symbol->string name-strsym)]
@@ -1210,8 +1210,8 @@ This is an implementation of the same idea, but also adding support for operator
      parsers))
 
   (extend-chido-readtable 'left-recursive-nonterminating
-                          #:precidence-greater-than precidence-greater-than
-                          #:precidence-less-than precidence-less-than
+                          #:precedence-greater-than precedence-greater-than
+                          #:precedence-less-than precedence-less-than
                           #:associativity associativity
                           #:symbol-blacklist symbols-to-blacklist
                           #:operator operator-style
@@ -1222,8 +1222,8 @@ This is an implementation of the same idea, but also adding support for operator
   (syntax-parse stx
     [(_
       [name:id (~or (~optional (~seq #:layout layout-arg:id))
-                    (~optional (~seq #:precidence-greater-than [pgt:id ...]))
-                    (~optional (~seq #:precidence-less-than [plt:id ...]))
+                    (~optional (~seq #:precedence-greater-than [pgt:id ...]))
+                    (~optional (~seq #:precedence-less-than [plt:id ...]))
                     (~optional (~seq #:associativity (~or assoc-arg:id #f))))
                ...]
       ...
@@ -1244,8 +1244,8 @@ This is an implementation of the same idea, but also adding support for operator
                    rt
                    #:layout layout
                    #:associativity assoc
-                   #:precidence-greater-than gts
-                   #:precidence-less-than lts)
+                   #:precedence-greater-than gts
+                   #:precedence-less-than lts)
                   more)]))]))
 
 
@@ -1285,10 +1285,10 @@ This is an implementation of the same idea, but also adding support for operator
       (chido-readtable-add-mixfix-operators
        [_<^>_ #:associativity right]
        [_<*>_ #:associativity left
-              #:precidence-greater-than [<+>]
-              #:precidence-less-than [<^>]]
-       [<low-prefix>_ #:precidence-less-than [<+>]]
-       [_<low-postfix> #:precidence-less-than [<+>]]
+              #:precedence-greater-than [<+>]
+              #:precedence-less-than [<^>]]
+       [<low-prefix>_ #:precedence-less-than [<+>]]
+       [_<low-postfix> #:precedence-less-than [<+>]]
        (chido-readtable-add-mixfix-operator
         "_<+>_" #:associativity 'left
         (chido-readtable-add-raw-string-parser
@@ -1484,7 +1484,7 @@ This is an implementation of the same idea, but also adding support for operator
           (p*/r "[1 <*> 2 <+> 3]" r1)
           [list #'((#%chido-readtable-infix-operator <+> (#%chido-readtable-infix-operator <*> 1 2) 3))])
 
-   ;;; operator deep precidence issue
+   ;;; operator deep precedence issue
    (check se/datum?
           (p*/r "[#t <+> <low-prefix> #f <+> #t]" r1)
           [list #'((#%chido-readtable-infix-operator

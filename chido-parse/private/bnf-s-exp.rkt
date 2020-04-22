@@ -59,7 +59,7 @@
 ** need a way to specify filters
 ** need a way to bind variables in sequence
 ** need a way to tell when something is a left-or-right recursive operator
-** need a way to specify operator precidence and assoc
+** need a way to specify operator precedence and assoc
 ** need a way to specify return value of whole form
 ** need a way to declare that sub-forms have their results ignored or spliced
 *** IE there should be a default return value constructor that makes a syntax object with things ignored or spliced, but then a function that can take the syntax object components and do something.
@@ -92,8 +92,8 @@
               ...+
               (~or (~optional (~seq #:name name:str))
                    (~optional (~seq #:associativity assoc:expr))
-                   (~optional (~seq #:precidence-greater-than pgt:expr))
-                   (~optional (~seq #:precidence-less-than plt:expr))
+                   (~optional (~seq #:precedence-greater-than pgt:expr))
+                   (~optional (~seq #:precedence-less-than plt:expr))
                    (~optional (~seq #:result/stx result/stx:expr))
                    (~optional (~seq #:result/bare result/bare:expr))
                    )
@@ -195,8 +195,8 @@
          [symbol-blacklist ...]
          [prefix-op? postfix-op?]
          assoc
-         precidence-gt
-         precidence-lt
+         precedence-gt
+         precedence-lt
          result/stx
          result/bare] ...)
        (for/list ([alt (syntax->list #'(spec ...))])
@@ -231,16 +231,16 @@
                                 #'x)]
                 [else #'#f]))
             (define assoc #'(~? s.assoc #f))
-            (define precidence-gt #'(~? s.pgt '()))
-            (define precidence-lt #'(~? s.plt '()))
+            (define precedence-gt #'(~? s.pgt '()))
+            (define precedence-lt #'(~? s.plt '()))
             (define result/stx #'(~? s.result/stx #f))
             (define result/bare #'(~? s.result/bare #f))
             (list (datum->syntax alt name alt)
                   (list str-elems)
                   (list prefix-op? postfix-op?)
                   assoc
-                  precidence-gt
-                  precidence-lt
+                  precedence-gt
+                  precedence-lt
                   result/stx
                   result/bare)])))
      #'(let-syntax ([arm-name (syntax-parser [_ #'current-chido-readtable])])
@@ -284,8 +284,8 @@
                            ([parser alts]
                             [op-spec (list (list prefix-op? postfix-op?) ...)]
                             [a (list assoc ...)]
-                            [pgt (list precidence-gt ...)]
-                            [plt (list precidence-lt ...)])
+                            [pgt (list precedence-gt ...)]
+                            [plt (list precedence-lt ...)])
                    (define op-type
                      (match op-spec
                        [(list #f #f) #f]
@@ -302,8 +302,8 @@
                     extension-type parser
                     #:operator op-type
                     #:associativity a
-                    #:precidence-greater-than pgt
-                    #:precidence-less-than plt
+                    #:precedence-greater-than pgt
+                    #:precedence-less-than plt
                     rt))]
                 [rt/blacklisted (chido-readtable-blacklist-symbols
                                  (flatten (list (list 'symbol-blacklist ...)
@@ -380,10 +380,10 @@
     #:ignore-arm-name? #t
     ["n"]
     [test2 "+" test2 #:associativity 'left]
-    [test2 "*" test2 #:associativity 'left #:precidence-greater-than "+"]
-    [test2 "^" test2 #:associativity 'right #:precidence-greater-than "*"]
-    [test2 "++" #:precidence-less-than '("*") #:precidence-greater-than "+"]
-    ["if" test2 "then" test2 "else" test2 #:precidence-less-than "+"])
+    [test2 "*" test2 #:associativity 'left #:precedence-greater-than "+"]
+    [test2 "^" test2 #:associativity 'right #:precedence-greater-than "*"]
+    [test2 "++" #:precedence-less-than '("*") #:precedence-greater-than "+"]
+    ["if" test2 "then" test2 "else" test2 #:precedence-less-than "+"])
 
   (check-equal? (p*/r "n"
                       (chido-readtable->read1 test2))
@@ -584,7 +584,7 @@
                 [expression "+" expression #:associativity 'left]
                 [expression "*" expression
                             #:associativity 'right
-                            #:precidence-greater-than '("+")]]
+                            #:precedence-greater-than '("+")]]
     [id ["x"]])
 
   (check-equal? (wp*/r "pass" bnf-test-1)
@@ -616,7 +616,7 @@
      [statement ["break"]
                 [id ":=" expression]]
      [expression ["let" id "=" expression "in" expression
-                        #:precidence-greater-than '("*")]]
+                        #:precedence-greater-than '("*")]]
      [id]))
 
   (check-equal? (wp*/r "{ pass break 2 + let x = 5 in 2 + 2 }" bnf-test-2)
@@ -719,8 +719,8 @@
              #:attr nonquick #'[elem.nonquick
                                 ...
                                 (~? (~@ #:associativity assoc))
-                                (~? (~@ #:precidence-greater-than pgt))
-                                (~? (~@ #:precidence-less-than plt))
+                                (~? (~@ #:precedence-greater-than pgt))
+                                (~? (~@ #:precedence-less-than plt))
                                 (~? (~@ #:result/stx result))]))
   )
 
