@@ -1089,7 +1089,7 @@ This is an implementation of the same idea, but also adding support for operator
               [(symbol? wrapper) (datum->syntax
                                   #f (list (datum->syntax
                                             #f wrapper
-                                            (list src line col pos (length l-delim)))
+                                            (list src line col pos (string-length l-delim)))
                                            stx))]
               [(not wrapper) stx]
               [else (error 'raw-string-parser "bad wrapper value: ~a" wrapper)])
