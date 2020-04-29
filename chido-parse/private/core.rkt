@@ -84,7 +84,7 @@
 
 (require
  "port-broker.rkt"
- "util.rkt"
+ "ephemeron-cache.rkt"
  "parse-failure.rkt"
  "stream-flatten.rkt"
  "parameters.rkt"
@@ -608,7 +608,7 @@ The job->result-cache is a map from parser-job structs -> parser-stream OR parse
 ;;;;; Caches
 
 #|
-Scheduler cache:
+Scheduler cache (IE global cache containing scheduler objects):
 A weak hash port-broker->ephemeron with scheduler.
 |#
 (define the-scheduler-cache (make-weak-hasheq))
