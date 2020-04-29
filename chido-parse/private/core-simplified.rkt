@@ -44,7 +44,7 @@ Simplifications from the full core.rkt:
    derivation-list)
   #:transparent)
 
-
+;; For finding the end point of a derivation when one is not explicitly provided
 (define current-chido-parse-derivation-implicit-end (make-parameter #f))
 
 (define (make-parse-derivation result
@@ -58,10 +58,6 @@ Simplifications from the full core.rkt:
            #:parser parser
            #:scheduler scheduler
            #:start-position start-position)
-     (define pb (scheduler-port-broker scheduler))
-     (define source-name (port-broker-source-name pb))
-     (define line (port-broker-line pb start-position))
-     (define column (port-broker-column pb start-position))
      (define end-use (or end
                          (and (not (null? derivation-list))
                               (apply max
@@ -154,7 +150,6 @@ Simplifications from the full core.rkt:
    )
   #:transparent)
 
-
 (struct cycle-breaker-job (failure-job cycle-jobs) #:transparent)
 
 (define (job->result job)
@@ -172,11 +167,10 @@ Simplifications from the full core.rkt:
   (job k [dependency #:mutable])
   #:transparent)
 
-
-(define (job->scheduled-continuation j k dep)
+(define (make-scheduled-continuation-for-job j k dep)
   (scheduled-continuation j k dep))
 
-
+;; In this simplified version, parser names are solely for ease of debugging this implementation itself.
 (define (job->display job)
   (cond [(not job) #f]
         [(cycle-breaker-job? job) "cycle-breaker"]
@@ -189,22 +183,17 @@ Simplifications from the full core.rkt:
   (if (not p) p (parser-name p)))
 
 
-
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;;; Caches
 
-#|
-Scheduler cache (IE global cache containing scheduler objects):
-A weak hash port-broker->ephemeron with scheduler.
-|#
+;; Scheduler cache (IE global cache containing scheduler objects):
+;; A weak hash port-broker->ephemeron with scheduler.
 (define the-scheduler-cache (make-weak-hasheq))
 (define port-broker-scheduler
   (make-ephemeron-cache-lookup the-scheduler-cache make-scheduler))
 
-#|
-The job cache is a hash table mapping (list parser start-position) to job-0s.
-Jobs contain a (mutable) vector of their siblings.
-|#
+;; The job cache is a hash table mapping (list parser start-position) to job-0s.
+;; Jobs contain a (mutable) vector of their siblings.
 (define (make-job-cache) (make-hash))
 
 (define (get-job-0! s parser start-position)
@@ -257,7 +246,7 @@ Jobs contain a (mutable) vector of their siblings.
           (let ([parent-job (current-chido-parse-job)])
             (call-with-composable-continuation
              (λ (k)
-               (define sched-k (job->scheduled-continuation parent-job k job))
+               (define sched-k (make-scheduled-continuation-for-job parent-job k job))
                (set-parser-job-continuation/worker! parent-job sched-k)
                (abort-current-continuation chido-parse-prompt #f))
              chido-parse-prompt))
@@ -267,7 +256,6 @@ Jobs contain a (mutable) vector of their siblings.
                           (run-scheduler scheduler))])
             (set-scheduler-requested-job! scheduler #f)
             result))))
-
 
 (define (run-scheduler s)
   (define orig-job (scheduler-requested-job s))
@@ -306,13 +294,9 @@ Jobs contain a (mutable) vector of their siblings.
                    (find-work s new-blocked new-to-check)])]
            [#f j]))))
 
-
-
 (define (fail-smallest-cycle! scheduler)
-  #|
-  TODO - better name.
-  This isn't failing the smallest cycle necessarily, but it is failing the job in a cycle that first depends back on something earlier in the chain to the root goal.
-  |#
+  ;; TODO - better name.
+  ;; This isn't failing the smallest cycle necessarily, but it is failing the job in a cycle that first depends back on something earlier in the chain to the root goal.
   (define (rec goal jobs)
     (match goal
       [(s/kw alt-worker #:job job #:remaining-jobs remaining-jobs)
@@ -329,9 +313,6 @@ Jobs contain a (mutable) vector of their siblings.
            (rec (parser-job-continuation/worker dependency)
                 (cons job jobs)))]))
   (rec (parser-job-continuation/worker (scheduler-requested-job scheduler)) '()))
-
-
-
 
 (define (schedule-job! scheduler job)
   (when (job->result job)
@@ -445,15 +426,11 @@ Jobs contain a (mutable) vector of their siblings.
             (begin (cache-result! scheduler job result)
                    (run-scheduler scheduler))))))
 
-
 (define (cache-result! scheduler job result)
   (if (proc-parser? (parser-job-parser job))
       (cache-result!/procedure-job scheduler job result)
-      (cache-result!/alternate-job scheduler job result)))
-
-(define (cache-result!/alternate-job scheduler job result)
-  ;; This version only gets pre-sanitized results, and is straightforward.
-  (set-parser-job-result! job result))
+      ;; Alt-parsers get pre-sanitized results
+      (set-parser-job-result! job result)))
 
 (define (cache-result!/procedure-job scheduler job result)
   ;; Clear the result-stream, if there is one, because it's not needed anymore.
@@ -477,9 +454,6 @@ Jobs contain a (mutable) vector of their siblings.
      (set-parser-job-result! job wrapped-result)]
     [else (error 'chido-parse "job ~a returned non-derivation: ~v"
                  (job->display job) result)]))
-
-
-
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;;; Parsing outer API
@@ -528,9 +502,8 @@ Jobs contain a (mutable) vector of their siblings.
     new-derivation)
   (parse-inner direct-recursive-parse-core port parser start-use))
 
-
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;;;; parse-stream stuff
+;;;; for/parse stuff
 ;;;; I'm putting this stuff inline because not supporting chido-parse-parameters simplifies the implementation of for/parse.
 
 #|
@@ -560,8 +533,8 @@ The parse*-direct function needs its own continuation prompt.  When called durin
      #'(for/parse-proc (λ (arg-name) body ...)
                        (λ () input-stream))]))
 
-
-
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;;; Tests
 
 (module+ test
   (define s1 "aaaaa")
@@ -631,4 +604,3 @@ The parse*-direct function needs its own continuation prompt.  When called durin
 
 
   )
-

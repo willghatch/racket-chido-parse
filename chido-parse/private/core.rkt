@@ -587,7 +587,7 @@ The job->result-cache is a map from parser-job structs -> parser-stream OR parse
   #:transparent)
 
 
-(define (job->scheduled-continuation j k dep)
+(define (make-scheduled-continuation-for-job j k dep)
   (scheduled-continuation j k dep #f))
 
 
@@ -803,7 +803,8 @@ But I still need to encapsulate the port and give a start position.
               (inc-potential-left-recursion!)
               (call-with-composable-continuation
                (λ (k)
-                 (define sched-k (job->scheduled-continuation parent-job k job))
+                 (define sched-k
+                   (make-scheduled-continuation-for-job parent-job k job))
                  (set-parser-job-continuation/worker! parent-job sched-k)
                  (push-parser-job-dependent! job sched-k)
                  ;(push-hint! scheduler sched-k)
