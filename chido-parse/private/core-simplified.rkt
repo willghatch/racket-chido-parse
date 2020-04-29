@@ -913,13 +913,6 @@ The job cache is a multi-level dictionary with the following keys / implementati
     new-derivation)
   (parse-inner direct-recursive-parse-core port parser start-use))
 
-#|
-TODO
-|#
-;(define (parse TODO) TODO)
-;(define (parse* TODO) TODO)
-;(define (whole-parse TODO) TODO)
-;(define (whole-parse* TODO) TODO)
 
 
 (module+ test
@@ -935,7 +928,7 @@ TODO
                                #:end (add1 pos)
                                #:derivations '())
         (make-parse-failure #:message "Didn't match.")))
-  (define a1-parser-obj (make-proc-parser #:name "a" #:prefix "" a1-parser-proc))
+  (define a1-parser-obj (proc-parser "a" a1-parser-proc))
 
   (define (Aa-parser-proc port)
     (for/parse
@@ -943,53 +936,53 @@ TODO
      (for/parse
       ([d/a (parse* port a1-parser-obj
                     #:start d/A)])
-      (make-parse-derivation (λ args (string-append (parse-derivation-result! d/A)
-                                                    (parse-derivation-result! d/a)))
+      (make-parse-derivation (string-append (parse-derivation-result d/A)
+                                            (parse-derivation-result d/a))
                              #:derivations (list d/A d/a)))))
 
-  (define Aa-parser-obj (make-proc-parser #:name "Aa" #:prefix "" Aa-parser-proc))
+  (define Aa-parser-obj (proc-parser "Aa" Aa-parser-proc))
 
 
-  (define A-parser (make-alt-parser "A"
-                                    (list
-                                     Aa-parser-obj
-                                     a1-parser-obj)))
+  (define A-parser (alt-parser "A"
+                               (list
+                                Aa-parser-obj
+                                a1-parser-obj)))
   (define (get-A-parser) A-parser)
 
   (define results1 (parse* p1 A-parser))
-  (check-equal? (map parse-derivation-result! (stream->list results1))
+  (check-equal? (map parse-derivation-result (stream->list results1))
                 (list "a" "aa" "aaa" "aaaa" "aaaaa"))
 
 
   (define (Aa-parser-proc/direct port)
     (define d/A (parse*-direct port (get-A-parser/direct)))
     (define d/a (parse*-direct port a1-parser-obj))
-    (make-parse-derivation (λ args (string-append (parse-derivation-result! d/A)
-                                                  (parse-derivation-result! d/a)))
+    (make-parse-derivation (string-append (parse-derivation-result d/A)
+                                          (parse-derivation-result d/a))
                            #:derivations (list d/A d/a)))
   (define Aa-parser-obj/direct
-    (make-proc-parser #:name "Aa" #:prefix "" Aa-parser-proc/direct))
-  (define A-parser/direct (make-alt-parser "A"
-                                           (list
-                                            Aa-parser-obj/direct
-                                            a1-parser-obj)))
+    (proc-parser "Aa" Aa-parser-proc/direct))
+  (define A-parser/direct (alt-parser "A"
+                                      (list
+                                       Aa-parser-obj/direct
+                                       a1-parser-obj)))
   (define (get-A-parser/direct) A-parser/direct)
 
   (define results2 (parse* p1 A-parser/direct))
-  (check-equal? (map parse-derivation-result! (stream->list results2))
+  (check-equal? (map parse-derivation-result (stream->list results2))
                 (list "a" "aa" "aaa" "aaaa" "aaaaa"))
 
   (define c3-parser
-    (make-proc-parser #:name "c3-parser" (λ (port) (read-string 3 port))))
+    (proc-parser "c3-parser" (λ (port) (read-string 3 port))))
   (check-equal?
-   (map parse-derivation-result!
+   (map parse-derivation-result
         (stream->list
          (parse* (open-input-string "abc")
                  c3-parser)))
    '("abc"))
 
   (check-equal?
-   (map parse-derivation-result!
+   (map parse-derivation-result
         (stream->list
          (parse* (open-input-string "◊")
                  "◊")))
