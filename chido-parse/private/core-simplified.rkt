@@ -11,7 +11,7 @@ Simplifications from the full core.rkt:
 * no chido-parse-parameters
 
 * TODO - maybe switch to string input instead of ports (needs a change from parsers being (-> port derivation) to (-> string position derivation))
-* TODO - maybe simplify the caching
+* TODO - maybe simplify the caching -- eg. sibling jobs are stored in a vector in the job record itself
 |#
 
 
@@ -132,16 +132,13 @@ Simplifications from the full core.rkt:
 
 
 (struct scheduler
-  (port-broker requested-job job-info->job-cache)
-  #:mutable
+  (port-broker [requested-job #:mutable] job-cache)
   #:transparent)
 (define (make-scheduler port-broker)
-  (scheduler port-broker #f (make-start-position-cache)))
+  (scheduler port-broker #f (make-job-cache)))
 
 (struct parser-job
-  (
-   ;; parser is either a parser struct or an alt-parser struct
-   parser
+  (parser
    scheduler
    start-position
    result-index
@@ -205,67 +202,23 @@ A weak hash port-broker->ephemeron with scheduler.
   (make-ephemeron-cache-lookup the-scheduler-cache make-scheduler))
 
 #|
-The job cache is a multi-level dictionary with the following keys / implementations:
-* start-position / gvector
-* parser / mutable hasheq
+The job cache is a hash table mapping (list parser start-position) to job-0s.
+Jobs contain a (mutable) vector of their siblings.
 |#
-(define (make-start-position-cache)
-  (make-gvector #:capacity 10000))
-(define (make-parser-cache)
-  (make-hasheq))
-(define (make-cp-params-cache)
-  (make-hash))
-
+(define (make-job-cache) (make-hash))
 
 (define (get-job-0! s parser start-position)
-  (define (make-fresh-parser-job usable)
-    (define siblings-vec (make-gvector))
-    (define job (parser-job usable s start-position 0 siblings-vec #f #f #f #f))
-    (gvector-add! siblings-vec job)
-    job)
-  (define (traverse-cache parser)
-    ;; Traverse the cache.  If no job is found, it updates the cache with a job.
-    ;; Either way it returns a job object.
-    ;; Each level of the cache may have a literal job object or a layer of caching.
-    ;; A layer of caching may be a gvector or a hash table.
-    (define (job-match? j)
-      (eq? parser (parser-job-parser j)))
-    (define c/start-pos (scheduler-job-info->job-cache s))
-    (define start-pos-referenced
-      (and (< start-position (gvector-count c/start-pos))
-           (gvector-ref c/start-pos start-position)))
-    (define (start-pos-add-cache-layer! old-job)
-      (define parser-cache-layer (make-parser-cache))
-      (define new-job (make-fresh-parser-job parser))
-      (hash-set! parser-cache-layer (parser-job-parser old-job) old-job)
-      (hash-set! parser-cache-layer parser new-job)
-      (gvector-set! c/start-pos start-position parser-cache-layer)
-      new-job)
-    (match start-pos-referenced
-      [#f
-       ;; extend gvector out to start position
-       (for ([i (in-range (gvector-count c/start-pos)
-                          (add1 start-position))])
-         (gvector-add! c/start-pos #f))
-       ;; add the parser to the cache
-       (define new-job (make-fresh-parser-job parser))
-       (gvector-set! c/start-pos start-position new-job)
-       new-job]
-      [(? parser-job?) (if (job-match? start-pos-referenced)
-                           start-pos-referenced
-                           (start-pos-add-cache-layer! start-pos-referenced))]
-      [else
-       (define c/parser start-pos-referenced)
-       (define parser-referenced (hash-ref c/parser parser #f))
-       (match parser-referenced
-         [#f
-          (define new-job (make-fresh-parser-job parser))
-          (hash-set! c/parser parser new-job)
-          new-job]
-         [(? parser-job?) parser-referenced])]))
-
   (define usable (parser->usable parser))
-  (traverse-cache usable))
+  (define cache (scheduler-job-cache s))
+  (define key (list usable start-position))
+  (define j-maybe (hash-ref cache key #f))
+  (or j-maybe
+      (let* ([siblings-vec (make-gvector)]
+             [fresh-job (parser-job usable s start-position 0
+                                    siblings-vec #f #f #f #f)])
+        (gvector-add! siblings-vec fresh-job)
+        (hash-set! cache key fresh-job)
+        fresh-job)))
 
 (define (get-next-job! job)
   (match job
