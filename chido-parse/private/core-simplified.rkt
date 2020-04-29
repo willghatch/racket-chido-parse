@@ -16,10 +16,7 @@ Simplifications from the full core.rkt:
 (require
  "port-broker.rkt"
  "util.rkt"
- "parse-failure.rkt"
  "stream-flatten.rkt"
- "parameters.rkt"
- "trie.rkt"
  "parse-stream.rkt"
  racket/stream
  racket/port
@@ -198,7 +195,7 @@ The job->result-cache is a map from parser-job structs -> parser-stream OR parse
 
 
 (define (job->scheduled-continuation j k dep)
-  (scheduled-continuation j k dep #f))
+  (scheduled-continuation j k dep))
 
 
 (define (job->display job)
@@ -238,7 +235,7 @@ The job cache is a multi-level dictionary with the following keys / implementati
   (make-hash))
 
 
-(define (get-job-0! s parser cp-params start-position)
+(define (get-job-0! s parser start-position)
   (define (make-fresh-parser-job usable)
     (define siblings-vec (make-gvector))
     (define job (parser-job usable s start-position 0 siblings-vec #f #f #f #f))
@@ -348,7 +345,7 @@ The job cache is a multi-level dictionary with the following keys / implementati
      (define next-job (find-work s '() (list orig-job)))
      (if (not next-job)
          (begin (fail-smallest-cycle! s) (run-scheduler s))
-         (schedule-job! next-job))]))
+         (schedule-job! s next-job))]))
 
 (define (find-work s blocked-jobs jobs-to-check)
   ;; Returns #f if no work is found
@@ -416,7 +413,7 @@ The job cache is a multi-level dictionary with the following keys / implementati
         (define inner-ready-job (findf job->result remaining-jobs))
         (when (not inner-ready-job)
           (error 'schedule-job! "scheduled an alt-job that wasn't ready: ~a" (job->display job)))
-        (define result (job->result ready-job))
+        (define result (job->result inner-ready-job))
         (define other-remaining-jobs (remq inner-ready-job remaining-jobs))
         (define new-remaining-jobs
           (if (parse-failure? result)
@@ -428,8 +425,7 @@ The job cache is a multi-level dictionary with the following keys / implementati
           [(? parse-failure?) (void)]
           [(? parse-stream?)
            (let ([result-contents (stream-first result)]
-                 [this-next-job (get-next-job! job)]
-                 [dep-next-job (get-next-job! ready-job)])
+                 [this-next-job (get-next-job! job)])
              (define result-stream
                (parse-stream result-contents this-next-job scheduler))
              (cache-result! scheduler job result-stream)
@@ -510,12 +506,12 @@ The job cache is a multi-level dictionary with the following keys / implementati
                        (stream-flatten result))))
               chido-parse-prompt
               result-loop))
-            (begin (cache-result-and-ready-dependents! scheduler job result)
+            (begin (cache-result! scheduler job result)
                    (run-scheduler scheduler))))))
 
 
 (define (cache-result! scheduler job result)
-  (if (proc-parser? p)
+  (if (proc-parser? (parser-job-parser job))
       (cache-result!/procedure-job scheduler job result)
       (cache-result!/alternate-job scheduler job result)))
 
@@ -537,7 +533,7 @@ The job cache is a multi-level dictionary with the following keys / implementati
      ;; will never itself return a stream.
      (define next-job (get-next-job! job))
      (set-parser-job-result-stream! next-job result)
-     (cache-result!/procedure-job scheduler job (stream-first results))]
+     (cache-result!/procedure-job scheduler job (stream-first result))]
     [(s/kw parse-derivation)
      (define next-job (get-next-job! job))
      (define wrapped-result
@@ -555,16 +551,12 @@ The job cache is a multi-level dictionary with the following keys / implementati
   (let-values ([(line col pos) (port-next-location p)]) pos))
 
 (define (parse-inner core-proc port/pbw parser start)
-  (define pb (if (port-broker-wrap? port/pbw)
-                 (port-broker-wrap-broker port/pbw)
-                 (or (port->port-broker port/pbw)
-                     (port-broker port/pbw))))
+  (define pb (or (port->port-broker port/pbw)
+                 (port-broker port/pbw)))
   (define start-pos (match start
                       [(? number?) start]
                       [(? parse-derivation?) (parse-derivation-end-position start)]
-                      [#f (if (port-broker-wrap? port/pbw)
-                              (port-broker-wrap-position port/pbw)
-                              (port->pos port/pbw))]))
+                      [#f (port->pos port/pbw)]))
   (core-proc pb parser start-pos))
 
 (define (parse* port/pbw parser
@@ -572,7 +564,6 @@ The job cache is a multi-level dictionary with the following keys / implementati
   (parse-inner enter-the-parser
                (cond [(string? port/pbw) (open-input-string port/pbw)]
                      [(input-port? port/pbw) port/pbw]
-                     [(port-broker-wrap? port/pbw) port/pbw]
                      [else (error 'parse* "bad input: ~v" port/pbw)])
                parser
                start))
@@ -585,7 +576,7 @@ The job cache is a multi-level dictionary with the following keys / implementati
      #'(for/parse-proc (λ (arg-name) body ...)
                        (λ () input-stream)
                        (~? failure-arg
-                           (λ (f) f (make-parse-failure #:inner-failure f))))]))
+                           (λ (f) (parse-failure))))]))
 
 (define (parse*-direct port parser
                       #:start [start #f]
@@ -626,7 +617,7 @@ The job cache is a multi-level dictionary with the following keys / implementati
         (make-parse-derivation "a"
                                #:end (add1 pos)
                                #:derivations '())
-        (make-parse-failure #:message "Didn't match.")))
+        (parse-failure)))
   (define a1-parser-obj (proc-parser "a" a1-parser-proc))
 
   (define (Aa-parser-proc port)
