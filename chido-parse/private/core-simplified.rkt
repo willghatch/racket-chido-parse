@@ -362,6 +362,7 @@ The job cache is a multi-level dictionary with the following keys / implementati
                    (find-work s new-blocked new-to-check)])]
            [(s/kw alt-worker #:remaining-jobs remaining-jobs)
             (cond [(null? remaining-jobs) j]
+                  [(findf job->result remaining-jobs) j]
                   [else
                    (define new-blocked (cons j blocked-jobs))
                    (define add-to-check (filter (λ (x) (not (memq x new-blocked)))
@@ -392,7 +393,7 @@ The job cache is a multi-level dictionary with the following keys / implementati
               (cycle-breaker-job dependency jobs)))
            (rec (parser-job-continuation/worker dependency)
                 (cons job jobs)))]))
-  (rec (scheduler-requested-job scheduler) '()))
+  (rec (parser-job-continuation/worker (scheduler-requested-job scheduler)) '()))
 
 
 
@@ -409,6 +410,10 @@ The job cache is a multi-level dictionary with the following keys / implementati
      (match k/worker
        [(s/kw scheduled-continuation #:job job #:dependency dependency #:k k)
         (do-run! scheduler k job #t (job->result dependency))]
+       [(s/kw alt-worker #:job job #:remaining-jobs (list))
+        ;; Finished alt-worker.
+        (cache-result! scheduler job (parse-failure))
+        (run-scheduler scheduler)]
        [(s/kw alt-worker #:job job #:remaining-jobs remaining-jobs)
         (define inner-ready-job (findf job->result remaining-jobs))
         (when (not inner-ready-job)
@@ -432,10 +437,6 @@ The job cache is a multi-level dictionary with the following keys / implementati
              (set-alt-worker-job! k/worker this-next-job)
              (set-parser-job-continuation/worker! this-next-job k/worker)
              (set-parser-job-continuation/worker! job #f))])
-        (run-scheduler scheduler)]
-       [(s/kw alt-worker #:job job #:remaining-jobs (list))
-        ;; Finished alt-worker.
-        (cache-result! scheduler job (parse-failure))
         (run-scheduler scheduler)]
        [#f
         ;; no k/worker case
@@ -526,7 +527,7 @@ The job cache is a multi-level dictionary with the following keys / implementati
     [(s/kw parse-failure)
      (set-parser-job-result! job result)]
     [(? (λ (x) (and (stream? x) (stream-empty? x))))
-     (parse-failure)]
+     (set-parser-job-result! job (parse-failure))]
     [(? stream?)
      ;; Recur with stream-first, setting the stream as the result-stream.
      ;; Note that because we have already flattened result streams, stream-first
@@ -663,7 +664,7 @@ The job cache is a multi-level dictionary with the following keys / implementati
                 (list "a" "aa" "aaa" "aaaa" "aaaaa"))
 
   (define c3-parser
-    (proc-parser "c3-parser" (λ (port) (read-string 3 port))))
+    (proc-parser "c3-parser" (λ (port) (make-parse-derivation (read-string 3 port)))))
   (check-equal?
    (map parse-derivation-result
         (stream->list
@@ -671,12 +672,6 @@ The job cache is a multi-level dictionary with the following keys / implementati
                  c3-parser)))
    '("abc"))
 
-  (check-equal?
-   (map parse-derivation-result
-        (stream->list
-         (parse* (open-input-string "◊")
-                 "◊")))
-   (list "◊"))
 
   )
 
