@@ -24,7 +24,7 @@
 (require
  racket/match
  data/gvector
- "util.rkt"
+ "ephemeron-cache.rkt"
  )
 
 (define info-byte-offset-offset 0)

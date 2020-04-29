@@ -16,7 +16,7 @@ Simplifications from the full core.rkt:
 
 (require
  "port-broker.rkt"
- "util.rkt"
+ "ephemeron-cache.rkt"
  "stream-flatten.rkt"
  racket/stream
  racket/match
