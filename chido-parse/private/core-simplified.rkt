@@ -11,6 +11,7 @@ Simplifications from the full core.rkt:
 * no chido-parse-parameters
 
 * TODO - maybe switch to string input instead of ports (needs a change from parsers being (-> port derivation) to (-> string position derivation))
+* TODO - maybe simplify the caching
 |#
 
 
@@ -130,19 +131,6 @@ Simplifications from the full core.rkt:
      (error 'stream-rest "empty stream"))])
 
 
-
-
-
-#|
-Schedulers keep track of parse work that needs to be done and have caches of results.
-
-The demand stack can contain:
-* scheduled-continuations, which have an outer job that they represent (or #f for the original outside caller) and a single dependency.
-* alt-workers, which are special workers for alt-parsers.  Alt-workers are spawned instead of normal continuations for alt-parsers.
-
-The job-cache is a multi-tier hash of parser->extra-args-list->start-position->result-number->parser-job
-The job->result-cache is a map from parser-job structs -> parser-stream OR parse-error
-|#
 (struct scheduler
   (port-broker requested-job job-info->job-cache)
   #:mutable
@@ -209,7 +197,7 @@ The job->result-cache is a map from parser-job structs -> parser-stream OR parse
 ;;;;; Caches
 
 #|
-Scheduler cache:
+Scheduler cache (IE global cache containing scheduler objects):
 A weak hash port-broker->ephemeron with scheduler.
 |#
 (define the-scheduler-cache (make-weak-hasheq))
