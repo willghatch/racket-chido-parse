@@ -20,18 +20,13 @@ Simplifications from the full core.rkt:
  "stream-flatten.rkt"
  "parse-stream.rkt"
  racket/stream
- racket/port
  racket/match
- racket/struct
- racket/string
- racket/exn
  data/gvector
  (rename-in kw-make-struct
             [make/kw s/kw])
  (for-syntax
   racket/base
   syntax/parse
-  racket/syntax
   ))
 
 (module+ test
