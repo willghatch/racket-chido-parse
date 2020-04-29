@@ -8,7 +8,7 @@ Simplifications from the full core.rkt:
 * no custom parser structs or raw strings (but still supporting parser thunks because they are useful to “tie the knot”)
 * the scheduler always captures continuations, not checking whether left recursion is possible
 * jobs don't track their dependents to update them automatically - we just do a search for available work each time we enter the scheduler
-* TODO - no chido-parse-parameters
+* no chido-parse-parameters
 * TODO - maybe switch to string input instead of ports (needs a change from parsers being (-> port derivation) to (-> string position derivation))
 |#
 
@@ -290,7 +290,7 @@ The job cache is a multi-level dictionary with the following keys / implementati
 
 (define (get-next-job! job)
   (match job
-    [(s/kw parser-job #:parser parser #:scheduler scheduler #:cp-params cp-params
+    [(s/kw parser-job #:parser parser #:scheduler scheduler
            #:start-position start-position #:result-index result-index
            #:siblings siblings #:port port)
      (define next-index (add1 result-index))
@@ -311,8 +311,7 @@ The job cache is a multi-level dictionary with the following keys / implementati
 
 (define (enter-the-parser port-broker parser start-position)
   (define s (port-broker-scheduler port-broker))
-  (define cp-params (current-chido-parse-parameters))
-  (define j (get-job-0! s parser cp-params start-position))
+  (define j (get-job-0! s parser start-position))
   (enter-the-parser/job s j))
 
 (define (enter-the-parser/job scheduler job)
@@ -338,153 +337,42 @@ The job cache is a multi-level dictionary with the following keys / implementati
             result))))
 
 
-
-(define (find-work s job-stack)
-  ;; Returns a hint stack for an actionable job -- IE a list where the
-  ;; first element is an actionable job, the second element is a job
-  ;; that depends on the first, etc
-  ;; OR
-  ;; Returns #f if there is no actionable job.
-  ;;
-  ;; s is a scheduler
-  ;; job-stacks is a list of these dependency stacks
-
-  #|
-  TODO - fail-chain-dependent!, do-alt-fail!, and anything about finding the last alt was an attempt at optimizing that wasn't very useful, so it's all commented out or unused.  Maybe I should delete it.  At any rate I want the code checked into my repo history.  Maybe later I'll realize that the code is useful but I did something that ruined it.  Or maybe I'll delete it later.  I don't know.
-  |#
-  #;(define (fail-chain-dependent! job stack)
-    (define dep
-      (match (parser-job-continuation/worker job)
-        [(s/kw scheduled-continuation #:dependency dep) dep]
-        [else (error
-               'find-work
-               "TODO - this shouldn't happen -- alt-job in fail-chain-dependent")]))
-    (if (memq dep stack)
-        (match (parser-job-continuation/worker dep)
-          [(and sk (s/kw scheduled-continuation #:dependency dep-dep))
-           (set-scheduled-continuation-dependency! sk
-                                                   (cycle-breaker-job dep-dep))
-           (set-scheduled-continuation-ready?! sk #t)]
-          [(and aw (s/kw alt-worker))
-           (set-alt-worker-remaining-jobs! aw '())])
-        (fail-chain-dependent! dep (cons dep stack))))
-  #;(define (do-alt-fail! alt-stack)
-    (define last-alt (car alt-stack))
-    (match (parser-job-continuation/worker last-alt)
-      [(s/kw alt-worker #:remaining-jobs remaining-jobs)
-       (for ([rj remaining-jobs])
-         (fail-chain-dependent! rj alt-stack))
-       (find-work s alt-stack)]))
-
-  (inc-find-work!)
-  (let loop ([stacks (list job-stack)]
-             [blocked '()]
-             [last-alt-stack #f #;(get-last-alt-stack job-stack)])
-    (inc-find-work-loop!)
-    (if (null? stacks)
-        #f
-        #;(if last-alt-stack
-            (do-alt-fail! last-alt-stack)
-            #f)
-        (let* ([jstack (car stacks)]
-               [j (car jstack)]
-               #;[last-alt (and last-alt-stack (car last-alt-stack))]
-               #;[alt-fail (and last-alt (not (memq last-alt jstack)))])
-          (cond #;[alt-fail (do-alt-fail! last-alt-stack)]
-                [(memq j blocked) (loop (cdr stacks) blocked last-alt-stack)]
-                ;; if it has a continuation/worker, add dependencies to jobs
-                [else (match (parser-job-continuation/worker j)
-                        [(s/kw scheduled-continuation
-                               #:dependency dependency
-                               #:ready? ready?)
-                         (cond [ready? jstack]
-                               [else (loop (cons (cons dependency jstack)
-                                                 (cdr stacks))
-                                           (cons j blocked)
-                                           last-alt-stack)])]
-                        [(s/kw alt-worker
-                               #:ready-jobs ready-jobs
-                               #:remaining-jobs remaining-jobs)
-                         (cond [(not (null? ready-jobs)) jstack]
-                               [(null? remaining-jobs) jstack]
-                               [else (loop (append (map (λ (rj) (cons rj jstack))
-                                                        remaining-jobs)
-                                                   (cdr stacks))
-                                           (cons j blocked)
-                                           jstack)])]
-                        [#f jstack])])))))
-
-(define (find-and-run-actionable-job s hint-stack using-hint?)
-  (define (run-actionable-job? j)
-    ;; TODO - this is probably not great, but for now I just want to get things working again...
-    (if (job->result j)
-        (run-scheduler s)
-        (run-actionable-job s j)))
-  (let* ([actionable-job-stack (find-work s hint-stack)]
-         [actionable-job (and actionable-job-stack (car actionable-job-stack))])
-    (when (not actionable-job) (inc-actionable-job-false!))
-    (and actionable-job-stack (set-scheduler-hint-stack-stack!
-                               s (cons actionable-job-stack
-                                       (cdr (scheduler-hint-stack-stack s)))))
-    (cond
-      [(and actionable-job (job->result actionable-job))
-       (pop-hint! s)
-       (ready-dependents! actionable-job)
-       (run-scheduler s)]
-      [actionable-job (run-actionable-job? actionable-job)]
-      [using-hint?
-       ;; try to find work in another part of the work tree...
-       ;; TODO - this should always be able to make progress, so the else case should not be necessary...
-       #;(define new-work-stack
-         (get-last-alt-stack (car (scheduler-hint-stack-stack s))))
-       (set-scheduler-hint-stack-stack!
-        s (cons #;new-work-stack '() (cdr (scheduler-hint-stack-stack s))))
-       (run-scheduler s)]
-      [else
-       ;; TODO - This should be optimized so that if `find-work` also finds this cycle...
-       (fail-smallest-cycle! s)
-       (run-scheduler s)])))
-
 (define (run-scheduler s)
-  (define done-k (car (scheduler-done-k-stack s)))
-  (define scheduler-done? (scheduled-continuation-ready? done-k))
+  (define orig-job (scheduler-requested-job s))
+  (define done?/result (job->result orig-job))
   (cond
-    [scheduler-done?
+    [done?/result
      ;; Escape the mad world of delimited-continuation-based parsing!
-     (job->result (scheduled-continuation-dependency done-k))]
+     done?/result]
     [else
-     (inc-run-scheduler!)
-     (define using-hint? #t)
-     (when (null? (car (scheduler-hint-stack-stack s)))
-       (inc-no-hint!)
-       (set! using-hint? #f)
-       (push-hint! s (car (scheduler-top-job-stack s))))
-     (define hint-stack (car (scheduler-hint-stack-stack s)))
-     (define hint-worker (parser-job-continuation/worker (car hint-stack)))
-     (define (run-actionable-job? j)
-       ;; TODO - this is probably not great, but for now I just want to get things working again...
-       (if (job->result j)
-           (begin (pop-hint! s)
-                  (run-scheduler s))
-           (run-actionable-job s j)))
-     (match hint-worker
-       [#f (if (job->result (car hint-stack))
-               (begin (pop-hint! s)
-                      (run-scheduler s))
-               (run-actionable-job? (car hint-stack)))]
-       [(s/kw scheduled-continuation #:job job #:ready? #t)
-        ;(pop-hint! s)
-        (run-actionable-job? job)]
-       [(s/kw scheduled-continuation)
-        (find-and-run-actionable-job s hint-stack using-hint?)]
-       [(s/kw alt-worker #:job job #:ready-jobs (list ready-job rjs ...))
-        (run-actionable-job? job)]
-       [(s/kw alt-worker #:job job #:remaining-jobs (list))
-        (run-actionable-job? job)]
-       [(s/kw alt-worker)
-        ;; No ready jobs
-        (find-and-run-actionable-job s hint-stack using-hint?)]
-       )]))
+     (define next-job (find-work s '() (list orig-job)))
+     (if (not next-job)
+         (begin (fail-smallest-cycle! s) (run-scheduler s))
+         (schedule-job! next-job))]))
+
+(define (find-work s blocked-jobs jobs-to-check)
+  ;; Returns #f if no work is found
+  (and (not (null? jobs-to-check))
+       (let* ([j (car jobs-to-check)])
+         (match (parser-job-continuation/worker j)
+           [(s/kw scheduled-continuation #:dependency dependency)
+            (cond [(job->result dependency) j]
+                  [else
+                   (define new-blocked (cons j blocked-jobs))
+                   (define new-to-check (if (memq dependency new-blocked)
+                                            (cdr jobs-to-check)
+                                            (cons dependency (cdr jobs-to-check))))
+                   (find-work s new-blocked new-to-check)])]
+           [(s/kw alt-worker #:remaining-jobs remaining-jobs)
+            (cond [(null? remaining-jobs) j]
+                  [else
+                   (define new-blocked (cons j blocked-jobs))
+                   (define add-to-check (filter (λ (x) (not (memq x new-blocked)))
+                                                remaining-jobs))
+                   (define new-to-check (append add-to-check (cdr jobs-to-check)))
+                   (find-work s new-blocked new-to-check)])]
+           [#f j]))))
+
 
 
 (define (fail-smallest-cycle! scheduler)
@@ -504,200 +392,88 @@ The job cache is a multi-level dictionary with the following keys / implementati
            (begin
              (set-scheduled-continuation-dependency!
               goal
-              (cycle-breaker-job dependency jobs))
-             (set-scheduled-continuation-ready?! goal #t))
+              (cycle-breaker-job dependency jobs)))
            (rec (parser-job-continuation/worker dependency)
                 (cons job jobs)))]))
-  (rec (car (scheduler-done-k-stack scheduler)) '()))
+  (rec (scheduler-requested-job scheduler) '()))
 
-(define (prefix-fail! scheduler job)
-  (match job
-    [(s/kw parser-job #:parser p #:start-position pos #:result #f)
-     (define pb (scheduler-port-broker scheduler))
-     (cache-result-and-ready-dependents!
-      scheduler
-      job
-      (parse-failure p
-                     (format "prefix didn't match: ~v" (parser-prefix p))
-                     (port-broker-line pb pos)
-                     (port-broker-column pb pos)
-                     pos pos pos
-                     #f #f #f))]
-    [else (void)]))
 
-(define (string-job-finalize! scheduler job match?)
-  (match job
-    [(s/kw parser-job #:parser s #:start-position start-position)
-     (define result
-       (parameterize ([current-chido-parse-job job])
-         (if match?
-             (parse-stream
-              (make-parse-derivation s #:end (+ start-position
-                                                (string-length s)))
-              #f
-              scheduler)
-             (make-parse-failure #:message (format "literal didn't match: ~s" s)
-                                 #:position start-position))))
-     (cache-result-and-ready-dependents! scheduler job result)]))
 
-(define (run-actionable-job scheduler job)
-  ;(eprintf "running actionable job: ~a\n" (job->display job))
+
+(define (schedule-job! scheduler job)
   (when (job->result job)
     (error 'chido-parse
-           "internal error - run-actionable-job got a job that was already done: ~a"
+           "internal error - schedule-job! got a job that was already done: ~a"
            (job->display job)))
   (match job
     [(s/kw parser-job #:parser parser #:continuation/worker k/worker
            #:result-stream result-stream #:result-index result-index
-           #:start-position start-position #:cp-params cp-params)
+           #:start-position start-position)
      (match k/worker
        [(s/kw scheduled-continuation #:job job #:dependency dependency #:k k)
-        (do-run! scheduler
-                 k
-                 job
-                 #t
-                 (job->result dependency))]
-       [(s/kw alt-worker #:job job
-              #:ready-jobs (list ready-job rjs ...)
-              #:remaining-jobs remaining-jobs
-              #:failures failures)
-        (set-alt-worker-remaining-jobs! k/worker (remq ready-job remaining-jobs))
-        (set-alt-worker-ready-jobs! k/worker rjs)
+        (do-run! scheduler k job #t (job->result dependency))]
+       [(s/kw alt-worker #:job job #:remaining-jobs remaining-jobs)
+        (define inner-ready-job (findf job->result remaining-jobs))
+        (when (not inner-ready-job)
+          (error 'schedule-job! "scheduled an alt-job that wasn't ready: ~a" (job->display job)))
         (define result (job->result ready-job))
-        (cond
-          [(parse-failure? result)
-           (set-alt-worker-failures! k/worker (cons result failures))]
-          [(parse-stream? result)
+        (define other-remaining-jobs (remq inner-ready-job remaining-jobs))
+        (define new-remaining-jobs
+          (if (parse-failure? result)
+              other-remaining-jobs
+              (cons (get-next-job! inner-ready-job)
+                    other-remaining-jobs)))
+        (set-alt-worker-remaining-jobs! k/worker new-remaining-jobs)
+        (match result
+          [(? parse-failure?) (void)]
+          [(? parse-stream?)
            (let ([result-contents (stream-first result)]
                  [this-next-job (get-next-job! job)]
                  [dep-next-job (get-next-job! ready-job)])
              (define result-stream
                (parse-stream result-contents this-next-job scheduler))
-             (cache-result-and-ready-dependents! scheduler job result-stream)
-             (set-alt-worker-successful?! k/worker #t)
+             (cache-result! scheduler job result-stream)
              (set-alt-worker-job! k/worker this-next-job)
              (set-parser-job-continuation/worker! this-next-job k/worker)
-             (set-parser-job-continuation/worker! job #f)
-             (push-parser-job-dependent! dep-next-job k/worker)
-             (set-alt-worker-remaining-jobs!
-              k/worker
-              (cons dep-next-job (alt-worker-remaining-jobs k/worker)))
-             (when (job->result dep-next-job)
-               (set-alt-worker-ready-jobs!
-                k/worker
-                (cons dep-next-job (alt-worker-ready-jobs k/worker)))))]
-          [else
-           (error 'chido-parse
-                  "Internal error - alt-worker got a non-stream result: ~s"
-                  result)])
+             (set-parser-job-continuation/worker! job #f))])
         (run-scheduler scheduler)]
-       [(s/kw alt-worker #:job job
-              #:ready-jobs (list)
-              #:remaining-jobs (list))
+       [(s/kw alt-worker #:job job #:remaining-jobs (list))
         ;; Finished alt-worker.
-        ;; TODO - Right now a failure object is also an empty stream,
-        ;;        so it can serve both cases.  Should this change?
-        (define result (alt-worker->failure k/worker))
-        (cache-result-and-ready-dependents! scheduler job result)
+        (cache-result! scheduler job (parse-failure))
         (run-scheduler scheduler)]
        [#f
-        (cond [(stream? result-stream)
-               (do-run! scheduler
-                        (λ () (stream-rest result-stream))
-                        job
-                        #f #f)]
-              [(equal? 0 result-index)
-               (match parser
-                 [(s/kw proc-parser
-                        #:name name
-                        #:prefix prefix
-                        #:procedure procedure
-                        #:preserve-prefix? preserve-prefix?
-                        #:use-port? use-port?)
-                  (define port-broker (scheduler-port-broker scheduler))
-                  (define proc-start-position
-                    (if preserve-prefix?
-                        start-position
-                        (+ start-position (string-length prefix))))
-                  (define proc-input (if use-port?
-                                         (port-broker->port port-broker
-                                                            proc-start-position)
-                                         (port-broker-wrap port-broker
-                                                           proc-start-position)))
-                  (when use-port?
-                    (set-parser-job-port! job proc-input))
-                  ;; TODO - optimize this peek for alt parsers, at least...
-                  (if (port-broker-substring? port-broker start-position prefix)
-                      (do-run! scheduler
-                               (λ ()
-                                 (parameterize ([current-chido-parse-parameters
-                                                 cp-params])
-                                   (procedure proc-input)))
-                               job
-                               #f #f)
-                      (begin (prefix-fail! scheduler job)
-                             (run-scheduler scheduler)))]
-                 [(s/kw alt-parser #:trie trie #:parsers parsers)
-                  (define (mk-dep p)
-                    (define j (get-job-0! scheduler p cp-params start-position))
-                    (when (string? p) (string-job-finalize! scheduler j #t))
-                    j)
-                  (define pb (scheduler-port-broker scheduler))
-                  (define deps-with-matched-prefixes
-                    (let loop ([matches '()]
-                               [t trie]
-                               [pos start-position])
-                      (define new-matches (append (trie-values t) matches))
-                      (define new-trie (trie-step t (port-broker-char pb pos) #f))
-                      (if new-trie
-                          (loop new-matches new-trie (add1 pos))
-                          new-matches)))
-                  ;; We could fail all parses here, but if we just ignore them
-                  ;; instead it is significantly faster.
-                  #;(for ([p parsers])
-                      (when (not (memq p deps-with-matched-prefixes))
-                        (prefix-fail! scheduler (mk-dep p))))
-                  (define dep-jobs (map mk-dep deps-with-matched-prefixes))
-                  (define ready-deps (filter parser-job-result dep-jobs))
-                  (define unready-deps
-                    (filter (λ (x) (not (parser-job-result x))) dep-jobs))
-                  (define worker
-                    (alt-worker job unready-deps ready-deps '() #f))
-                  (for ([dep unready-deps])
-                    (push-parser-job-dependent! dep worker))
-                  (set-parser-job-continuation/worker! job worker)
-                  (cond [(not (null? ready-deps))
-                         ;; There is a result ready, so we just run this same job again to set the result.
-                         (run-actionable-job scheduler job)]
-                        [(and (not (null? unready-deps))
-                              (null? (cdr unready-deps))
-                              (job-immediately-actionable? (car unready-deps)))
-                         (run-actionable-job scheduler (car unready-deps))]
-                        [else (run-scheduler scheduler)])
-                  ;(push-hint! scheduler worker)
-                  ]
-                 [(? string?)
-                  (define s parser)
-                  (define pb (scheduler-port-broker scheduler))
-                  (define match?
-                    (port-broker-substring? pb start-position s))
-                  (string-job-finalize! scheduler job match?)
-                  (run-scheduler scheduler)])]
-              [else
-               ;; In this case there has been a result stream but it is dried up.
-               (define pb (scheduler-port-broker scheduler))
-               (define pos (parser-job-start-position job))
-               (let ([end-failure (parse-failure (parser-job-parser job)
-                                                 "No more results"
-                                                 (port-broker-line pb pos)
-                                                 (port-broker-column pb pos)
-                                                 pos pos pos
-                                                 #f #f #f)])
-                 (cache-result-and-ready-dependents! scheduler
-                                                     job
-                                                     end-failure)
-                 (set-parser-job-continuation/worker! job #f)
-                 (run-scheduler scheduler))])])]))
+        ;; no k/worker case
+        (cond
+          [(stream? result-stream)
+           ;; IE the case of a procedural parser with a result stream to force
+           (do-run! scheduler
+                    (λ () (stream-rest result-stream))
+                    job
+                    #f #f)]
+          [(equal? 0 result-index)
+           ;; IE the first run of a parser
+           (match parser
+             [(s/kw proc-parser #:procedure procedure)
+              (define proc-input (port-broker->port (scheduler-port-broker scheduler)
+                                                    start-position))
+              (set-parser-job-port! job proc-input)
+              (do-run! scheduler
+                       (λ () (procedure proc-input))
+                       job
+                       #f #f)]
+             [(s/kw alt-parser #:parsers parsers)
+              (define (mk-dep p)
+                (get-job-0! scheduler p start-position))
+              (define pb (scheduler-port-broker scheduler))
+              (define dep-jobs (map mk-dep parsers))
+              (define worker (alt-worker job dep-jobs))
+              (set-parser-job-continuation/worker! job worker)
+              (run-scheduler scheduler)])]
+          [else
+           ;; In this case there has been a result stream but it is dried up.
+           (cache-result! scheduler job (parse-failure))
+           (set-parser-job-continuation/worker! job #f)
+           (run-scheduler scheduler)])])]))
 
 (define (do-run! scheduler thunk/k job continuation-run? k-arg)
   (when (not job)
@@ -737,108 +513,39 @@ The job cache is a multi-level dictionary with the following keys / implementati
             (begin (cache-result-and-ready-dependents! scheduler job result)
                    (run-scheduler scheduler))))))
 
-(define (ready-dependents! job)
-  (for ([dep (parser-job-dependents job)])
-    (match dep
-      [(s/kw alt-worker #:ready-jobs ready-jobs)
-       (set-alt-worker-ready-jobs! dep (cons job ready-jobs))]
-      [(s/kw scheduled-continuation)
-       (set-scheduled-continuation-ready?! dep #t)]))
-  (set-parser-job-dependents! job '()))
 
-(define (cache-result-and-ready-dependents! scheduler job result)
-  (define p (parser-job-parser job))
-  (cond [(proc-parser? p)
-         (cache-result-and-ready-dependents!/procedure-job scheduler job result)]
-        [else
-         (cache-result-and-ready-dependents!/builtin scheduler job result)]))
+(define (cache-result! scheduler job result)
+  (if (proc-parser? p)
+      (cache-result!/procedure-job scheduler job result)
+      (cache-result!/alternate-job scheduler job result)))
 
-(define (cache-result-and-ready-dependents!/builtin scheduler job result)
+(define (cache-result!/alternate-job scheduler job result)
   ;; This version only gets pre-sanitized results, and is straightforward.
-  (when (and (not (parse-failure? result))
-             (not (parse-stream? result)))
-    (error 'chido-parse-cache-result-and-ready-dependents/builtin!
-           "trying to cache something for job ~s with a bad type: ~s\n"
-           (job->display job)
-           result))
-  (set-parser-job-result! job result)
-  (ready-dependents! job))
+  (set-parser-job-result! job result))
 
-(define (cache-result-and-ready-dependents!/procedure-job
-         scheduler job result)
+(define (cache-result!/procedure-job scheduler job result)
   ;; Clear the result-stream, if there is one, because it's not needed anymore.
   (set-parser-job-result-stream! job #f)
   (match result
     [(s/kw parse-failure)
-     (set-parser-job-result! job result)
-     (ready-dependents! job)]
+     (set-parser-job-result! job result)]
     [(? (λ (x) (and (stream? x) (stream-empty? x))))
-     ;; Turn it into a parse failure and recur.
-     (match job
-       [(s/kw parser-job #:parser parser #:start-position start-position)
-        (match parser
-          [(s/kw proc-parser #:name name)
-           (define failure
-             (let ([inner-failures (and (flattened-stream? result)
-                                        (flattened-stream-failures result))])
-               (match inner-failures
-                 [(or #f (list))
-                  (define pb (scheduler-port-broker scheduler))
-                  (parse-failure parser
-                                 "parse returned empty stream"
-                                 (port-broker-line pb start-position)
-                                 (port-broker-column pb start-position)
-                                 start-position start-position start-position
-                                 #f #f #f)]
-                 [(list one-fail) one-fail]
-                 [(list fail ...)
-                  (parameterize ([current-chido-parse-job job])
-                    (make-parse-failure #:failures fail))])))
-           (cache-result-and-ready-dependents!/procedure-job
-            scheduler
-            job
-            failure)])])]
+     (parse-failure)]
     [(? stream?)
-     ;; Recur with stream-first, setting the stream as the result-stream
+     ;; Recur with stream-first, setting the stream as the result-stream.
+     ;; Note that because we have already flattened result streams, stream-first
+     ;; will never itself return a stream.
      (define next-job (get-next-job! job))
      (set-parser-job-result-stream! next-job result)
-     (cache-result-and-ready-dependents!/procedure-job
-      scheduler job (reject-raw-results job (stream-first result)))]
+     (cache-result!/procedure-job scheduler job (stream-first results))]
     [(s/kw parse-derivation)
      (define next-job (get-next-job! job))
      (define wrapped-result
        (parse-stream result next-job scheduler))
-     (set-parser-job-result! job wrapped-result)
-     (ready-dependents! job)]
-    [else (cache-result-and-ready-dependents! scheduler
-                                              job
-                                              (reject-raw-results
-                                               job
-                                               result))]))
-
-(define (reject-raw-results job result)
-  (cond
-    [(parse-derivation? result) result]
-    [(and (not (parse-derivation? result))
-          (not (stream? result))
-          (not (procedure? result))
-          (parser-job-port job))
-     (let ([port-broker (scheduler-port-broker (parser-job-scheduler job))]
-           [start-position (parser-job-start-position job)])
-       (parse-derivation
-        result
-        #t ;; forced?
-        (parser-job-parser job)
-        (port-broker-source-name port-broker)
-        (port-broker-line port-broker
-                          start-position)
-        (port-broker-column port-broker
-                            start-position)
-        start-position
-        (port->pos (parser-job-port job))
-        '()))]
+     (set-parser-job-result! job wrapped-result)]
     [else (error 'chido-parse "job ~a returned non-derivation: ~v"
                  (job->display job) result)]))
+
 
 
 
@@ -890,7 +597,6 @@ The job cache is a multi-level dictionary with the following keys / implementati
   ;; This one lets the user get a single result back, but the return is actually a stream.
   (define (direct-recursive-parse-core pb parser core-start)
     (define job (current-chido-parse-job))
-    (define params (current-chido-parse-parameters))
     (define new-derivation
       (call-with-composable-continuation
        (λ (k)
@@ -898,14 +604,7 @@ The job cache is a multi-level dictionary with the following keys / implementati
           parse*-direct-prompt
           ;; TODO - better failure handling and propagation
           (λ () (for/parse ([d (parse* port parser #:start core-start)]
-                            #:failure (λ (f)
-                                        (parameterize
-                                            ([current-chido-parse-job job]
-                                             [current-chido-parse-parameters params])
-                                          (or (and failure-arg
-                                                   (failure-arg f))
-                                              (make-parse-failure
-                                               #:inner-failure f)))))
+                            #:failure (λ (f) (parse-failure)))
                            (k d)))))
        parse*-direct-prompt))
     (define new-pos (parse-derivation-end-position new-derivation))
