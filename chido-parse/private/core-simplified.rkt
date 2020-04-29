@@ -18,7 +18,6 @@ Simplifications from the full core.rkt:
  "port-broker.rkt"
  "util.rkt"
  "stream-flatten.rkt"
- "parse-stream.rkt"
  racket/stream
  racket/match
  data/gvector
@@ -564,16 +563,6 @@ The job cache is a multi-level dictionary with the following keys / implementati
                parser
                start))
 
-(define-syntax (for/parse stx)
-  (syntax-parse stx
-    [(_ ([arg-name input-stream]
-         (~optional (~seq #:failure failure-arg:expr)))
-        body ...+)
-     #'(for/parse-proc (λ (arg-name) body ...)
-                       (λ () input-stream)
-                       (~? failure-arg
-                           (λ (f) (parse-failure))))]))
-
 (define (parse*-direct port parser
                       #:start [start #f]
                       #:failure [failure-arg #f])
@@ -590,14 +579,46 @@ The job cache is a multi-level dictionary with the following keys / implementati
          (abort-current-continuation
           parse*-direct-prompt
           ;; TODO - better failure handling and propagation
-          (λ () (for/parse ([d (parse* port parser #:start core-start)]
-                            #:failure (λ (f) (parse-failure)))
+          (λ () (for/parse ([d (parse* port parser #:start core-start)])
                            (k d)))))
        parse*-direct-prompt))
     (define new-pos (parse-derivation-end-position new-derivation))
     (port-broker-port-reset-position! port new-pos)
     new-derivation)
   (parse-inner direct-recursive-parse-core port parser start-use))
+
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;; parse-stream stuff
+;;;; I'm putting this stuff inline because not supporting chido-parse-parameters simplifies the implementation of for/parse.
+
+#|
+The parse*-direct function needs its own continuation prompt.  When called during evaluation of a stream, it should NOT abort the processing of that stream to return its own stream instead.  The parse*-direct stream should be a child of any outer streams that are being processed.  Also, not supporting good failure objects simplifies it as well.
+|#
+(define parse*-direct-prompt (make-continuation-prompt-tag 'parse*-direct-prompt))
+
+(define-syntax (delimit-parse*-direct stx)
+  (syntax-parse stx
+    [(_ e:expr)
+     #'(call-with-continuation-prompt
+        (λ () e)
+        parse*-direct-prompt)]))
+
+
+(define (for/parse-proc body-proc arg-stream-thunk)
+  (let loop ([stream (arg-stream-thunk)])
+    (cond [(stream-empty? stream) stream]
+          [else (let ([v1 (stream-first stream)])
+                  (stream-cons (body-proc v1)
+                               (loop (stream-rest stream))))])))
+
+(define-syntax (for/parse stx)
+  (syntax-parse stx
+    [(_ ([arg-name input-stream])
+        body ...+)
+     #'(for/parse-proc (λ (arg-name) body ...)
+                       (λ () input-stream))]))
+
 
 
 
