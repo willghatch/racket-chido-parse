@@ -592,15 +592,4 @@ The parse*-direct function needs its own continuation prompt.  When called durin
   (define results2 (parse* p1 A-parser/direct))
   (check-equal? (map parse-derivation-result (stream->list results2))
                 (list "a" "aa" "aaa" "aaaa" "aaaaa"))
-
-  (define c3-parser
-    (proc-parser "c3-parser" (λ (port) (make-parse-derivation (read-string 3 port)))))
-  (check-equal?
-   (map parse-derivation-result
-        (stream->list
-         (parse* (open-input-string "abc")
-                 c3-parser)))
-   '("abc"))
-
-
   )
