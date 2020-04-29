@@ -126,12 +126,11 @@ Simplifications from the full core.rkt:
    )
   #:transparent)
 
-(struct cycle-breaker-job (failure-job cycle-jobs) #:transparent)
+(struct cycle-breaker-job ())
 
 (define (job->result job)
   (match job
-    [(cycle-breaker-job failure-job cycle-jobs)
-     (parse-failure)]
+    [(cycle-breaker-job) (parse-failure)]
     [(s/kw parser-job #:result r) r]))
 
 (struct alt-worker
@@ -291,7 +290,7 @@ Simplifications from the full core.rkt:
            (begin
              (set-scheduled-continuation-dependency!
               goal
-              (cycle-breaker-job dependency jobs)))
+              (cycle-breaker-job)))
            (rec (parser-job-continuation/worker dependency)
                 (cons job jobs)))]))
   (rec (parser-job-continuation/worker (scheduler-requested-job scheduler)) '()))
