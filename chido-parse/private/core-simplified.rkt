@@ -38,21 +38,14 @@ Simplifications from the full core.rkt:
 ;;;; Structs
 
 (struct parse-derivation
-  (result
-   parser
-   start-position end-position
-   derivation-list)
+  (result parser start-position end-position derivation-list)
   #:transparent)
-
-;; For finding the end point of a derivation when one is not explicitly provided
-(define current-chido-parse-derivation-implicit-end (make-parameter #f))
 
 (define (make-parse-derivation result
                                #:end [end #f]
                                #:derivations [derivations '()])
   (define job (current-chido-parse-job))
   (define derivation-list (if (list? derivations) derivations (list derivations)))
-  ;; TODO - simplify end handling.
   (match job
     [(s/kw parser-job
            #:parser parser
@@ -63,9 +56,6 @@ Simplifications from the full core.rkt:
                               (apply max
                                      (map parse-derivation-end-position
                                           derivation-list)))
-                         (current-chido-parse-derivation-implicit-end)
-                         (let ([port (parser-job-port job)])
-                           (and port (port->pos port)))
                          (error 'make-parse-derivation
                                 "Couldn't infer end location and none provided.")))
      (define delayed? (procedure? result))
@@ -77,22 +67,8 @@ Simplifications from the full core.rkt:
                  "Not called during the dynamic extent of chido-parse...")]))
 
 (struct parser-struct (name) #:transparent)
-
 (struct proc-parser parser-struct (procedure) #:transparent)
 (struct alt-parser parser-struct (parsers) #:transparent)
-
-
-(define (parser? p)
-  (cond [(parser-struct? p)]
-        ;; TODO - this is not a great predicate...
-        [(procedure? p)]
-        [else #f]))
-
-(define (parser-name p)
-  (cond [(parser-struct? p) (parser-struct-name p)]
-        [(procedure? p) (parser-name (p))]
-        [else (error 'parser-name "not a parser: ~s" p)])) 
-
 
 (define parser-cache (make-weak-hasheq))
 (define (parser->usable p)
@@ -171,6 +147,15 @@ Simplifications from the full core.rkt:
   (scheduled-continuation j k dep))
 
 ;; In this simplified version, parser names are solely for ease of debugging this implementation itself.
+(define (parser-name p)
+  (cond [(parser-struct? p) (parser-struct-name p)]
+        [(procedure? p) (parser-name (p))]
+        [else (error 'parser-name "not a parser: ~s" p)])) 
+
+(define (job->parser-name job)
+  (define p (and job (parser-job-parser job)))
+  (if (not p) p (parser-name p)))
+
 (define (job->display job)
   (cond [(not job) #f]
         [(cycle-breaker-job? job) "cycle-breaker"]
@@ -178,9 +163,6 @@ Simplifications from the full core.rkt:
                       (job->parser-name job)
                       (parser-job-start-position job)
                       (parser-job-result-index job))]))
-(define (job->parser-name job)
-  (define p (and job (parser-job-parser job)))
-  (if (not p) p (parser-name p)))
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
