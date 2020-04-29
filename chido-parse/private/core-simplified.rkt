@@ -9,6 +9,7 @@ Simplifications from the full core.rkt:
 * the scheduler always captures continuations, not checking whether left recursion is possible
 * jobs don't track their dependents to update them automatically - we just do a search for available work each time we enter the scheduler
 * no chido-parse-parameters
+
 * TODO - maybe switch to string input instead of ports (needs a change from parsers being (-> port derivation) to (-> string position derivation))
 |#
 
@@ -21,7 +22,6 @@ Simplifications from the full core.rkt:
  racket/stream
  racket/port
  racket/match
- racket/list
  racket/struct
  racket/string
  racket/exn
