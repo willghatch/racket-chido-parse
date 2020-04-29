@@ -1,86 +1,17 @@
 #lang racket/base
-(require racket/contract/base)
-(provide
- make-parse-derivation
- parse-derivation?
- (contract-out
-  (rename parse-derivation-result! parse-derivation-result
-          (-> parse-derivation? any/c)))
- parse-derivation-parser
- parse-derivation-source-name
- parse-derivation-line
- parse-derivation-column
- parse-derivation-start-position
- parse-derivation-end-position
- ;; TODO - replace uses of derivation-list and then rename in the struct itself.
- parse-derivation-derivation-list
- (rename-out [parse-derivation-derivation-list parse-derivation-subderivations])
 
- parse-derivation-parser?
- parse-derivation-parser-name?
- parse-derivation-left-most-subderivation
- parse-derivation-right-most-subderivation
+#|
+Simplifications from the full core.rkt:
+* Error handling - there is only one error object which contains no useful data
+* derivation objects - results are strict instead of potentially lazy, only start/end positions are tracked (no line/column/span/source-name)
+* proc-parsers and alt-parsers have no extra metadata like prefix, nullability, promise-no-left-recursion, prefix tries, etc
+* no custom parser structs or raw strings (but still supporting parser thunks because they are useful to “tie the knot”)
+* the scheduler always captures continuations, not checking whether left recursion is possible
+* jobs don't track their dependents to update them automatically - we just do a search for available work each time we enter the scheduler
+* TODO - no chido-parse-parameters
+* TODO - maybe switch to string input instead of ports (needs a change from parsers being (-> port derivation) to (-> string position derivation))
+|#
 
- ;; this is not for the public interface...
- current-chido-parse-derivation-implicit-end
- port->pos
-
- alt-parser?
- ;; TODO - use the renamed `alt-parser` everywhere.  Its interface is better than `make-alt-parser`.
- make-alt-parser
- (rename-out [make-alt-parser* alt-parser])
- alt-parser-parsers
- alt-parser-left-recursive?
- ;alt-parser-null?
- (rename-out [make-proc-parser proc-parser])
- proc-parser?
- prop:custom-parser
-
- non-cached-parser-thunk
-
- parser-name
- parser-prefix
- parser-potentially-left-recursive?
- parser-potentially-null?
- parser?
-
- (struct-out parse-failure)
- make-parse-failure
- (rename-out [exn->failure/export exn->failure])
- parse-failure->string/location-triple
- parse-failure->string/simple
- parse-failure->string/message
- parse-failure->string/chain
- parse-failure->string/tree
- greatest-failure
- chido-parse-keep-multiple-failures?
-
- get-counts!
-
- parse*
- parse*-direct
- delimit-parse*-direct
- for/parse
- #;(contract-out
-  [parse* (->* (input-port? parser?)
-               (#:args (listof any/c)
-                #:start integer?)
-               (or/c parse-failure? stream?))]
-  )
- ;; TODO - other parse functions
-
- ;; From port-broker
- (rename-out
-  [port-broker->port/wrap port-broker->port]
-  [port-broker-char/wrap port-broker-char]
-  [port-broker-line/wrap port-broker-line]
-  [port-broker-column/wrap port-broker-column]
-  [port-broker-substring?/wrap port-broker-substring?]
-  [port-broker-substring/wrap port-broker-substring]
-  [port-broker-wrap-position port-broker-start-position]
-  )
-
- )
 
 (require
  "port-broker.rkt"
@@ -111,86 +42,25 @@
    rackunit
    ))
 
-;; TODO - explanation from notes about the big picture of how this parsing library works
-
-;; TODO - procedures with the contract (-> parser) should be accepted as parsers
-
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;; Structs
 
 (struct parse-derivation
-  ;; TODO - document from notes
-  (
-   [result #:mutable] [result-forced? #:mutable]
+  (result
    parser
-   source-name
-   line column start-position end-position
-   derivation-list
-   )
+   start-position end-position
+   derivation-list)
   #:transparent)
 
-(define (parse-derivation-result! pd)
-  (if (parse-derivation-result-forced? pd)
-      (parse-derivation-result pd)
-      (let* ([f (parse-derivation-result pd)]
-             [r (with-handlers ([(λ(e)#t)(λ(e)e)])
-                  (f (parse-derivation-source-name pd)
-                     (parse-derivation-line pd)
-                     (parse-derivation-column pd)
-                     (parse-derivation-start-position pd)
-                     (- (parse-derivation-end-position pd)
-                        (parse-derivation-start-position pd))
-                     (parse-derivation-derivation-list pd)))])
-        (set-parse-derivation-result! pd r)
-        (set-parse-derivation-result-forced?! pd #t)
-        r)))
-
-(define (parse-derivation-parser? derivation parser)
-  (equal? (parse-derivation-parser derivation) parser))
-(define (parse-derivation-parser-name? derivation name)
-  (equal? (parser-name (parse-derivation-parser derivation))
-          name))
-
-(define (parse-derivation-left-most-subderivation derivation)
-  (car (parse-derivation-derivation-list derivation)))
-(define (parse-derivation-right-most-subderivation derivation)
-  (car (reverse (parse-derivation-derivation-list derivation))))
-
-
-(define-syntax (define-counters stx)
-  (syntax-parse stx
-    [(_ get-counts-name! [name ...])
-     (with-syntax ([(inc! ...) (map (λ (x) (format-id x "inc-~a!" x))
-                                    (syntax->list #'(name ...)))]
-                   [(counter ...) (generate-temporaries #'(name ...))])
-       #'(begin
-           (define counter 0) ...
-           (define (inc!) (set! counter (add1 counter))) ...
-           (define (get-counts-name!)
-             (eprintf "~a: ~a\n" 'name counter) ...
-             (eprintf "\n")
-             (set! counter 0) ...)))]))
-(define-counters get-counts! (parse-enter
-                              find-work
-                              find-work-loop
-                              actionable-job-false
-                              potential-left-recursion
-                              run-scheduler
-                              no-hint
-                              traverse-cache
-                              cache-parser-conflict
-                              cache-cp-param-conflict
-                              ))
 
 (define current-chido-parse-derivation-implicit-end (make-parameter #f))
 
 (define (make-parse-derivation result
                                #:end [end #f]
                                #:derivations [derivations '()])
-  ;; `result` should be a non-procedure OR a procedure that accepts
-  ;; src line column start-position span derivation-list
   (define job (current-chido-parse-job))
   (define derivation-list (if (list? derivations) derivations (list derivations)))
+  ;; TODO - simplify end handling.
   (match job
     [(s/kw parser-job
            #:parser parser
@@ -212,115 +82,33 @@
                                 "Couldn't infer end location and none provided.")))
      (define delayed? (procedure? result))
      (parse-derivation result
-                       (not delayed?)
                        parser
-                       source-name
-                       line column start-position end-use
+                       start-position end-use
                        derivation-list)]
     [else (error 'make-parse-derivation
                  "Not called during the dynamic extent of chido-parse...")]))
 
 (struct parser-struct (name) #:transparent)
 
-(struct proc-parser parser-struct
-  ;; TODO - document from notes
-  (prefix procedure preserve-prefix? promise-no-left-recursion? use-port?)
-  #:transparent)
-(define (make-proc-parser
-         proc
-         #:prefix [prefix ""]
-         #:name [name (format "~a" (object-name proc))]
-         #:preserve-prefix? [preserve-prefix? #f]
-         #:promise-no-left-recursion? [promise-no-left-recursion? #f]
-         #:use-port? [use-port? #t])
-  (proc-parser name prefix proc
-               preserve-prefix? promise-no-left-recursion? use-port?))
+(struct proc-parser parser-struct (procedure) #:transparent)
+(struct alt-parser parser-struct (parsers) #:transparent)
 
-(struct alt-parser parser-struct
-  (parsers left-recursive? null? trie)
-  #:transparent)
-
-(define (make-alt-parser name parsers)
-  (define l-recursive? (ormap parser-potentially-left-recursive? parsers))
-  (define null? (ormap parser-potentially-null? parsers))
-  (define trie (for/fold ([t empty-trie])
-                         ([p parsers])
-                 (trie-add t (parser-prefix p) p)))
-  (define name-use (or name "alt-parser"))
-  (alt-parser name-use
-              parsers
-              l-recursive?
-              null?
-              trie))
-(define (make-alt-parser* #:name [name #f] . parsers)
-  (make-alt-parser name parsers))
-
-(define-values (prop:custom-parser custom-parser? custom-parser-ref)
-  ;; TODO - document -- the property should be a function that accepts a `self` argument and returns a parser.
-  ;; TODO - Is this really a good idea?  Perhaps I really just want to have objects that users can convert into parsing procedures, eg. readtable-like-object with ->single-read, ->multi-read functions.
-  (make-struct-type-property 'custom-parser))
 
 (define (parser? p)
   (cond [(parser-struct? p)]
-        [(custom-parser? p)]
-        [(string? p)]
         ;; TODO - this is not a great predicate...
         [(procedure? p)]
         [else #f]))
 
 (define (parser-name p)
   (cond [(parser-struct? p) (parser-struct-name p)]
-        ;; TODO - custom parsers should be able to inform this
-        [(custom-parser? p) (parser-name (parser->usable p))]
-        [(string? p) p]
         [(procedure? p) (parser-name (p))]
-        [else (error 'parser-name "not a parser: ~s" p)]))
+        [else (error 'parser-name "not a parser: ~s" p)])) 
 
-(define (parser-prefix p)
-  (cond [(proc-parser? p) (proc-parser-prefix p)]
-        [(string? p) p]
-        [else ""]))
-
-(define (parser-potentially-left-recursive? p)
-  (cond [(alt-parser? p) (alt-parser-left-recursive? p)]
-        [(proc-parser? p) (and (not (proc-parser-promise-no-left-recursion? p))
-                               (or (equal? "" (proc-parser-prefix p))
-                                   (proc-parser-preserve-prefix? p)))]
-        [(string? p) #f]
-        ;; TODO - custom parsers should be able to inform this
-        [(custom-parser? p) #t]
-        ;; TODO - this is not great, but I need this predicate to work while
-        ;;        *constructing* parsers...
-        [(procedure? p) #t]
-        [else (error 'parser-potentially-left-recursive?
-                     "Not yet implemented for: ~s" p)]))
-
-(define (parser-potentially-null? p)
-  (cond [(alt-parser? p) (alt-parser-null? p)]
-        [(proc-parser? p) (equal? "" (proc-parser-prefix p))]
-        [(equal? p "") #t]
-        [(string? p) #f]
-        ;; TODO - custom parsers should be able to inform this
-        [(custom-parser? p) #t]
-        ;; TODO - this is not great, but I need this predicate to work while
-        ;;        *constructing* parsers...
-        [(procedure? p) #t]
-        [else (error 'parser-potentially-null?
-                     "Not yet implemented for: ~s" p)]))
-
-(struct non-cached-parser-thunk (proc)
-  #:property prop:procedure (struct-field-index proc))
 
 (define parser-cache (make-weak-hasheq))
 (define (parser->usable p)
   (cond [(parser-struct? p) p]
-        [(custom-parser? p)
-         (parser->usable ((custom-parser-ref p) p))]
-        [(and (string? p) (immutable? p)) p]
-        [(string? p) (string->immutable-string p)]
-        ;; Usually I want to cache thunk results, but some, including chido-parse-parameters, specifically need NOT to be cached (at least not merely on procedure object identity), because they depend on chido-parse-parameterization.
-        [(non-cached-parser-thunk? p) (parser->usable (p))]
-        [(chido-parse-parameter? p) (parser->usable (p))]
         [(and (procedure? p) (procedure-arity-includes? p 0))
          (define cached (hash-ref parser-cache p #f))
          (or (and cached (parser->usable cached))
@@ -341,165 +129,16 @@
                                (parse-stream-next-job s))
          empty-stream))])
 
-(define progress-default (gensym))
-;; TODO - Maybe I should have a `keep-all?` parameter and a `keep-ties?` parameter to keep multiple failures when they tie for greatest.
-(define chido-parse-keep-multiple-failures? (make-parameter #f))
-(define (make-parse-failure #:message [message #f]
-                            #:position [position #f]
-                            #:end [end #f]
-                            #:made-progress? [made-progress?/given progress-default]
-                            #:inner-failure [inner-failure #f]
-                            #:failures [failures #f])
-  (define job (current-chido-parse-job))
-  (match job
-    [#f (error 'make-parse-failure
-               "Called outside of the dynamic extent of a chido-parse parser.")]
-    [(s/kw parser-job #:parser parser #:start-position start-position #:port port)
-     (define all-failures (and failures
-                               (remove-duplicates
-                                (if inner-failure
-                                    (cons inner-failure failures)
-                                    failures)
-                                eq?)))
-     (define best-failure (or inner-failure
-                              (and all-failures
-                                   (not (null? all-failures))
-                                   (greatest-failure all-failures))))
-     (define guess-end (if port
-                           (port->pos port)
-                           start-position))
-     (define inner-end (if all-failures
-                           (and (not (null? all-failures))
-                                (apply max (map parse-failure-effective-end
-                                                all-failures)))
-                           (and best-failure
-                                (parse-failure-effective-end best-failure))))
-     (define effective-end (max (or end guess-end) (or position 0) (or inner-end 0)))
-     (define report-position (or position effective-end))
-     (define pb (scheduler-port-broker (parser-job-scheduler job)))
-     (define report-line (port-broker-line pb report-position))
-     (define report-column (port-broker-column pb report-position))
-     (define made-progress? (cond [(eq? #t made-progress?/given) #t]
-                                  [(eq? #f made-progress?/given) #f]
-                                  [(> (or end position guess-end) start-position) #t]
-                                  [else #f]))
-     (parse-failure parser
-                    message
-                    report-line
-                    report-column
-                    report-position
-                    start-position
-                    effective-end
-                    made-progress?
-                    best-failure
-                    (and (chido-parse-keep-multiple-failures?)
-                         all-failures))]))
-
-(define (parse-failure->string/location-triple pf)
-  (format "~a:~a:~a"
-          (parse-failure-report-line pf)
-          (parse-failure-report-column pf)
-          (parse-failure-report-position pf)))
-(define (format-parser+message parser message)
-  (if message
-      (format "~a: ~a" (parser-name parser) message)
-      ;; TODO - this format should not be necessary, but parser-name is not always returning strings.  I should fix that.
-      (format "~a"
-              (parser-name parser))))
-
-(define (parse-failure->string/simple pf)
-  (format "Parse failure at ~a. ~a"
-          (parse-failure->string/location-triple pf)
-          (format-parser+message (parse-failure-parser pf)
-                                 (parse-failure-message pf))))
-(define (parse-failure->string/message pf)
-  (format "Parse failure at ~a. ~a"
-          (parse-failure->string/location-triple pf)
-          (format-parser+message (parse-failure-parser pf)
-                                 (parse-failure->first-message pf))))
-
-(define (parse-failure->string/chain pf)
-  (format "Parse failure at ~a.\n~a\n"
-          (parse-failure->string/location-triple pf)
-          (string-join
-           (map (λ (pf) (format-parser+message (parse-failure-parser pf)
-                                               (parse-failure-message pf)))
-                (parse-failure->chain pf))
-           "\n")))
-
-(define (parse-failure->string/tree pf)
-  (define (->tree depth pf)
-    (define (print-indent)
-      (for ([i (in-range depth)])
-        (printf "  ")))
-    (with-output-to-string
-      (λ ()
-        (print-indent)
-        (printf "* ~a\n" (parse-failure->string/message pf))
-        (for ([inner (or (parse-failure-inner-failure-list pf) '())])
-          (printf "~a\n" (->tree (add1 depth) inner))))))
-  (->tree 0 pf))
+(struct parse-failure ()
+  #:transparent
+  #:methods gen:stream
+  [(define (stream-empty? s) #t)
+   (define (stream-first s)
+     (error 'stream-first "empty stream"))
+   (define (stream-rest s)
+     (error 'stream-rest "empty stream"))])
 
 
-(define (make-cycle-failure job job-cycle-list)
-  (match job
-    [(s/kw parser-job #:parser parser #:start-position start-position
-           #:scheduler scheduler)
-     (define pb (scheduler-port-broker scheduler))
-     (parse-failure parser
-                    (format "Cycle failure: ~a" (map job->display
-                                                     (reverse job-cycle-list)))
-                    (port-broker-line pb start-position)
-                    (port-broker-column pb start-position)
-                    start-position
-                    start-position
-                    start-position
-                    #f
-                    #f
-                    #f)]))
-
-(define (exn->failure e job)
-  (let ([message (format "Exception while parsing: ~a\n" (exn->string e))])
-    (match job
-      [(s/kw parser-job #:parser parser
-             #:start-position start-position
-             #:port port
-             #:scheduler scheduler)
-       (define pb (scheduler-port-broker scheduler))
-       (define fail-pos (if port (port->pos port) start-position))
-       (parse-failure parser
-                      message
-                      (port-broker-line pb fail-pos)
-                      (port-broker-column pb fail-pos)
-                      fail-pos
-                      start-position
-                      fail-pos
-                      (not (equal? start-position fail-pos))
-                      #f
-                      #f)])))
-(define (exn->failure/export e)
-  (let ([j (current-chido-parse-job)])
-    (if j
-        (exn->failure e j)
-        (error 'exn->failure
-               "Can only be called in the dynamic extent of chido-parse."))))
-
-(define (alt-worker->failure aw)
-  (match aw
-    [(s/kw alt-worker #:job job #:failures failures)
-     (match job
-       [(s/kw parser-job #:parser parser #:start-position start-position
-              #:scheduler scheduler)
-        (define pb (scheduler-port-broker scheduler))
-        (match parser
-          [(s/kw alt-parser #:name name)
-           (parameterize ([current-chido-parse-job job])
-             (make-parse-failure
-              #:message
-              (if (null? failures)
-                  "Alt failed with no inner failures.  Probably no prefixes matched."
-                  #f)
-              #:failures failures))])])]))
 
 
 
@@ -514,38 +153,23 @@ The job-cache is a multi-tier hash of parser->extra-args-list->start-position->r
 The job->result-cache is a map from parser-job structs -> parser-stream OR parse-error
 |#
 (struct scheduler
-  ;; TODO - document
-  (port-broker top-job-stack done-k-stack hint-stack-stack job-info->job-cache)
+  (port-broker requested-job job-info->job-cache)
   #:mutable
   #:transparent)
 (define (make-scheduler port-broker)
-  (scheduler port-broker '() '() '() (make-start-position-cache)))
-
-(define (pop-hint! scheduler)
-  (define hss (scheduler-hint-stack-stack scheduler))
-  (set-scheduler-hint-stack-stack! scheduler
-                                   (cons (cdr (car hss)) (cdr hss))))
-(define (push-hint! scheduler hint)
-  (define hss (scheduler-hint-stack-stack scheduler))
-  (set-scheduler-hint-stack-stack! scheduler (cons (cons hint (car hss))
-                                                   (cdr hss))))
+  (scheduler port-broker #f (make-start-position-cache)))
 
 (struct parser-job
-  ;; TODO - document from notes
   (
    ;; parser is either a parser struct or an alt-parser struct
    parser
    scheduler
-   ;; chido-parse-parameters
-   cp-params
    start-position
    result-index
    ;; gvector of siblings indexed by result-index
    siblings
    [port #:mutable]
    [continuation/worker #:mutable]
-   ;; dependents are scheduled-continuations or alt-workers
-   [dependents #:mutable]
    ;; The actual result.
    [result #:mutable]
    ;; This one is not used for alt-parsers, but is used to keep track of the
@@ -554,36 +178,22 @@ The job->result-cache is a map from parser-job structs -> parser-stream OR parse
    )
   #:transparent)
 
-(define (job-immediately-actionable? job)
-  (and (not (job->result job))
-       (match job
-         [(s/kw parser-job #:continuation/worker c/w)
-          (match c/w
-            [#f #t]
-            [(s/kw scheduled-continuation #:ready? (? (λ(x)x))) #t]
-            [(s/kw alt-worker #:ready-jobs (? (λ(x) (not (null? x))))) #t]
-            [else #f])])))
-
-(define (push-parser-job-dependent! job new-dependent)
-  (set-parser-job-dependents!
-   job
-   (cons new-dependent (parser-job-dependents job))))
 
 (struct cycle-breaker-job (failure-job cycle-jobs) #:transparent)
 
 (define (job->result job)
   (match job
     [(cycle-breaker-job failure-job cycle-jobs)
-     (make-cycle-failure failure-job cycle-jobs)]
+     (parse-failure)]
     [(s/kw parser-job #:result r) r]))
 
 (struct alt-worker
-  (job remaining-jobs ready-jobs failures successful?)
+  (job remaining-jobs)
   #:mutable #:transparent)
 
 (struct scheduled-continuation
   ;; The dependency is only mutated to break cycles.
-  (job k [dependency #:mutable] [ready? #:mutable])
+  (job k [dependency #:mutable])
   #:transparent)
 
 
@@ -591,9 +201,6 @@ The job->result-cache is a map from parser-job structs -> parser-stream OR parse
   (scheduled-continuation j k dep #f))
 
 
-(define (job->parser-name job)
-  (define p (and job (parser-job-parser job)))
-  (if (not p) p (parser-name p)))
 (define (job->display job)
   (cond [(not job) #f]
         [(cycle-breaker-job? job) "cycle-breaker"]
@@ -601,6 +208,9 @@ The job->result-cache is a map from parser-job structs -> parser-stream OR parse
                       (job->parser-name job)
                       (parser-job-start-position job)
                       (parser-job-result-index job))]))
+(define (job->parser-name job)
+  (define p (and job (parser-job-parser job)))
+  (if (not p) p (parser-name p)))
 
 
 
@@ -615,24 +225,10 @@ A weak hash port-broker->ephemeron with scheduler.
 (define port-broker-scheduler
   (make-ephemeron-cache-lookup the-scheduler-cache make-scheduler))
 
-;; Here are some alist wrappers that I tried.  They don't seem to be faster
-;; than using hashes anywhere I've tried, but I guess I don't want to delete
-;; them just yet.
-;(struct malist ([content #:mutable]))
-;(define (malist-ref malist key)
-;  (let ([pair (assq key (malist-content malist))])
-;    (and pair (cdr pair))))
-;(define (malist-set! malist key val)
-;  (set-malist-content! malist
-;                       (cons (cons key val)
-;                             (malist-content malist))))
-;(define (make-malist) (malist '()))
-
 #|
 The job cache is a multi-level dictionary with the following keys / implementations:
 * start-position / gvector
 * parser / mutable hasheq
-* cp-params / mutable hashequal?
 |#
 (define (make-start-position-cache)
   (make-gvector #:capacity 10000))
@@ -645,9 +241,7 @@ The job cache is a multi-level dictionary with the following keys / implementati
 (define (get-job-0! s parser cp-params start-position)
   (define (make-fresh-parser-job usable)
     (define siblings-vec (make-gvector))
-    (define job
-      (parser-job usable s cp-params start-position
-                  0 siblings-vec #f #f '() #f #f))
+    (define job (parser-job usable s start-position 0 siblings-vec #f #f #f #f))
     (gvector-add! siblings-vec job)
     job)
   (define (traverse-cache parser)
@@ -656,17 +250,12 @@ The job cache is a multi-level dictionary with the following keys / implementati
     ;; Each level of the cache may have a literal job object or a layer of caching.
     ;; A layer of caching may be a gvector or a hash table.
     (define (job-match? j)
-      (and
-       (eq? parser (parser-job-parser j))
-       (equal? cp-params (parser-job-cp-params j))))
-    (define update #t)
-    (inc-traverse-cache!)
+      (eq? parser (parser-job-parser j)))
     (define c/start-pos (scheduler-job-info->job-cache s))
     (define start-pos-referenced
       (and (< start-position (gvector-count c/start-pos))
            (gvector-ref c/start-pos start-position)))
     (define (start-pos-add-cache-layer! old-job)
-      (inc-cache-parser-conflict!)
       (define parser-cache-layer (make-parser-cache))
       (define new-job (make-fresh-parser-job parser))
       (hash-set! parser-cache-layer (parser-job-parser old-job) old-job)
@@ -689,31 +278,12 @@ The job cache is a multi-level dictionary with the following keys / implementati
       [else
        (define c/parser start-pos-referenced)
        (define parser-referenced (hash-ref c/parser parser #f))
-       (define (parser-add-cache-layer! old-job)
-         (inc-cache-cp-param-conflict!)
-         (define new-cache-layer (make-cp-params-cache))
-         (define new-job (make-fresh-parser-job parser))
-         (hash-set! new-cache-layer (parser-job-cp-params old-job) old-job)
-         (hash-set! new-cache-layer cp-params new-job)
-         (hash-set! c/parser parser new-cache-layer)
-         new-job)
        (match parser-referenced
          [#f
           (define new-job (make-fresh-parser-job parser))
           (hash-set! c/parser parser new-job)
           new-job]
-         [(? parser-job?) (if (job-match? parser-referenced)
-                              parser-referenced
-                              (parser-add-cache-layer! parser-referenced))]
-         [else
-          (define c/cp-params parser-referenced)
-          (define cp-params-referenced (hash-ref c/cp-params cp-params #f))
-          (if cp-params-referenced
-              cp-params-referenced
-              (let ([new-job (make-fresh-parser-job parser)])
-                (hash-set! c/cp-params cp-params new-job)
-                new-job))])])
-    )
+         [(? parser-job?) parser-referenced])]))
 
   (define usable (parser->usable parser))
   (traverse-cache usable))
@@ -726,45 +296,10 @@ The job cache is a multi-level dictionary with the following keys / implementati
      (define next-index (add1 result-index))
      (if (< next-index (gvector-count siblings))
          (gvector-ref siblings next-index)
-         (let ([new-job (parser-job parser scheduler cp-params start-position
-                                    next-index siblings port #f '() #f #f)])
+         (let ([new-job (parser-job parser scheduler start-position
+                                    next-index siblings port #f #f #f)])
            (gvector-add! siblings new-job)
            new-job))]))
-
-
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;;;; port-broker wraps
-
-#|
-I want to avoid using the port interface where possible, since it imposes a constant back-and-forth between bytes and strings.
-So I want to use port-brokers directly to use *fewer* custom port calls.
-But I still need to encapsulate the port and give a start position.
-|#
-(struct port-broker-wrap (broker position) #:transparent)
-
-(define (range-err pb/w pos name message)
-  (when (< pos
-           (port-broker-wrap-position pb/w))
-    (error name message)))
-
-(define (port-broker->port/wrap pb/w pos)
-  (range-err pb/w pos 'port-broker->port "Can't create a port with a start position lower that the current parse start position.")
-  (port-broker->port (port-broker-wrap-broker pb/w) pos))
-(define (port-broker-char/wrap pb/w pos)
-  (range-err pb/w pos 'port-broker-char "Can't read a position lower that the current parse start position.")
-  (port-broker-char (port-broker-wrap-broker pb/w) pos))
-(define (port-broker-line/wrap pb/w pos)
-  (range-err pb/w pos 'port-broker-line "Can't read a position lower that the current parse start position.")
-  (port-broker-line (port-broker-wrap-broker pb/w) pos))
-(define (port-broker-column/wrap pb/w pos)
-  (range-err pb/w pos 'port-broker-column "Can't read a position lower that the current parse start position.")
-  (port-broker-column (port-broker-wrap-broker pb/w) pos))
-(define (port-broker-substring?/wrap pb/w pos str)
-  (range-err pb/w pos 'port-broker-substring? "Can't read a position lower that the current parse start position.")
-  (port-broker-substring? (port-broker-wrap-broker pb/w) pos str))
-(define (port-broker-substring/wrap pb/w pos len)
-  (range-err pb/w pos 'port-broker-substring "Can't read a position lower that the current parse start position.")
-  (port-broker-substring (port-broker-wrap-broker pb/w) pos len))
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -783,63 +318,26 @@ But I still need to encapsulate the port and give a start position.
 (define (enter-the-parser/job scheduler job)
   (define ready-result (job->result job))
   (or ready-result
-      (let* ([old-start (and (current-chido-parse-job)
-                             (parser-job-start-position (current-chido-parse-job)))]
-             [new-start (parser-job-start-position job)]
-             [parser (parser-job-parser job)]
-             [left-recursive? (and (eq? old-start new-start)
-                                   (parser-potentially-left-recursive? parser))])
-        (inc-parse-enter!)
-        (when (and old-start (< new-start old-start))
-          (error 'chido-parse
-                 "Recursive parse tried to recursively parse to the left of its starting position: ~a"
-                 (parser-name (parser-job-parser (current-chido-parse-job)))))
-        (if (and left-recursive? (current-chido-parse-job))
-            ;; This is a (potentially left-) recursive call.
-            ;; So we de-schedule the current work by capturing its continuation,
-            ;; we schedule its dependency, and then we abort back to the
-            ;; scheduler loop.
-            (let ([parent-job (current-chido-parse-job)])
-              (inc-potential-left-recursion!)
-              (call-with-composable-continuation
-               (λ (k)
-                 (define sched-k (job->scheduled-continuation parent-job k job))
-                 (set-parser-job-continuation/worker! parent-job sched-k)
-                 (push-parser-job-dependent! job sched-k)
-                 ;(push-hint! scheduler sched-k)
-                 (abort-current-continuation chido-parse-prompt #f))
-               chido-parse-prompt))
-            ;; This is the original entry into the parser machinery.
-            ;; Or a recursive call that isn't a left-recursion.
-            (let ()
-              (define result
-                (let ()
-                  (define k-job (scheduled-continuation #f #f job #f))
-                  (push-parser-job-dependent! job k-job)
-                  ;; As a fresh entry into the parser, we start a fresh hint stack.
-                  (set-scheduler-hint-stack-stack!
-                   scheduler (cons (list job)
-                                   (scheduler-hint-stack-stack scheduler)))
-                  (set-scheduler-done-k-stack!
-                   scheduler (cons k-job
-                                   (scheduler-done-k-stack scheduler)))
-                  (set-scheduler-top-job-stack!
-                   scheduler (cons job (scheduler-top-job-stack scheduler)))
-                  (run-scheduler scheduler)))
-              (begin
-                (set-scheduler-done-k-stack!
-                 scheduler (cdr (scheduler-done-k-stack scheduler)))
-                (set-scheduler-top-job-stack!
-                 scheduler (cdr (scheduler-top-job-stack scheduler)))
-                (set-scheduler-hint-stack-stack!
-                 scheduler (cdr (scheduler-hint-stack-stack scheduler)))
-                result))))))
+      (if (current-chido-parse-job)
+          ;; This is a (potentially left-) recursive call.
+          ;; So we de-schedule the current work by capturing its continuation,
+          ;; we schedule its dependency, and then we abort back to the
+          ;; scheduler loop.
+          (let ([parent-job (current-chido-parse-job)])
+            (call-with-composable-continuation
+             (λ (k)
+               (define sched-k (job->scheduled-continuation parent-job k job))
+               (set-parser-job-continuation/worker! parent-job sched-k)
+               (abort-current-continuation chido-parse-prompt #f))
+             chido-parse-prompt))
+          ;; This is the original entry into the parser machinery.
+          (let ([result (begin
+                          (set-scheduler-requested-job! scheduler job)
+                          (run-scheduler scheduler))])
+            (set-scheduler-requested-job! scheduler #f)
+            result))))
 
 
-(define (get-last-alt-stack job-stack)
-  (cond [(null? job-stack) #f]
-        [(alt-parser? (parser-job-parser (car job-stack))) job-stack]
-        [else (get-last-alt-stack (cdr job-stack))]))
 
 (define (find-work s job-stack)
   ;; Returns a hint stack for an actionable job -- IE a list where the
