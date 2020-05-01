@@ -19,11 +19,7 @@ Simplifications from the full core.rkt:
  racket/match
  )
 
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;;;; Structs
-
 (struct parse-derivation (result parser start-position end-position derivation-list))
-
 (define (make-parse-derivation result derivations [end #f])
   (match (current-chido-parse-job)
     [(parser-job parser start-position _ _ _ _)
@@ -34,16 +30,12 @@ Simplifications from the full core.rkt:
                                           derivations)))
                          (error 'make-parse-derivation
                                 "Couldn't infer end location and none provided.")))
-     (parse-derivation result
-                       parser
-                       start-position end-use
-                       derivations)]
-    [else (error 'make-parse-derivation
-                 "Not called during the dynamic extent of chido-parse...")]))
+     (parse-derivation result parser start-position end-use derivations)]
+    [else (error 'make-parse-derivation "Not called during the dynamic extent of chido-parse...")]))
 
 (struct proc-parser (procedure))
 (struct alt-parser (parsers))
-
+;; We also allow (-> parser) thunks as parsers, which is helpful to tie the knot for recursive references.
 (define parser-cache (make-weak-hasheq))
 (define (parser->usable p)
   (match p
@@ -54,47 +46,26 @@ Simplifications from the full core.rkt:
                                       result)))]))
 
 (define (parse-stream result next-job scheduler)
-  (stream-cons result
-               (if next-job
-                   (enter-the-parser/job scheduler next-job)
-                   empty-stream)))
-
+  (stream-cons result (if next-job
+                          (enter-the-parser/job scheduler next-job)
+                          empty-stream)))
 (define (parse-failure? x) (and (stream? x) (stream-empty? x)))
 
-(struct scheduler
-  (input-string [requested-job #:mutable] job-cache)
-  #:transparent)
+(struct scheduler (input-string [requested-job #:mutable] job-cache))
 (define (make-scheduler input-string)
   (scheduler input-string #f (make-job-cache)))
 
 (struct parser-job
-  (parser
-   start-position
-   result-index
-   [continuation/worker #:mutable]
-   ;; The actual result.
-   [result #:mutable]
-   ;; This one is not used for alt-parsers, but is used to keep track of the
-   ;; stream from a procedure.
-   [result-stream #:mutable]
-   )
-  #:transparent)
+  (parser start-position result-index
+   [continuation/worker #:mutable] [result #:mutable] [result-stream #:mutable]))
 
-(struct cycle-breaker-job ())
+(define cycle-breaker-job (parser-job #f #f #f #f empty-stream #f))
 
-(define (job->result job)
-  (match job
-    [(cycle-breaker-job) empty-stream]
-    [(parser-job _ _ _ _ result _) result]))
-
-(struct alt-worker
-  (job remaining-jobs)
-  #:mutable #:transparent)
+(struct alt-worker (job remaining-jobs) #:mutable)
 
 (struct scheduled-continuation
   ;; The dependency is only mutated to break cycles.
-  (job k [dependency #:mutable])
-  #:transparent)
+  (job k [dependency #:mutable]))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;;; Caches
@@ -141,7 +112,7 @@ Simplifications from the full core.rkt:
   (enter-the-parser/job scheduler j))
 
 (define (enter-the-parser/job scheduler job)
-  (define ready-result (job->result job))
+  (define ready-result (parser-job-result job))
   (or ready-result
       (if (current-chido-parse-job)
           ;; This is a (potentially left-) recursive call.
@@ -163,7 +134,7 @@ Simplifications from the full core.rkt:
             result))))
 
 (define (run-scheduler s)
-  (or (job->result (scheduler-requested-job s))
+  (or (parser-job-result (scheduler-requested-job s))
       (let ([next-job (find-work s '() (list (scheduler-requested-job s)))])
         (if (not next-job)
             (begin (fail-cycle! s) (run-scheduler s))
@@ -175,7 +146,7 @@ Simplifications from the full core.rkt:
        (let* ([j (car to-check)])
          (match (parser-job-continuation/worker j)
            [(scheduled-continuation job k dependency)
-            (cond [(job->result dependency) j]
+            (cond [(parser-job-result dependency) j]
                   [else (define new-blocked (cons j blocked-jobs))
                         (define new-to-check (if (memq dependency new-blocked)
                                                  (cdr to-check)
@@ -183,7 +154,7 @@ Simplifications from the full core.rkt:
                         (find-work s new-blocked new-to-check)])]
            [(alt-worker _ remaining-jobs)
             (cond [(null? remaining-jobs) j]
-                  [(findf job->result remaining-jobs) j]
+                  [(findf parser-job-result remaining-jobs) j]
                   [else (define new-blocked (cons j blocked-jobs))
                         (define add-to-check (filter (λ (x) (not (memq x new-blocked)))
                                                      remaining-jobs))
@@ -200,7 +171,7 @@ Simplifications from the full core.rkt:
        (rec (parser-job-continuation/worker next-job) (cons job jobs))]
       [(scheduled-continuation job k dependency)
        (if (memq dependency jobs)
-           (set-scheduled-continuation-dependency! goal (cycle-breaker-job))
+           (set-scheduled-continuation-dependency! goal cycle-breaker-job)
            (rec (parser-job-continuation/worker dependency)
                 (cons job jobs)))]))
   (rec (parser-job-continuation/worker (scheduler-requested-job scheduler)) '()))
@@ -210,14 +181,14 @@ Simplifications from the full core.rkt:
     [(parser-job parser start-position result-index k/worker result result-stream)
      (match k/worker
        [(scheduled-continuation job k dependency)
-        (do-run! scheduler k job #t (job->result dependency))]
+        (do-run! scheduler k job #t (parser-job-result dependency))]
        [(alt-worker job (list))
         ;; Finished alt-worker.
         (cache-result! scheduler job empty-stream)
         (run-scheduler scheduler)]
        [(alt-worker job remaining-jobs)
-        (define inner-ready-job (findf job->result remaining-jobs))
-        (define result (job->result inner-ready-job))
+        (define inner-ready-job (findf parser-job-result remaining-jobs))
+        (define result (parser-job-result inner-ready-job))
         (define other-remaining-jobs (remq inner-ready-job remaining-jobs))
         (define new-remaining-jobs
           (if (parse-failure? result)
