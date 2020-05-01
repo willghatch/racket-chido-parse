@@ -2,14 +2,12 @@
 #|
 Simplifications from the full core.rkt:
 * Error handling - parse failure objects are replaced by empty-stream objects with no interesting data.
-* derivation objects - results are strict instead of potentially lazy, only start/end positions are tracked (no line/column/span/source-name)
-* proc-parsers and alt-parsers have no extra metadata like prefix, nullability, promise-no-left-recursion, prefix tries, etc
-* no custom parser structs or raw strings (but still supporting parser thunks because they are useful to “tie the knot”)
-* the scheduler always captures continuations, not checking whether left recursion is possible
-* jobs don't track their dependents to update them automatically - we just do a search for available work each time we enter the scheduler
-* no chido-parse-parameters
-* input is string-based instead of port-based -- note that this means parse functions are (-> string position stream-tree) instead of (-> port stream-tree)
-* caching is simpler
+* Derivation objects - results are strict instead of potentially lazy, only start/end positions are tracked (no line/column/span/source-name).
+* Proc-parsers and alt-parsers have no extra metadata like prefix, nullability, promise-no-left-recursion, prefix tries, etc.
+* No custom parser structs or raw strings.
+* No chido-parse-parameters.
+* Input is string-based instead of port-based -- note that this means parse functions are (-> string position stream-tree) instead of (-> port stream-tree)
+* Everything is written with no thought for performance.
 |#
 
 (require racket/match racket/stream "stream-flatten.rkt")
