@@ -13,9 +13,9 @@ Simplifications from the full core.rkt:
 
 (require racket/match racket/stream "stream-flatten.rkt")
 
-(struct scheduler (input-string [requested-job #:mutable] job-cache))
+(struct scheduler (input-string job-cache))
 (define (make-scheduler input-string)
-  (scheduler input-string #f (make-job-cache)))
+  (scheduler input-string (make-job-cache)))
 
 (struct proc-parser (procedure))
 (struct alt-parser (parsers))
@@ -110,17 +110,14 @@ Simplifications from the full core.rkt:
                (abort-current-continuation chido-parse-prompt #f))
              chido-parse-prompt))
           ;; This is the original entry into the parser machinery.
-          (let ([result (begin (set-scheduler-requested-job! scheduler job)
-                               (run-scheduler scheduler))])
-            (set-scheduler-requested-job! scheduler #f)
-            result))))
+          (run-scheduler scheduler job))))
 
-(define (run-scheduler s)
-  (or (parser-job-result (scheduler-requested-job s))
-      (let ([next-job (find-work s '() (list (scheduler-requested-job s)))])
+(define (run-scheduler s goal-job)
+  (or (parser-job-result goal-job)
+      (let ([next-job (find-work s '() (list goal-job))])
         (if (not next-job)
-            (begin (fail-cycle! s) (run-scheduler s))
-            (schedule-job! s next-job)))))
+            (begin (fail-cycle! s goal-job) (run-scheduler s goal-job))
+            (schedule-job! s next-job goal-job)))))
 
 (define (find-work s blocked-jobs to-check)
   ;; Returns #f if no work is found
@@ -145,7 +142,7 @@ Simplifications from the full core.rkt:
            [(stream-worker _) j]
            [#f j]))))
 
-(define (fail-cycle! scheduler)
+(define (fail-cycle! scheduler goal-job)
   ;; Fail the first job that is found to depend back on something earlier in
   ;; the chain back to the root goal.
   (define (rec goal jobs)
@@ -158,20 +155,20 @@ Simplifications from the full core.rkt:
            (set-scheduled-continuation-dependency! goal cycle-breaker-job)
            (rec (parser-job-continuation/worker dependency)
                 (cons job jobs)))]))
-  (rec (parser-job-continuation/worker (scheduler-requested-job scheduler)) '()))
+  (rec (parser-job-continuation/worker goal-job) '()))
 
-(define (schedule-job! scheduler job)
+(define (schedule-job! scheduler job goal-job)
   (match job
     [(parser-job parser pos result-index k/worker result)
      (match k/worker
        [(scheduled-continuation job k dependency)
-        (do-run! scheduler k job #t (parser-job-result dependency))]
+        (do-run! scheduler k job #t (parser-job-result dependency) goal-job)]
        [(stream-worker result-stream)
-        (do-run! scheduler (λ () (stream-rest result-stream)) job #f #f)]
+        (do-run! scheduler (λ () (stream-rest result-stream)) job #f #f goal-job)]
        [(alt-worker job (list))
         ;; Finished alt-worker.
         (cache-result! scheduler job empty-stream)
-        (run-scheduler scheduler)]
+        (run-scheduler scheduler goal-job)]
        [(alt-worker job remaining-jobs)
         (define inner-ready-job (findf parser-job-result remaining-jobs))
         (define result (parser-job-result inner-ready-job))
@@ -191,21 +188,21 @@ Simplifications from the full core.rkt:
             (set-alt-worker-job! k/worker this-next-job)
             (set-parser-job-continuation/worker! this-next-job k/worker)
             (set-parser-job-continuation/worker! job #f)))
-        (run-scheduler scheduler)]
+        (run-scheduler scheduler goal-job)]
        ;; There is no k/worker on the first run of a parser
        [#f (match parser
              [(proc-parser procedure)
               (do-run! scheduler
                        (λ () (procedure (scheduler-input-string scheduler)
                                         pos))
-                       job #f #f)]
+                       job #f #f goal-job)]
              [(alt-parser parsers)
               (set-parser-job-continuation/worker!
                job
                (alt-worker job (map (λ (p) (get-job scheduler p pos 0)) parsers)))
-              (run-scheduler scheduler)])])]))
+              (run-scheduler scheduler goal-job)])])]))
 
-(define (do-run! scheduler thunk/k job continuation-run? k-arg)
+(define (do-run! scheduler thunk/k job continuation-run? k-arg goal-job)
   ;; When continuation-run? is true, we are running a continuation
   ;; (instead of a fresh thunk) and we want to supply k-arg.
   ;; This keeps us from growing the continuation at all when recurring.
@@ -222,7 +219,7 @@ Simplifications from the full core.rkt:
                                                         parse*-direct-prompt))))))
   (let flatten-loop ([result result])
     (if (eq? result recursive-enter-flag)
-        (run-scheduler scheduler)
+        (run-scheduler scheduler goal-job)
         (if (and (stream? result)
                  (not (flattened-stream? result))
                  (not (stream-empty? result)))
@@ -233,7 +230,7 @@ Simplifications from the full core.rkt:
               chido-parse-prompt
               result-loop))
             (begin (cache-result! scheduler job result)
-                   (run-scheduler scheduler))))))
+                   (run-scheduler scheduler goal-job))))))
 
 (define (cache-result! scheduler job result)
   (if (proc-parser? (parser-job-parser job))
