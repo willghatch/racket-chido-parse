@@ -1,5 +1,4 @@
 #lang racket/base
-
 #|
 Simplifications from the full core.rkt:
 * Error handling - parse failure objects are replaced by empty-stream objects with no interesting data.
@@ -13,11 +12,33 @@ Simplifications from the full core.rkt:
 * caching is simpler
 |#
 
-(require
- "stream-flatten.rkt"
- racket/stream
- racket/match
- )
+(require racket/match racket/stream "stream-flatten.rkt")
+
+(struct scheduler (input-string [requested-job #:mutable] job-cache))
+(define (make-scheduler input-string)
+  (scheduler input-string #f (make-job-cache)))
+
+(struct proc-parser (procedure))
+(struct alt-parser (parsers))
+;; We also allow (-> parser) thunks as parsers, which is helpful to tie the knot for recursive references.
+(define parser-cache (make-weak-hasheq))
+(define (parser->usable p)
+  (match p
+    [(or (? proc-parser?) (? alt-parser?)) p]
+    [(? procedure?)
+     (hash-ref parser-cache p (λ () (let ([result (parser->usable (p))])
+                                      (hash-set! parser-cache p result)
+                                      result)))]))
+
+(struct parser-job
+  (parser start-position result-index
+   [continuation/worker #:mutable] [result #:mutable] [result-stream #:mutable]))
+(define cycle-breaker-job (parser-job #f #f #f #f empty-stream #f))
+(struct alt-worker (job remaining-jobs) #:mutable)
+(struct scheduled-continuation
+  ;; The dependency is only mutated to break cycles.
+  (job k [dependency #:mutable]))
+(define current-chido-parse-job (make-parameter #f))
 
 (struct parse-derivation (result parser start-position end-position derivation-list))
 (define (make-parse-derivation result derivations [end #f])
@@ -33,44 +54,11 @@ Simplifications from the full core.rkt:
      (parse-derivation result parser start-position end-use derivations)]
     [else (error 'make-parse-derivation "Not called during the dynamic extent of chido-parse...")]))
 
-(struct proc-parser (procedure))
-(struct alt-parser (parsers))
-;; We also allow (-> parser) thunks as parsers, which is helpful to tie the knot for recursive references.
-(define parser-cache (make-weak-hasheq))
-(define (parser->usable p)
-  (match p
-    [(or (? proc-parser?) (? alt-parser?)) p]
-    [(? procedure?)
-     (hash-ref parser-cache p (λ () (let ([result (parser->usable (p))])
-                                      (hash-set! parser-cache p result)
-                                      result)))]))
-
-(define (parse-stream result next-job scheduler)
-  (stream-cons result (if next-job
-                          (enter-the-parser/job scheduler next-job)
-                          empty-stream)))
-(define (parse-failure? x) (and (stream? x) (stream-empty? x)))
-
-(struct scheduler (input-string [requested-job #:mutable] job-cache))
-(define (make-scheduler input-string)
-  (scheduler input-string #f (make-job-cache)))
-
-(struct parser-job
-  (parser start-position result-index
-   [continuation/worker #:mutable] [result #:mutable] [result-stream #:mutable]))
-
-(define cycle-breaker-job (parser-job #f #f #f #f empty-stream #f))
-
-(struct alt-worker (job remaining-jobs) #:mutable)
-
-(struct scheduled-continuation
-  ;; The dependency is only mutated to break cycles.
-  (job k [dependency #:mutable]))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;;; Caches
 
-(define string->scheduler-cache (make-hash))
+(define string->scheduler-cache (make-weak-hash))
 (define (string->scheduler str)
   (hash-ref string->scheduler-cache str (λ ()
                                           (define s (make-scheduler str))
@@ -88,37 +76,38 @@ Simplifications from the full core.rkt:
                               (hash-set! cache key fresh-job)
                               fresh-job))))
 
-(define (get-next-job scheduler job)
-  (match job
-    [(parser-job parser start-position result-index _ _ _)
-     (define next-index (add1 result-index))
-     (get-job scheduler parser start-position next-index)]))
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;;; Parsing outer API
 
+(define (parse* in-string parser pos)
+  (define scheduler (string->scheduler in-string))
+  (enter-the-parser scheduler (get-job scheduler parser pos 0)))
+
+(define (parse*-direct in-string parser pos)
+  (call-with-composable-continuation
+   (λ (k)
+     (abort-current-continuation
+      parse*-direct-prompt
+      (λ () (for/parse ([d (parse* in-string parser pos)])
+                       (k d)))))
+   parse*-direct-prompt))
+
+(define-syntax-rule (for/parse ([arg-name input-stream]) body)
+  (let loop ([stream input-stream])
+    (cond [(stream-empty? stream) stream]
+          [else (let ([arg-name (stream-first stream)])
+                  (stream-cons body
+                               (loop (stream-rest stream))))])))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;;;; Scheduling
+;;;;; Parsing
 
-(define chido-parse-prompt (make-continuation-prompt-tag 'chido-parse-prompt))
-(define parse*-direct-prompt (make-continuation-prompt-tag 'parse*-direct-prompt))
-(define-syntax-rule (delimit-parse*-direct e)
-  (call-with-continuation-prompt (λ () e) parse*-direct-prompt))
-
-
-(define current-chido-parse-job (make-parameter #f))
-(define recursive-enter-flag (gensym 'recursive-enter-flag))
-
-(define (enter-the-parser scheduler parser start-position)
-  (define j (get-job scheduler parser start-position 0))
-  (enter-the-parser/job scheduler j))
-
-(define (enter-the-parser/job scheduler job)
-  (define ready-result (parser-job-result job))
-  (or ready-result
+(define (enter-the-parser scheduler job)
+  (or (parser-job-result job)
       (if (current-chido-parse-job)
           ;; This is a (potentially left-) recursive call.
           ;; So we de-schedule the current work by capturing its continuation,
-          ;; we schedule its dependency, and then we abort back to the
-          ;; scheduler loop.
+          ;; and then we abort back to the scheduler.
           (let ([parent-job (current-chido-parse-job)])
             (call-with-composable-continuation
              (λ (k)
@@ -296,27 +285,25 @@ Simplifications from the full core.rkt:
      (set-parser-job-result! job wrapped-result)]))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;;;;; Parsing outer API
-(define (parse* in-string parser pos)
-  (define scheduler (string->scheduler in-string))
-  (enter-the-parser scheduler parser pos))
+;;;;; Miscellaneous
 
-(define (parse*-direct in-string parser pos)
-  (call-with-composable-continuation
-   (λ (k)
-     (abort-current-continuation
-      parse*-direct-prompt
-      (λ () (for/parse ([d (parse* in-string parser pos)])
-                       (k d)))))
-   parse*-direct-prompt))
+(define chido-parse-prompt (make-continuation-prompt-tag 'chido-parse-prompt))
+(define parse*-direct-prompt (make-continuation-prompt-tag 'parse*-direct-prompt))
+(define-syntax-rule (delimit-parse*-direct e)
+  (call-with-continuation-prompt (λ () e) parse*-direct-prompt))
 
-(define-syntax-rule (for/parse ([arg-name input-stream]) body)
-  (let loop ([stream input-stream])
-    (cond [(stream-empty? stream) stream]
-          [else (let ([arg-name (stream-first stream)])
-                  (stream-cons body
-                               (loop (stream-rest stream))))])))
+(define recursive-enter-flag (gensym 'recursive-enter-flag))
 
+(define (get-next-job scheduler job)
+  (match job
+    [(parser-job parser start-position result-index _ _ _)
+     (get-job scheduler parser start-position (add1 result-index))]))
+
+(define (parse-stream result next-job scheduler)
+  (stream-cons result (if next-job
+                          (enter-the-parser scheduler next-job)
+                          empty-stream)))
+(define (parse-failure? x) (and (stream? x) (stream-empty? x)))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;;; Tests
