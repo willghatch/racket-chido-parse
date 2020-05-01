@@ -2,7 +2,7 @@
 
 #|
 Simplifications from the full core.rkt:
-* Error handling - there is only one error object which contains no useful data
+* Error handling - parse failure objects are replaced by empty-stream objects with no interesting data.
 * derivation objects - results are strict instead of potentially lazy, only start/end positions are tracked (no line/column/span/source-name)
 * proc-parsers and alt-parsers have no extra metadata like prefix, nullability, promise-no-left-recursion, prefix tries, etc
 * no custom parser structs or raw strings (but still supporting parser thunks because they are useful to “tie the knot”)
@@ -12,6 +12,10 @@ Simplifications from the full core.rkt:
 
 * TODO - maybe switch to string input instead of ports (needs a change from parsers being (-> port derivation) to (-> string position derivation))
 * TODO - maybe simplify the caching -- eg. sibling jobs are stored in a vector in the job record itself
+
+* TODO - don't use keyword-based struct matchers
+
+* TODO - change the API anywhere it makes the implementation simpler.  Eg. maybe there is only 1 scheduler.
 |#
 
 
@@ -58,7 +62,6 @@ Simplifications from the full core.rkt:
                                           derivation-list)))
                          (error 'make-parse-derivation
                                 "Couldn't infer end location and none provided.")))
-     (define delayed? (procedure? result))
      (parse-derivation result
                        parser
                        start-position end-use
@@ -81,6 +84,7 @@ Simplifications from the full core.rkt:
                (parser->usable result)))]
         [else (error 'chido-parse "not a parser: ~s" p)]))
 
+;; TODO - just make a regular stream that uses the logic here in the stream-cons thing
 (struct parse-stream
   (result next-job scheduler)
   #:methods gen:stream
@@ -93,15 +97,7 @@ Simplifications from the full core.rkt:
                                (parse-stream-next-job s))
          empty-stream))])
 
-(struct parse-failure ()
-  #:transparent
-  #:methods gen:stream
-  [(define (stream-empty? s) #t)
-   (define (stream-first s)
-     (error 'stream-first "empty stream"))
-   (define (stream-rest s)
-     (error 'stream-rest "empty stream"))])
-
+(define (parse-failure? x) (and (stream? x) (stream-empty? x)))
 
 (struct scheduler
   (port-broker [requested-job #:mutable] job-cache)
@@ -130,7 +126,7 @@ Simplifications from the full core.rkt:
 
 (define (job->result job)
   (match job
-    [(cycle-breaker-job) (parse-failure)]
+    [(cycle-breaker-job) empty-stream]
     [(s/kw parser-job #:result r) r]))
 
 (struct alt-worker
@@ -309,11 +305,12 @@ Simplifications from the full core.rkt:
         (do-run! scheduler k job #t (job->result dependency))]
        [(s/kw alt-worker #:job job #:remaining-jobs (list))
         ;; Finished alt-worker.
-        (cache-result! scheduler job (parse-failure))
+        (cache-result! scheduler job empty-stream)
         (run-scheduler scheduler)]
        [(s/kw alt-worker #:job job #:remaining-jobs remaining-jobs)
         (define inner-ready-job (findf job->result remaining-jobs))
         (when (not inner-ready-job)
+          ;; TODO - prune away this assertion by the end
           (error 'schedule-job! "scheduled an alt-job that wasn't ready: ~a" (job->display job)))
         (define result (job->result inner-ready-job))
         (define other-remaining-jobs (remq inner-ready-job remaining-jobs))
@@ -365,7 +362,7 @@ Simplifications from the full core.rkt:
               (run-scheduler scheduler)])]
           [else
            ;; In this case there has been a result stream but it is dried up.
-           (cache-result! scheduler job (parse-failure))
+           (cache-result! scheduler job empty-stream)
            (set-parser-job-continuation/worker! job #f)
            (run-scheduler scheduler)])])]))
 
@@ -417,10 +414,10 @@ Simplifications from the full core.rkt:
   ;; Clear the result-stream, if there is one, because it's not needed anymore.
   (set-parser-job-result-stream! job #f)
   (match result
-    [(s/kw parse-failure)
+    [(? parse-failure?)
      (set-parser-job-result! job result)]
     [(? (λ (x) (and (stream? x) (stream-empty? x))))
-     (set-parser-job-result! job (parse-failure))]
+     (set-parser-job-result! job empty-stream)]
     [(? stream?)
      ;; Recur with stream-first, setting the stream as the result-stream.
      ;; Note that because we have already flattened result streams, stream-first
@@ -529,7 +526,7 @@ The parse*-direct function needs its own continuation prompt.  When called durin
         (make-parse-derivation "a"
                                #:end (add1 pos)
                                #:derivations '())
-        (parse-failure)))
+        empty-stream))
   (define a1-parser-obj (proc-parser "a" a1-parser-proc))
 
   (define (Aa-parser-proc port)
