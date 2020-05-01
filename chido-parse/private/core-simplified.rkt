@@ -9,13 +9,8 @@ Simplifications from the full core.rkt:
 * the scheduler always captures continuations, not checking whether left recursion is possible
 * jobs don't track their dependents to update them automatically - we just do a search for available work each time we enter the scheduler
 * no chido-parse-parameters
-
-* TODO - maybe switch to string input instead of ports (needs a change from parsers being (-> port derivation) to (-> string position derivation))
-* TODO - maybe simplify the caching -- eg. sibling jobs are stored in a vector in the job record itself
-
-* TODO - don't use keyword-based struct matchers
-
-* TODO - change the API anywhere it makes the implementation simpler.  Eg. maybe there is only 1 scheduler.
+* input is string-based instead of port-based -- note that this means parse functions are (-> string position stream-tree) instead of (-> port stream-tree)
+* caching is simpler
 |#
 
 
@@ -23,15 +18,7 @@ Simplifications from the full core.rkt:
  "stream-flatten.rkt"
  racket/stream
  racket/match
- (for-syntax
-  racket/base
-  syntax/parse
-  ))
-
-(module+ test
-  (require
-   rackunit
-   ))
+ )
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;; Structs
@@ -172,6 +159,11 @@ Simplifications from the full core.rkt:
 ;;;; Scheduling
 
 (define chido-parse-prompt (make-continuation-prompt-tag 'chido-parse-prompt))
+(define parse*-direct-prompt (make-continuation-prompt-tag 'parse*-direct-prompt))
+(define-syntax-rule (delimit-parse*-direct e)
+  (call-with-continuation-prompt (λ () e) parse*-direct-prompt))
+
+
 (define current-chido-parse-job (make-parameter #f))
 (define recursive-enter-flag (gensym 'recursive-enter-flag))
 
@@ -410,41 +402,23 @@ Simplifications from the full core.rkt:
                        (k d)))))
    parse*-direct-prompt))
 
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;;;; for/parse stuff
-;;;; I'm putting this stuff inline because not supporting chido-parse-parameters simplifies the implementation of for/parse.
 
-#|
-The parse*-direct function needs its own continuation prompt.  When called during evaluation of a stream, it should NOT abort the processing of that stream to return its own stream instead.  The parse*-direct stream should be a child of any outer streams that are being processed.  Also, not supporting good failure objects simplifies it as well.
-|#
-(define parse*-direct-prompt (make-continuation-prompt-tag 'parse*-direct-prompt))
-
-(define-syntax (delimit-parse*-direct stx)
-  (syntax-parse stx
-    [(_ e:expr)
-     #'(call-with-continuation-prompt
-        (λ () e)
-        parse*-direct-prompt)]))
-
-
-(define (for/parse-proc body-proc arg-stream-thunk)
-  (let loop ([stream (arg-stream-thunk)])
+(define-syntax-rule (for/parse ([arg-name input-stream]) body)
+  (let loop ([stream input-stream])
     (cond [(stream-empty? stream) stream]
-          [else (let ([v1 (stream-first stream)])
-                  (stream-cons (body-proc v1)
+          [else (let ([arg-name (stream-first stream)])
+                  (stream-cons body
                                (loop (stream-rest stream))))])))
 
-(define-syntax (for/parse stx)
-  (syntax-parse stx
-    [(_ ([arg-name input-stream])
-        body ...+)
-     #'(for/parse-proc (λ (arg-name) body ...)
-                       (λ () input-stream))]))
+
+
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;;; Tests
 
 (module+ test
+  (require rackunit)
+
   (define s1 "aaaaa")
 
   (define (a1-parser-proc in-string position)
