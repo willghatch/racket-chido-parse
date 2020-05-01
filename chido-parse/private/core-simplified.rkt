@@ -20,8 +20,6 @@ Simplifications from the full core.rkt:
 
 
 (require
- "port-broker.rkt"
- "ephemeron-cache.rkt"
  "stream-flatten.rkt"
  racket/stream
  racket/match
@@ -70,6 +68,7 @@ Simplifications from the full core.rkt:
                  "Not called during the dynamic extent of chido-parse...")]))
 
 (struct parser-struct (name) #:transparent)
+;; In this model, proc-parser procedures must be of type (-> string position stream-tree)
 (struct proc-parser parser-struct (procedure) #:transparent)
 (struct alt-parser parser-struct (parsers) #:transparent)
 
@@ -93,10 +92,10 @@ Simplifications from the full core.rkt:
 (define (parse-failure? x) (and (stream? x) (stream-empty? x)))
 
 (struct scheduler
-  (port-broker [requested-job #:mutable] job-cache)
+  (input-string [requested-job #:mutable] job-cache)
   #:transparent)
-(define (make-scheduler port-broker)
-  (scheduler port-broker #f (make-job-cache)))
+(define (make-scheduler input-string)
+  (scheduler input-string #f (make-job-cache)))
 
 (struct parser-job
   (parser
@@ -155,11 +154,12 @@ Simplifications from the full core.rkt:
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;;; Caches
 
-;; Scheduler cache (IE global cache containing scheduler objects):
-;; A weak hash port-broker->ephemeron with scheduler.
-(define the-scheduler-cache (make-weak-hasheq))
-(define port-broker-scheduler
-  (make-ephemeron-cache-lookup the-scheduler-cache make-scheduler))
+(define string->scheduler-cache (make-hash))
+(define (string->scheduler str)
+  (hash-ref string->scheduler-cache str (λ ()
+                                          (define s (make-scheduler str))
+                                          (hash-set! string->scheduler-cache str s)
+                                          s)))
 
 ;; The job cache is a hash table mapping (list parser start-position) to job-0s.
 ;; Jobs contain a (mutable) vector of their siblings.
@@ -199,10 +199,9 @@ Simplifications from the full core.rkt:
 (define current-chido-parse-job (make-parameter #f))
 (define recursive-enter-flag (gensym 'recursive-enter-flag))
 
-(define (enter-the-parser port-broker parser start-position)
-  (define s (port-broker-scheduler port-broker))
-  (define j (get-job-0! s parser start-position))
-  (enter-the-parser/job s j))
+(define (enter-the-parser scheduler parser start-position)
+  (define j (get-job-0! scheduler parser start-position))
+  (enter-the-parser/job scheduler j))
 
 (define (enter-the-parser/job scheduler job)
   (define ready-result (job->result job))
@@ -337,16 +336,14 @@ Simplifications from the full core.rkt:
            ;; IE the first run of a parser
            (match parser
              [(s/kw proc-parser #:procedure procedure)
-              (define proc-input (port-broker->port (scheduler-port-broker scheduler)
-                                                    start-position))
               (do-run! scheduler
-                       (λ () (procedure proc-input))
+                       (λ () (procedure (scheduler-input-string scheduler)
+                                        start-position))
                        job
                        #f #f)]
              [(s/kw alt-parser #:parsers parsers)
               (define (mk-dep p)
                 (get-job-0! scheduler p start-position))
-              (define pb (scheduler-port-broker scheduler))
               (define dep-jobs (map mk-dep parsers))
               (define worker (alt-worker job dep-jobs))
               (set-parser-job-continuation/worker! job worker)
@@ -426,50 +423,18 @@ Simplifications from the full core.rkt:
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;;; Parsing outer API
-(define (port->pos p)
-  (let-values ([(line col pos) (port-next-location p)]) pos))
+(define (parse* in-string parser pos)
+  (define scheduler (string->scheduler in-string))
+  (enter-the-parser scheduler parser pos))
 
-(define (parse-inner core-proc port/pbw parser start)
-  (define pb (or (port->port-broker port/pbw)
-                 (port-broker port/pbw)))
-  (define start-pos (match start
-                      [(? number?) start]
-                      [(? parse-derivation?) (parse-derivation-end-position start)]
-                      [#f (port->pos port/pbw)]))
-  (core-proc pb parser start-pos))
-
-(define (parse* port/pbw parser
-                #:start [start #f])
-  (parse-inner enter-the-parser
-               (cond [(string? port/pbw) (open-input-string port/pbw)]
-                     [(input-port? port/pbw) port/pbw]
-                     [else (error 'parse* "bad input: ~v" port/pbw)])
-               parser
-               start))
-
-(define (parse*-direct port parser
-                      #:start [start #f]
-                      #:failure [failure-arg #f])
-  (when (not (input-port? port))
-    (error 'parse*-direct "parse*-direct requires a port as an argument, given: ~v"
-           port))
-  (define start-use (or start (port->pos port)))
-  ;; This one lets the user get a single result back, but the return is actually a stream.
-  (define (direct-recursive-parse-core pb parser core-start)
-    (define job (current-chido-parse-job))
-    (define new-derivation
-      (call-with-composable-continuation
-       (λ (k)
-         (abort-current-continuation
-          parse*-direct-prompt
-          ;; TODO - better failure handling and propagation
-          (λ () (for/parse ([d (parse* port parser #:start core-start)])
-                           (k d)))))
-       parse*-direct-prompt))
-    (define new-pos (parse-derivation-end-position new-derivation))
-    (port-broker-port-reset-position! port new-pos)
-    new-derivation)
-  (parse-inner direct-recursive-parse-core port parser start-use))
+(define (parse*-direct in-string parser pos)
+  (call-with-composable-continuation
+   (λ (k)
+     (abort-current-continuation
+      parse*-direct-prompt
+      (λ () (for/parse ([d (parse* in-string parser pos)])
+                       (k d)))))
+   parse*-direct-prompt))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;; for/parse stuff
@@ -507,25 +472,22 @@ The parse*-direct function needs its own continuation prompt.  When called durin
 
 (module+ test
   (define s1 "aaaaa")
-  (define p1 (open-input-string s1))
-  (port-count-lines! p1)
 
-  (define (a1-parser-proc port)
-    (define-values (line col pos) (port-next-location port))
-    (define c (read-char port))
+  (define (a1-parser-proc in-string position)
+    (define c (and (< position (string-length in-string))
+                   (string-ref in-string position)))
     (if (equal? c #\a)
         (make-parse-derivation "a"
-                               #:end (add1 pos)
+                               #:end (add1 position)
                                #:derivations '())
         empty-stream))
   (define a1-parser-obj (proc-parser "a" a1-parser-proc))
 
-  (define (Aa-parser-proc port)
+  (define (Aa-parser-proc in-string pos)
     (for/parse
-     ([d/A (parse* port (get-A-parser))])
+     ([d/A (parse* in-string (get-A-parser) pos)])
      (for/parse
-      ([d/a (parse* port a1-parser-obj
-                    #:start d/A)])
+      ([d/a (parse* in-string a1-parser-obj (parse-derivation-end-position d/A))])
       (make-parse-derivation (string-append (parse-derivation-result d/A)
                                             (parse-derivation-result d/a))
                              #:derivations (list d/A d/a)))))
@@ -539,14 +501,14 @@ The parse*-direct function needs its own continuation prompt.  When called durin
                                 a1-parser-obj)))
   (define (get-A-parser) A-parser)
 
-  (define results1 (parse* p1 A-parser))
+  (define results1 (parse* s1 A-parser 0))
   (check-equal? (map parse-derivation-result (stream->list results1))
                 (list "a" "aa" "aaa" "aaaa" "aaaaa"))
 
 
-  (define (Aa-parser-proc/direct port)
-    (define d/A (parse*-direct port (get-A-parser/direct)))
-    (define d/a (parse*-direct port a1-parser-obj))
+  (define (Aa-parser-proc/direct in-string pos)
+    (define d/A (parse*-direct in-string (get-A-parser/direct) pos))
+    (define d/a (parse*-direct in-string a1-parser-obj (parse-derivation-end-position d/A)))
     (make-parse-derivation (string-append (parse-derivation-result d/A)
                                           (parse-derivation-result d/a))
                            #:derivations (list d/A d/a)))
@@ -558,7 +520,7 @@ The parse*-direct function needs its own continuation prompt.  When called durin
                                        a1-parser-obj)))
   (define (get-A-parser/direct) A-parser/direct)
 
-  (define results2 (parse* p1 A-parser/direct))
+  (define results2 (parse* s1 A-parser/direct 0))
   (check-equal? (map parse-derivation-result (stream->list results2))
                 (list "a" "aa" "aaa" "aaaa" "aaaaa"))
   )
