@@ -20,7 +20,8 @@ Simplifications from the full core.rkt:
 
 (struct proc-parser (procedure))
 (struct alt-parser (parsers))
-;; We also allow (-> parser) thunks as parsers, which is helpful to tie the knot for recursive references.
+;; We also allow (-> parser) thunks as parsers, which is helpful to tie
+;; the knot for recursive references.
 (define parser-cache (make-weak-hasheq))
 (define (parser->usable p)
   (match p
@@ -41,19 +42,12 @@ Simplifications from the full core.rkt:
 (define current-chido-parse-job (make-parameter #f))
 
 (struct parse-derivation (result parser start-position end-position derivation-list))
-(define (make-parse-derivation result derivations [end #f])
+(define (make-parse-derivation result derivations end)
   (match (current-chido-parse-job)
     [(parser-job parser start-position _ _ _ _)
-     (define end-use (or end
-                         (and (not (null? derivations))
-                              (apply max
-                                     (map parse-derivation-end-position
-                                          derivations)))
-                         (error 'make-parse-derivation
-                                "Couldn't infer end location and none provided.")))
-     (parse-derivation result parser start-position end-use derivations)]
-    [else (error 'make-parse-derivation "Not called during the dynamic extent of chido-parse...")]))
-
+     (parse-derivation result parser start-position end derivations)]
+    [else (error 'make-parse-derivation
+                 "Not called during the dynamic extent of chido-parse...")]))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;;; Caches
@@ -111,14 +105,13 @@ Simplifications from the full core.rkt:
           (let ([parent-job (current-chido-parse-job)])
             (call-with-composable-continuation
              (λ (k)
-               (define sched-k (scheduled-continuation parent-job k job))
-               (set-parser-job-continuation/worker! parent-job sched-k)
+               (set-parser-job-continuation/worker!
+                parent-job (scheduled-continuation parent-job k job))
                (abort-current-continuation chido-parse-prompt #f))
              chido-parse-prompt))
           ;; This is the original entry into the parser machinery.
-          (let ([result (begin
-                          (set-scheduler-requested-job! scheduler job)
-                          (run-scheduler scheduler))])
+          (let ([result (begin (set-scheduler-requested-job! scheduler job)
+                               (run-scheduler scheduler))])
             (set-scheduler-requested-job! scheduler #f)
             result))))
 
@@ -145,14 +138,15 @@ Simplifications from the full core.rkt:
             (cond [(null? remaining-jobs) j]
                   [(findf parser-job-result remaining-jobs) j]
                   [else (define new-blocked (cons j blocked-jobs))
-                        (define add-to-check (filter (λ (x) (not (memq x new-blocked)))
-                                                     remaining-jobs))
+                        (define add-to-check
+                          (filter (λ (x) (not (memq x new-blocked))) remaining-jobs))
                         (define new-to-check (append add-to-check (cdr to-check)))
                         (find-work s new-blocked new-to-check)])]
            [#f j]))))
 
 (define (fail-cycle! scheduler)
-  ;; Fail the first job that is found to depend back on something earlier in the chain back to the root goal.
+  ;; Fail the first job that is found to depend back on something earlier in
+  ;; the chain back to the root goal.
   (define (rec goal jobs)
     (match goal
       [(alt-worker job remaining-jobs)
@@ -167,7 +161,7 @@ Simplifications from the full core.rkt:
 
 (define (schedule-job! scheduler job)
   (match job
-    [(parser-job parser start-position result-index k/worker result result-stream)
+    [(parser-job parser pos result-index k/worker result result-stream)
      (match k/worker
        [(scheduled-continuation job k dependency)
         (do-run! scheduler k job #t (parser-job-result dependency))]
@@ -185,51 +179,42 @@ Simplifications from the full core.rkt:
               (cons (get-next-job scheduler inner-ready-job)
                     other-remaining-jobs)))
         (set-alt-worker-remaining-jobs! k/worker new-remaining-jobs)
-        (match result
-          [(? parse-failure?) (void)]
-          [(? stream?)
-           (let ([result-contents (stream-first result)]
-                 [this-next-job (get-next-job scheduler job)])
-             (define result-stream
-               (parse-stream result-contents this-next-job scheduler))
-             (cache-result! scheduler job result-stream)
-             (set-alt-worker-job! k/worker this-next-job)
-             (set-parser-job-continuation/worker! this-next-job k/worker)
-             (set-parser-job-continuation/worker! job #f))])
+        (when (not (parse-failure? result))
+          (let ([result-contents (stream-first result)]
+                [this-next-job (get-next-job scheduler job)])
+            (define result-stream
+              (parse-stream result-contents this-next-job scheduler))
+            (cache-result! scheduler job result-stream)
+            (set-alt-worker-job! k/worker this-next-job)
+            (set-parser-job-continuation/worker! this-next-job k/worker)
+            (set-parser-job-continuation/worker! job #f)))
         (run-scheduler scheduler)]
-       [#f
-        ;; no k/worker case
-        (cond
-          [(stream? result-stream)
-           ;; IE the case of a procedural parser with a result stream to force
-           (do-run! scheduler
-                    (λ () (stream-rest result-stream))
-                    job
-                    #f #f)]
-          [(equal? 0 result-index)
-           ;; IE the first run of a parser
-           (match parser
-             [(proc-parser procedure)
-              (do-run! scheduler
-                       (λ () (procedure (scheduler-input-string scheduler)
-                                        start-position))
-                       job
-                       #f #f)]
-             [(alt-parser parsers)
-              (define (mk-dep p)
-                (get-job scheduler p start-position 0))
-              (define dep-jobs (map mk-dep parsers))
-              (define worker (alt-worker job dep-jobs))
-              (set-parser-job-continuation/worker! job worker)
-              (run-scheduler scheduler)])]
-          [else
-           ;; In this case there has been a result stream but it is dried up.
-           (cache-result! scheduler job empty-stream)
-           (set-parser-job-continuation/worker! job #f)
-           (run-scheduler scheduler)])])]))
+       ;; no k/worker case
+       [#f (cond
+             [(stream? result-stream)
+              ;; IE the case of a procedural parser with a result stream to force
+              (do-run! scheduler (λ () (stream-rest result-stream)) job #f #f)]
+             [(equal? 0 result-index)
+              ;; IE the first run of a parser
+              (match parser
+                [(proc-parser procedure)
+                 (do-run! scheduler
+                          (λ () (procedure (scheduler-input-string scheduler)
+                                           pos))
+                          job #f #f)]
+                [(alt-parser parsers)
+                 (set-parser-job-continuation/worker!
+                  job
+                  (alt-worker job (map (λ (p) (get-job scheduler p pos 0)) parsers)))
+                 (run-scheduler scheduler)])]
+             [else
+              ;; In this case there has been a result stream but it is dried up.
+              (cache-result! scheduler job empty-stream)
+              (run-scheduler scheduler)])])]))
 
 (define (do-run! scheduler thunk/k job continuation-run? k-arg)
-  ;; When continuation-run? is true, we are running a continuation (instead of a fresh thunk) and we want to supply k-arg.
+  ;; When continuation-run? is true, we are running a continuation
+  ;; (instead of a fresh thunk) and we want to supply k-arg.
   ;; This keeps us from growing the continuation at all when recurring.
   (define (result-loop new-thunk)
     (if new-thunk
@@ -237,15 +222,11 @@ Simplifications from the full core.rkt:
         recursive-enter-flag))
   (define result
     (if continuation-run?
-        (call-with-continuation-prompt thunk/k
-                                       chido-parse-prompt
-                                       result-loop
-                                       k-arg)
+        (call-with-continuation-prompt thunk/k chido-parse-prompt result-loop k-arg)
         (result-loop (λ ()
                        (parameterize ([current-chido-parse-job job])
-                         (call-with-continuation-prompt
-                          thunk/k
-                          parse*-direct-prompt))))))
+                         (call-with-continuation-prompt thunk/k
+                                                        parse*-direct-prompt))))))
   (let flatten-loop ([result result])
     (if (eq? result recursive-enter-flag)
         (run-scheduler scheduler)
@@ -255,8 +236,7 @@ Simplifications from the full core.rkt:
             (flatten-loop
              (call-with-continuation-prompt
               (λ () (parameterize ([current-chido-parse-job job])
-                      (delimit-parse*-direct
-                       (stream-flatten result))))
+                      (delimit-parse*-direct (stream-flatten result))))
               chido-parse-prompt
               result-loop))
             (begin (cache-result! scheduler job result)
@@ -305,6 +285,10 @@ Simplifications from the full core.rkt:
                           empty-stream)))
 (define (parse-failure? x) (and (stream? x) (stream-empty? x)))
 
+(define (derivations->end derivations)
+  (apply max (map parse-derivation-end-position derivations)))
+
+
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;;; Tests
 
@@ -328,7 +312,8 @@ Simplifications from the full core.rkt:
       ([d/a (parse* in-string a1-parser-obj (parse-derivation-end-position d/A))])
       (make-parse-derivation (string-append (parse-derivation-result d/A)
                                             (parse-derivation-result d/a))
-                             (list d/A d/a)))))
+                             (list d/A d/a)
+                             (derivations->end (list d/A d/a))))))
 
   (define Aa-parser-obj (proc-parser Aa-parser-proc))
 
@@ -343,10 +328,12 @@ Simplifications from the full core.rkt:
 
   (define (Aa-parser-proc/direct in-string pos)
     (define d/A (parse*-direct in-string (get-A-parser/direct) pos))
-    (define d/a (parse*-direct in-string a1-parser-obj (parse-derivation-end-position d/A)))
+    (define d/a (parse*-direct in-string a1-parser-obj
+                               (parse-derivation-end-position d/A)))
     (make-parse-derivation (string-append (parse-derivation-result d/A)
                                           (parse-derivation-result d/a))
-                           (list d/A d/a)))
+                           (list d/A d/a)
+                           (derivations->end (list d/A d/a))))
   (define Aa-parser-obj/direct
     (proc-parser Aa-parser-proc/direct))
   (define A-parser/direct (alt-parser (list Aa-parser-obj/direct a1-parser-obj)))
