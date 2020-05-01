@@ -84,18 +84,11 @@ Simplifications from the full core.rkt:
                (parser->usable result)))]
         [else (error 'chido-parse "not a parser: ~s" p)]))
 
-;; TODO - just make a regular stream that uses the logic here in the stream-cons thing
-(struct parse-stream
-  (result next-job scheduler)
-  #:methods gen:stream
-  [(define (stream-empty? s) #f)
-   (define (stream-first s)
-     (parse-stream-result s))
-   (define (stream-rest s)
-     (if (parse-stream-next-job s)
-         (enter-the-parser/job (parse-stream-scheduler s)
-                               (parse-stream-next-job s))
-         empty-stream))])
+(define (parse-stream result next-job scheduler)
+  (stream-cons result
+               (if next-job
+                   (enter-the-parser/job scheduler next-job)
+                   empty-stream)))
 
 (define (parse-failure? x) (and (stream? x) (stream-empty? x)))
 
@@ -112,7 +105,6 @@ Simplifications from the full core.rkt:
    result-index
    ;; gvector of siblings indexed by result-index
    siblings
-   [port #:mutable]
    [continuation/worker #:mutable]
    ;; The actual result.
    [result #:mutable]
@@ -181,7 +173,7 @@ Simplifications from the full core.rkt:
   (or j-maybe
       (let* ([siblings-vec (make-gvector)]
              [fresh-job (parser-job usable s start-position 0
-                                    siblings-vec #f #f #f #f)])
+                                    siblings-vec #f #f #f)])
         (gvector-add! siblings-vec fresh-job)
         (hash-set! cache key fresh-job)
         fresh-job)))
@@ -190,12 +182,12 @@ Simplifications from the full core.rkt:
   (match job
     [(s/kw parser-job #:parser parser #:scheduler scheduler
            #:start-position start-position #:result-index result-index
-           #:siblings siblings #:port port)
+           #:siblings siblings)
      (define next-index (add1 result-index))
      (if (< next-index (gvector-count siblings))
          (gvector-ref siblings next-index)
          (let ([new-job (parser-job parser scheduler start-position
-                                    next-index siblings port #f #f #f)])
+                                    next-index siblings #f #f #f)])
            (gvector-add! siblings new-job)
            new-job))]))
 
@@ -244,7 +236,7 @@ Simplifications from the full core.rkt:
     [else
      (define next-job (find-work s '() (list orig-job)))
      (if (not next-job)
-         (begin (fail-smallest-cycle! s) (run-scheduler s))
+         (begin (fail-cycle! s) (run-scheduler s))
          (schedule-job! s next-job))]))
 
 (define (find-work s blocked-jobs jobs-to-check)
@@ -271,9 +263,8 @@ Simplifications from the full core.rkt:
                    (find-work s new-blocked new-to-check)])]
            [#f j]))))
 
-(define (fail-smallest-cycle! scheduler)
-  ;; TODO - better name.
-  ;; This isn't failing the smallest cycle necessarily, but it is failing the job in a cycle that first depends back on something earlier in the chain to the root goal.
+(define (fail-cycle! scheduler)
+  ;; Fail the first job that is found to depend back on something earlier in the chain back to the root goal.
   (define (rec goal jobs)
     (match goal
       [(s/kw alt-worker #:job job #:remaining-jobs remaining-jobs)
@@ -293,6 +284,7 @@ Simplifications from the full core.rkt:
 
 (define (schedule-job! scheduler job)
   (when (job->result job)
+    ;; TODO - remove this assertion when done
     (error 'chido-parse
            "internal error - schedule-job! got a job that was already done: ~a"
            (job->display job)))
@@ -322,7 +314,7 @@ Simplifications from the full core.rkt:
         (set-alt-worker-remaining-jobs! k/worker new-remaining-jobs)
         (match result
           [(? parse-failure?) (void)]
-          [(? parse-stream?)
+          [(? stream?)
            (let ([result-contents (stream-first result)]
                  [this-next-job (get-next-job! job)])
              (define result-stream
@@ -347,7 +339,6 @@ Simplifications from the full core.rkt:
              [(s/kw proc-parser #:procedure procedure)
               (define proc-input (port-broker->port (scheduler-port-broker scheduler)
                                                     start-position))
-              (set-parser-job-port! job proc-input)
               (do-run! scheduler
                        (λ () (procedure proc-input))
                        job
