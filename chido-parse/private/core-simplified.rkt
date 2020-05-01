@@ -41,14 +41,13 @@ Simplifications from the full core.rkt:
     [else (error 'make-parse-derivation
                  "Not called during the dynamic extent of chido-parse...")]))
 
-(struct parser-struct (name))
-(struct proc-parser parser-struct (procedure))
-(struct alt-parser parser-struct (parsers))
+(struct proc-parser (procedure))
+(struct alt-parser (parsers))
 
 (define parser-cache (make-weak-hasheq))
 (define (parser->usable p)
   (match p
-    [(? parser-struct?) p]
+    [(or (? proc-parser?) (? alt-parser?)) p]
     [(? procedure?)
      (hash-ref parser-cache p (λ () (let ([result (parser->usable (p))])
                                       (hash-set! parser-cache p result)
@@ -96,26 +95,6 @@ Simplifications from the full core.rkt:
   ;; The dependency is only mutated to break cycles.
   (job k [dependency #:mutable])
   #:transparent)
-
-
-;; In this simplified version, parser names are solely for ease of debugging this implementation itself.
-(define (parser-name p)
-  (cond [(parser-struct? p) (parser-struct-name p)]
-        [(procedure? p) (parser-name (p))]
-        [else (error 'parser-name "not a parser: ~s" p)])) 
-
-(define (job->parser-name job)
-  (define p (and job (parser-job-parser job)))
-  (if (not p) p (parser-name p)))
-
-(define (job->display job)
-  (cond [(not job) #f]
-        [(cycle-breaker-job? job) "cycle-breaker"]
-        [else (format "~a@~a_~a"
-                      (job->parser-name job)
-                      (parser-job-start-position job)
-                      (parser-job-result-index job))]))
-
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;;; Caches
@@ -227,11 +206,6 @@ Simplifications from the full core.rkt:
   (rec (parser-job-continuation/worker (scheduler-requested-job scheduler)) '()))
 
 (define (schedule-job! scheduler job)
-  (when (job->result job)
-    ;; TODO - remove this assertion when done
-    (error 'chido-parse
-           "internal error - schedule-job! got a job that was already done: ~a"
-           (job->display job)))
   (match job
     [(parser-job parser start-position result-index k/worker result result-stream)
      (match k/worker
@@ -243,9 +217,6 @@ Simplifications from the full core.rkt:
         (run-scheduler scheduler)]
        [(alt-worker job remaining-jobs)
         (define inner-ready-job (findf job->result remaining-jobs))
-        (when (not inner-ready-job)
-          ;; TODO - prune away this assertion by the end
-          (error 'schedule-job! "scheduled an alt-job that wasn't ready: ~a" (job->display job)))
         (define result (job->result inner-ready-job))
         (define other-remaining-jobs (remq inner-ready-job remaining-jobs))
         (define new-remaining-jobs
@@ -278,13 +249,13 @@ Simplifications from the full core.rkt:
           [(equal? 0 result-index)
            ;; IE the first run of a parser
            (match parser
-             [(proc-parser name procedure)
+             [(proc-parser procedure)
               (do-run! scheduler
                        (λ () (procedure (scheduler-input-string scheduler)
                                         start-position))
                        job
                        #f #f)]
-             [(alt-parser name parsers)
+             [(alt-parser parsers)
               (define (mk-dep p)
                 (get-job scheduler p start-position 0))
               (define dep-jobs (map mk-dep parsers))
@@ -390,7 +361,7 @@ Simplifications from the full core.rkt:
     (if (equal? c #\a)
         (make-parse-derivation "a" '() (add1 position))
         empty-stream))
-  (define a1-parser-obj (proc-parser "a" a1-parser-proc))
+  (define a1-parser-obj (proc-parser a1-parser-proc))
 
   (define (Aa-parser-proc in-string pos)
     (for/parse
@@ -401,13 +372,10 @@ Simplifications from the full core.rkt:
                                             (parse-derivation-result d/a))
                              (list d/A d/a)))))
 
-  (define Aa-parser-obj (proc-parser "Aa" Aa-parser-proc))
+  (define Aa-parser-obj (proc-parser Aa-parser-proc))
 
 
-  (define A-parser (alt-parser "A"
-                               (list
-                                Aa-parser-obj
-                                a1-parser-obj)))
+  (define A-parser (alt-parser (list Aa-parser-obj a1-parser-obj)))
   (define (get-A-parser) A-parser)
 
   (define results1 (parse* s1 A-parser 0))
@@ -422,11 +390,8 @@ Simplifications from the full core.rkt:
                                           (parse-derivation-result d/a))
                            (list d/A d/a)))
   (define Aa-parser-obj/direct
-    (proc-parser "Aa" Aa-parser-proc/direct))
-  (define A-parser/direct (alt-parser "A"
-                                      (list
-                                       Aa-parser-obj/direct
-                                       a1-parser-obj)))
+    (proc-parser Aa-parser-proc/direct))
+  (define A-parser/direct (alt-parser (list Aa-parser-obj/direct a1-parser-obj)))
   (define (get-A-parser/direct) A-parser/direct)
 
   (define results2 (parse* s1 A-parser/direct 0))
