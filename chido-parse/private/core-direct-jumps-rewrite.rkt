@@ -1342,55 +1342,58 @@ But I still need to encapsulate the port and give a start position.
               #:successful? successful?)
         (cond
           [(not (eq? 0 reapable-bitmask))
-           (define ready-job-offset (alt-mask->first-offset reapable-bitmask))
-           (define job-mask (alt-offset->mask-bit ready-job-offset))
-           (set-alt-worker-reapable-bitmask!
-            worker
-            (bitwise-xor reapable-bitmask job-mask))
-           (define ready-job-cell (vector-ref job-vector ready-job-offset))
-           (define ready-job (match ready-job-cell
-                               [(? parser-job?) ready-job-cell]
-                               [(vector job stack) job]))
-           (define result (job->result ready-job))
-           (cond
-             [(parse-failure? result)
-              (set-alt-worker-failures! worker (cons result failures))
-              (vector-set! job-vector ready-job-offset #f)
-              ;; The alt worker has gained a failure, but not made progress on a result...
-              (run-scheduler scheduler)]
-             [(parse-stream? result)
-              (let ([result-contents (stream-first result)]
-                    [this-next-job (get-next-job! job)]
-                    [dep-next-job (get-next-job! ready-job)])
-                (define result-stream
-                  (parse-stream result-contents this-next-job scheduler))
-                (cache-result-and-ready-dependents! scheduler job result-stream)
-                (set-alt-worker-successful?! worker #t)
-                (set-alt-worker-job! worker this-next-job)
-                (set-parser-job-continuation/worker! this-next-job worker)
-                (set-parser-job-continuation/worker! job #f)
-                (if (job->result dep-next-job)
-                    ;; reset the original bitmask, since the next job is still ready.
-                    (set-alt-worker-reapable-bitmask!
-                     worker
-                     (bitwise-ior (alt-worker-reapable-bitmask worker)
-                                  job-mask))
-                    (begin
-                      (set-alt-worker-workable-bitmask!
-                       worker
-                       (bitwise-ior (alt-worker-workable-bitmask worker) job-mask))
-                      (push-parser-job-dependent!
-                       dep-next-job
-                       (alt-direct-dependent worker ready-job-offset))))
-                (vector-set! job-vector ready-job-offset dep-next-job))
-              (scheduler-pop-job! scheduler)
-              (run-scheduler scheduler)]
-             [else
-              (error 'chido-parse
-                     "Internal error - alt-worker for ~a got a non-stream result for dependency ~a: ~s"
-                     (job->display job)
-                     (job->display ready-job)
-                     result)])]
+           (set-alt-worker-reapable-bitmask! worker 0)
+           (define any-success? #f)
+           (let reap-loop ([rmask reapable-bitmask])
+             (define job (alt-worker-job worker))
+             (define ready-job-offset (alt-mask->first-offset rmask))
+             (define job-mask (alt-offset->mask-bit ready-job-offset))
+             (define new-rmask (bitwise-xor rmask job-mask))
+             (define job-for-next-loop job)
+             (define ready-job-cell (vector-ref job-vector ready-job-offset))
+             (define ready-job (match ready-job-cell
+                                 [(? parser-job?) ready-job-cell]
+                                 [(vector job stack) job]))
+             (define result (job->result ready-job))
+             (cond
+               [(parse-failure? result)
+                (set-alt-worker-failures! worker (cons result failures))
+                ;; The alt worker has gained a failure, but not made progress on a result...
+                (vector-set! job-vector ready-job-offset #f)]
+               [(parse-stream? result)
+                (let ([result-contents (stream-first result)]
+                      [this-next-job (get-next-job! job)]
+                      [dep-next-job (get-next-job! ready-job)])
+                  (set! any-success? #t)
+                  (define result-stream
+                    (parse-stream result-contents this-next-job scheduler))
+                  (cache-result-and-ready-dependents! scheduler job result-stream)
+                  (set-alt-worker-successful?! worker #t)
+                  (set-alt-worker-job! worker this-next-job)
+                  (set-parser-job-continuation/worker! this-next-job worker)
+                  (set-parser-job-continuation/worker! job #f)
+                  (if (job->result dep-next-job)
+                      ;; reset the original bitmask, since the next job is still ready.
+                      (set! new-rmask (bitwise-ior rmask job-mask))
+                      (begin
+                        (set-alt-worker-workable-bitmask!
+                         worker
+                         (bitwise-ior (alt-worker-workable-bitmask worker) job-mask))
+                        (push-parser-job-dependent!
+                         dep-next-job
+                         (alt-direct-dependent worker ready-job-offset))))
+                  (vector-set! job-vector ready-job-offset dep-next-job))]
+               [else
+                (error 'chido-parse
+                       "Internal error - alt-worker for ~a got a non-stream result for dependency ~a: ~s"
+                       (job->display job)
+                       (job->display ready-job)
+                       result)])
+             (if (eq? 0 new-rmask)
+                 (begin (when any-success?
+                          (scheduler-pop-job! scheduler))
+                        (run-scheduler scheduler))
+                 (reap-loop new-rmask)))]
           [(not (eq? 0 workable-bitmask))
            (define offset (alt-mask->first-offset workable-bitmask))
            (set-alt-worker-working-child-offset! worker offset)
