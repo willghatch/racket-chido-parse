@@ -2,7 +2,7 @@
 
 (module+ main
   (require
-   "core.rkt"
+   "core-use.rkt"
    "readtable-parser.rkt"
    "parameters.rkt"
    racket/cmdline

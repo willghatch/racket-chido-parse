@@ -20,7 +20,7 @@
   (require
    syntax/strip-context
    racket/port
-   "private/core.rkt"
+   "private/core-use.rkt"
    "private/procedural-combinators.rkt"
    "private/readtable-parser.rkt"
    ;; TODO - use default chido-parse readtable

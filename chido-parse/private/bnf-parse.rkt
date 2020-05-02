@@ -6,7 +6,7 @@
 
 
 (require
- "core.rkt"
+ "core-use.rkt"
  "procedural-combinators.rkt"
  "bnf-s-exp.rkt"
  "readtable-parser.rkt"

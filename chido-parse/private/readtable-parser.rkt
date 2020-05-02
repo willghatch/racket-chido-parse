@@ -79,7 +79,7 @@ This is an implementation of the same idea, but also adding support for operator
  )
 
 (require
- "core.rkt"
+ "core-use.rkt"
  "procedural-combinators.rkt"
  "trie.rkt"
  "parameters.rkt"

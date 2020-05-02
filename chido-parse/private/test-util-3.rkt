@@ -5,7 +5,7 @@
  (all-from-out "test-util-2.rkt"))
 
 (require
- "core.rkt"
+ "core-use.rkt"
  "procedural-combinators.rkt"
  "test-util-2.rkt"
  )

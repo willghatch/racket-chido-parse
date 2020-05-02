@@ -35,7 +35,7 @@
  )
 
 (require
- "core.rkt"
+ "core-use.rkt"
  "parse-stream.rkt"
  racket/string
  racket/stream

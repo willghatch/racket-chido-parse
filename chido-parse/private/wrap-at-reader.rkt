@@ -6,7 +6,7 @@
  )
 
 (require
- "core.rkt"
+ "core-use.rkt"
  "readtable-parser.rkt"
  "procedural-combinators.rkt"
  "parameters.rkt"

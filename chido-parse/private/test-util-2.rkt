@@ -7,7 +7,7 @@
 (require
  racket/stream
  "test-util-1.rkt"
- "core.rkt"
+ "core-use.rkt"
  )
 
 

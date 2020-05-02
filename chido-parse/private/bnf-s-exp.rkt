@@ -20,7 +20,7 @@
  )
 
 (require
- "core.rkt"
+ "core-use.rkt"
  "readtable-parser.rkt"
  "procedural-combinators.rkt"
  "binding-sequence.rkt"

@@ -2,7 +2,7 @@
 
 (module+ main
   (require
-   "core.rkt"
+   "core-use.rkt"
    "procedural-combinators.rkt"
    "readtable-parser.rkt"
    (submod "readtable-parser.rkt" an-s-exp-readtable)

@@ -16,7 +16,7 @@
  "bnf-s-exp.rkt"
  "procedural-combinators.rkt"
  (for-syntax
-  "core.rkt"
+  "core-use.rkt"
   "bnf-s-exp.rkt"
   "procedural-combinators.rkt"
   "bnf-parse.rkt"
@@ -203,7 +203,7 @@ stmt : \"pass\"
          (wp*/r "exexexexexex" layout-test)
          (list #'(stmt (expr ("ex" "ex" "ex" "ex" "ex" "ex")))))
 
-  (require "core.rkt")
+  (require "core-use.rkt")
   (define-bnf/syntactic use-assignment "
 stmt : \"pass\"
      | expr

@@ -7,7 +7,7 @@
  )
 
 (require
- "core.rkt"
+ "core-use.rkt"
  "procedural-combinators.rkt"
  racket/match
  racket/stxparam
