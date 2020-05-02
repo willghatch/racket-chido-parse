@@ -1445,7 +1445,9 @@ But I still need to encapsulate the port and give a start position.
          (define offset-stored (alt-worker-working-child-offset worker))
          ;; TODO - I should set the current better when replacing things on the stack due to left-recursion shuffling.  But for now let's just search.
          (define offset
-           (or offset-stored
+           (or (and offset-stored
+                    (vector-ref (alt-worker-child-job-vector worker) offset-stored)
+                    offset-stored)
                (let* ([one-bit-masks (append
                                       (bitmask->1-bit-masks
                                        (alt-worker-workable-bitmask worker))
@@ -1519,6 +1521,9 @@ But I still need to encapsulate the port and give a start position.
   (define job (scheduler-peek-job scheduler))
   ;(eprintf "in run-scheduler with job: ~v\n" (job->display job))
   (cond
+    [(job->result job)
+     (scheduler-pop-job! scheduler)
+     (run-scheduler scheduler)]
     [(and (string-parser-job? job)
           (eq? 0 (parser-job-result-index job)))
      (define s (parser-job-parser job))
