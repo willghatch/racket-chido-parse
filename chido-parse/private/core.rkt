@@ -808,7 +808,7 @@ But I still need to encapsulate the port and give a start position.
                  (set-parser-job-continuation/worker! parent-job sched-k)
                  (push-parser-job-dependent! job sched-k)
                  ;(push-hint! scheduler sched-k)
-                 (abort-current-continuation chido-parse-prompt #f))
+                 (abort-current-continuation chido-parse-prompt))
                chido-parse-prompt))
             ;; This is the original entry into the parser machinery.
             ;; Or a recursive call that isn't a left-recursion.
@@ -1209,21 +1209,20 @@ But I still need to encapsulate the port and give a start position.
   When continuation-run? is true, we are running a continuation (instead of a fresh thunk) and we want to supply k-arg.
   This keeps us from growing the continuation at all when recurring.
   |#
-  (define (result-loop new-thunk)
-    (if new-thunk
-        (call-with-continuation-prompt new-thunk chido-parse-prompt result-loop)
-        recursive-enter-flag))
+  (define (recursion-handler) recursive-enter-flag)
   (define result
     (if continuation-run?
         (call-with-continuation-prompt thunk/k
                                        chido-parse-prompt
-                                       result-loop
+                                       recursion-handler
                                        k-arg)
-        (result-loop (λ ()
-                       (parameterize ([current-chido-parse-job job])
-                         (call-with-continuation-prompt
-                          thunk/k
-                          parse*-direct-prompt))))))
+        (call-with-continuation-prompt
+         (λ ()
+           (parameterize ([current-chido-parse-job job])
+             (call-with-continuation-prompt thunk/k
+                                            parse*-direct-prompt)))
+         chido-parse-prompt
+         recursion-handler)))
   (let flatten-loop ([result result])
     (if (eq? result recursive-enter-flag)
         (run-scheduler scheduler)
@@ -1236,7 +1235,7 @@ But I still need to encapsulate the port and give a start position.
                       (delimit-parse*-direct
                        (stream-flatten result))))
               chido-parse-prompt
-              result-loop))
+              recursion-handler))
             (begin (cache-result-and-ready-dependents! scheduler job result)
                    (run-scheduler scheduler))))))
 

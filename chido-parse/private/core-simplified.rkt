@@ -107,7 +107,7 @@ Simplifications from the full core.rkt:
              (λ (k)
                (set-parser-job-continuation/worker!
                 parent-job (scheduled-continuation parent-job k job))
-               (abort-current-continuation chido-parse-prompt #f))
+               (abort-current-continuation chido-parse-prompt))
              chido-parse-prompt))
           ;; This is the original entry into the parser machinery.
           (run-scheduler scheduler job))))
@@ -206,17 +206,17 @@ Simplifications from the full core.rkt:
   ;; When continuation-run? is true, we are running a continuation
   ;; (instead of a fresh thunk) and we want to supply k-arg.
   ;; This keeps us from growing the continuation at all when recurring.
-  (define (result-loop new-thunk)
-    (if new-thunk
-        (call-with-continuation-prompt new-thunk chido-parse-prompt result-loop)
-        recursive-enter-flag))
+  (define (recursion-handler) recursive-enter-flag)
   (define result
     (if continuation-run?
-        (call-with-continuation-prompt thunk/k chido-parse-prompt result-loop k-arg)
-        (result-loop (λ ()
-                       (parameterize ([current-chido-parse-job job])
-                         (call-with-continuation-prompt thunk/k
-                                                        parse*-direct-prompt))))))
+        (call-with-continuation-prompt thunk/k chido-parse-prompt recursion-handler k-arg)
+        (call-with-continuation-prompt
+         (λ ()
+           (parameterize ([current-chido-parse-job job])
+             (call-with-continuation-prompt thunk/k
+                                            parse*-direct-prompt)))
+         chido-parse-prompt
+         recursion-handler)))
   (let flatten-loop ([result result])
     (if (eq? result recursive-enter-flag)
         (run-scheduler scheduler goal-job)
@@ -228,7 +228,7 @@ Simplifications from the full core.rkt:
               (λ () (parameterize ([current-chido-parse-job job])
                       (delimit-parse*-direct (stream-flatten result))))
               chido-parse-prompt
-              result-loop))
+              recursion-handler))
             (begin (cache-result! scheduler job result)
                    (run-scheduler scheduler goal-job))))))
 
