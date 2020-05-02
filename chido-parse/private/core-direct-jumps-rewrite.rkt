@@ -1631,8 +1631,9 @@ But I still need to encapsulate the port and give a start position.
                 (loop new-matches new-trie (add1 pos))
                 new-matches)))
         (if (null? dep-pairs-with-matched-prefixes)
-            (let ([failure (make-parse-failure
-                            #:message "Alt parser had no prefixes match.")])
+            (let ([failure (parameterize ([current-chido-parse-job job])
+                             (make-parse-failure
+                              #:message "Alt parser had no prefixes match."))])
               (cache-result-and-ready-dependents! scheduler job failure)
               (run-scheduler scheduler))
             (let* ([job-vector (make-vector (alt-parser-num-parsers parser) #f)])
