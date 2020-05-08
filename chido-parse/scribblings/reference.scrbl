@@ -467,7 +467,7 @@ You can supply @racket[result] as the result field for @racket[make-parse-deriva
 Return a parser that parses with @racket[parser] but wraps the resulting derivation in another derivation whose end point is its start point.
 The wrapped derivation will have the same result as the inner derivation returned by @racket[parser].
 
-You could use this with eg. @racket[parse*-direct] to peek ahead without actually affecting the input port.
+You could use this with eg. @racket[parse*-direct] to peek ahead without actually effecting the input port.
 }
 
 @;@defproc[(char-parser [c (or/c char? string?)]) parser?]{
@@ -570,7 +570,7 @@ When the built-in symbol parser is used by a chido-readtable, the symbol continu
 
 Layout parsers are whitespace or comment parsers that delimit symbols and numbers, and are generally allowed between other parsers inside lists.
 Results from layout parsers are ignored when creating parse results from readtable parsers, only the fact that they succeed at parsing is relevant.
-They come in @racket['terminating-layout], @racket['soft-terminating-layout], and @racket['nonterminating-layout] varieties, which match the symbol affects of @racket['terminating], @racket['soft-terminating], and @racket['nonterminating] parsers, respectively.
+They come in @racket['terminating-layout], @racket['soft-terminating-layout], and @racket['nonterminating-layout] varieties, which match the symbol effects of @racket['terminating], @racket['soft-terminating], and @racket['nonterminating] parsers, respectively.
 
 Terminating parsers are parsing alternatives that also delimit symbols and numbers (IE they terminate the built-in symbol/number parsing).
 In other words no space is necessary between a symbol or number and a following terminating parser.
@@ -590,8 +590,8 @@ If another parser is successful, the symbol parser is not tried.
 The symbol parser never returns an ambiguous result.
 
 One final parser flag is @racket['left-recursive-nonterminating].
-Parsers with the @racket['left-recursive-nonterminating] flag are run @emph{after} the symbol parser and do not affect symbol parsing.
-While chido-parse doesn't normally need a flag to handle left-recursive parsers, because most readtable parsers are run before the symbol parser and used to affect the symbol parser, left-recursive parsers need a special flag in the readtable parser.
+Parsers with the @racket['left-recursive-nonterminating] flag are run @emph{after} the symbol parser and do not effect symbol parsing.
+While chido-parse doesn't normally need a flag to handle left-recursive parsers, because most readtable parsers are run before the symbol parser and used to effect the symbol parser, left-recursive parsers need a special flag in the readtable parser.
 
 @subsection{chido-readtable objects}
 
@@ -662,13 +662,18 @@ IE it uses all the extensions to determine what symbols can be parsed, but it is
 All readtable “modifiers” are functional.
 They do not actually mutate a readtable, they merely return a new modified readtable.
 
-@defproc[(extend-chido-readtable [mode (or/c 'terminating
-                                             'soft-terminating
-                                             'nonterminating
-                                             'terminating-layout
-                                             'soft-terminating-layout
-                                             'nonterminating-layout
-                                             'left-recursive-nonterminating)]
+@defthing[chido-readtable-symbol-effect/c contract?]{
+The same as
+@racketblock[(or/c 'terminating
+                   'soft-terminating
+                   'nonterminating
+                   'terminating-layout
+                   'soft-terminating-layout
+                   'nonterminating-layout
+                   'left-recursive-nonterminating)]
+}
+
+@defproc[(extend-chido-readtable [mode chido-readtable-symbol-effect/c]
                                  [parser parser/c]
                                  [rt chido-readtable?])
          chido-readtable?]{
@@ -677,12 +682,131 @@ TODO -- optional keyword arguments (for operators).
 Extend @racket[rt] with @racket[parser] and given @racket[mode].
 }
 
+@defproc[(extend-chido-readtable* [rt chido-readtable?]
+                                  [arg any/c] ...)
+         chido-readtable?]{
+Applies @racket[extend-chido-readtable] multiple times.
+Eg.
+@racketblock[(extend-chido-readtable* my-rt
+                                      'terminating at-reader-parser
+                                      'nonterminating some-other-parser)]
+}
 
-TODO - extend-chido-readtable*
-TODO - chido-readtable-add-list-parser
-TODO - chido-readtable-add-raw-string-parser
-TODO - chido-readtable-add-mixfix-operator
-TODO - chido-readtable-add-mixfix-operators
+@defproc[(chido-readtable-add-list-parser
+          [l-delim string?]
+          [r-delim string?]
+          [rt chid-readtable?]
+          [#:wrapper wrapper (or/c #f symbol? (-> syntax? syntax?)) #f]
+          [#:inside-readtable inside-readtable
+           (or/c #f chido-readtable? (-> chido-readtable?)) #f]
+          [#:readtable-symbol-effect readtable-symbol-effect
+           chido-readtable-symbol-effect/c 'terminating])
+          chido-readtable?]{
+Adds a list parser with the given delimiters.
+Eg. the default parenthesis parser in Racket is similar to
+@racketblock[(chido-readtable-add-list-parser "(" ")" my-rt)].
+
+If @racket[inside-readtable] is @racket[#f], the @racket[current-readtable] is queried for recursive parses (of both forms and layout).
+You can instead set @racket[inside-readtable] to a particular readtable to use it, or to a thunk that provides a readtable, in which case the thunk will be called (with no caching) to get an inner readtable each time.
+
+If @racket[wrapper] is a symbol, that symbol is prepended to the list.
+Eg. if you use
+@racketblock[(chido-readtable-add-list-parser "$(" ")" mostly-normal-rt #:wrapper '#%dollar-paren)],
+then the string @racket["$(foo bar)"] would be parsed as @racket['(#%dollar-paren foo bar)].
+
+You can also use a procedure for @racket[wrapper], in which case the procedure takes the result syntax as an argument and must return a syntax object.
+
+Note that if @racket[l-delim] and @racket[r-delim] are the same character, you can't nest lists.
+It's a constant annoyance to me that people ever choose to use the same (likely single character) string as both left and right delimiters for things, because of course you can't nest such things without some kind of escaping.
+}
+
+@defproc[(chido-readtable-add-raw-string-parser
+          [l-delim string?]
+          [r-delim string?]
+          [rt chid-readtable?]
+          [#:wrapper wrapper (or/c #f symbol? (-> syntax? syntax?)) #f]
+          [#:readtable-symbol-effect readtable-symbol-effect
+           chido-readtable-symbol-effect/c 'terminating])
+         chido-readtable?]{
+Adds a parser for raw strings with balanced inner delimiters.
+In other words, there are no escapes like @racket["\n"], every character in the source string exists in the parsed string, including newlines and embedded delimiters.
+If @racket[l-delim] appears in the string before @racket[r-delim], it will cause an @racket[r-delim] to be part of the string instead of the string terminator.
+This means that not all strings are representable with a given raw string parser added with this procedure.
+But if you really need a string that contains the same delimiters without being balanced, you can use a different string notation.
+
+Raw strings are convenient for embedding source code as strings.
+For example, if we use
+@racketblock[(chido-readtable-add-raw-string-parser "«" "»" my-rt)],
+we can parse the following as a single string:
+
+TODO - this example is messing up my auto-indentation, so I'm commenting it out for the moment.
+@;@verbatim{
+@;«
+@;(print «printf("%d", 5)»)
+@;»
+@;}
+
+I mean, that's a pretty dumb example, but I think you get the picture.
+When you have to embed HTML inside Javascript inside PHP inside ... escaping is super annoying.
+But realistically raw strings of source code are useful in Racket in particular because you can write macros to parse those string at compile time.
+And sometimes you just want to write strings that contain quotes or backslashes without a bunch of escaping nonsense.
+In other words, they are also nice for writing regular expressions (IE a special case of embedding source code as a string).
+
+Note that if @racket[l-delim] and @racket[r-delim] are the same character, you can't nest raw strings.
+It's a constant annoyance to me that people ever choose to use the same (likely single character) string as both left and right delimiters for things, because of course you can't nest such things without some kind of escaping.
+}
+
+@defproc[(chido-readtable-add-mixfix-operator
+          [name (or/c symbol? string?)]
+          [rt chido-readtable?]
+          [#:layout layout (or/c 'required 'optional 'none) 'required]
+          [#:precedence-greater-than precedence-greater-than list? '()]
+          [#:precedence-less-than precedence-less-than list? '()]
+          [#:associativity associativity (or/c #f 'left 'right) #f])
+         chido-readtable?]{
+Yes, that's right, chido-readtables can have infix, prefix, and postfix operators.
+Whether or not that's a good idea you can decide for yourself.
+But they're supported!
+
+This code:
+@racketblock[(chido-readtable-add-mixfix-operator "_<+>_" my-rt)]
+adds a @tt{<+>} operator to the readtable, so you could write eg:
+@racket["(string-length foo) <+> (some-thunk)"]
+and it would be read as:
+@racket['(#%chido-readtable-infix-operator <+> (string-length foo) (some-thunk))].
+
+The @racket[name] must have an underscore everywhere you want a recursive parse to happen, thus determining whether the operator is infix, prefix, postfix, or “notfix” (meaning that it neither begins nor ends with a recursive parse).
+The fixity determines the implicit symbol that starts the result form, either @racket['#%chido-readtable-infix-operator], @racket['#%chido-readtable-prefix-operator], @racket['#%chido-readtable-postfix-operator], or @racket['#%chido-readtable-notfix-operator].
+
+The second symbol in the result is the operator name, with any leading and trailing underscores stripped but any interior underscores preserved.
+
+Example with inner holes (though the specific example is kind of dumb):
+@racketblock[(chido-readtable-add-mixfix-operator 'IF_THEN_ELSE_ my-rt)]
+would parse the string
+@racket["IF 5 THEN (foobar) ELSE quux"]
+as
+@racket['(#%chido-readtable-prefix-operator IF_THEN_ELSE 5 (foobar) quux)].
+
+The @racket[layout] argument determines whether layout is required, optional, or disallowed between the operator components and the recursive parses.
+Obviously the only good answer here is @racket['required], but if you love poor language design where you can't allow identifiers to include the characters used as operator names you can choose @racket['optional], just know that I think poorly of your choices.
+To round things out, you can also choose @racket['none], which I hope everyone can see is just a dumb choice.
+But I added it for the sake of completeness.
+
+The @racket[associativity] argument should not need much explanation.
+But it should be extended to allow associativity groups, which it currently doesn't support.
+
+The @racket[precidence-greater-than] and @racket[precidence-less-than] allow you to specify relative precidence of operators.
+Using these, your operator precidence forms a partial order, and any operators with no ordering between them require disambiguation (IE it's an error to put them together).
+(I could have left it ambiguous, but really who wants that?)
+I could have written this with numeric precidence instead, but I like partial-order precidence a lot better, so that's what you get in this implementation.
+(I mean, it could be extended to have the option of doing either, or maybe both!  But that's more work than I currently want to bother with.)
+
+The symbol pieces of the operator name are blacklisted from the symbol parser.  So if you add the operator @racket['<>=<_>>#>_<$+¢>_] (channeling Haskell), the symbols @racket['<>=<], @racket['>>#>], and @racket[<$+¢>] would be unreadable by the readtable.
+This prevents ambiguous parses where you have a parse with the operator as an operator and a parse where you just have the operator name as a symbol in a list of forms.
+}
+
+@;@defform[(chido-readtable-add-mixfix-operators [name option ...] ... readtable-expr)]{}
+
 
 @; TODO - I waffled on whether or not number parsing needed to be built-in, but ultimately decided it doesn't.  So I should remove everything about built-in number support.
 @;@defthing[set-chido-readtable-complex-number-support]{

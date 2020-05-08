@@ -1,12 +1,12 @@
 #lang racket/base
 
 #|
-Arguably the point of Racket's readtable is to have an extensible alternate parser that has a built-in symbol parser that is affected by each added alternate.
+Arguably the point of Racket's readtable is to have an extensible alternate parser that has a built-in symbol parser that is effected by each added alternate.
 This is an implementation of the same idea, but also adding support for operators with declarative precedence and associativity and potentially other extra features.
 |#
 
 (require racket/contract/base)
-(define symbol-affect/c
+(define symbol-effect/c
   (or/c 'terminating 'soft-terminating 'nonterminating
         'terminating-layout 'soft-terminating-layout 'nonterminating-layout
         'left-recursive-nonterminating))
@@ -16,7 +16,7 @@ This is an implementation of the same idea, but also adding support for operator
   ;; TODO - re-think what the empty readtable should be...
   [empty-chido-readtable chido-readtable?]
   [extend-chido-readtable
-   (->* (symbol-affect/c
+   (->* (symbol-effect/c
          ;; parser...
          any/c
          chido-readtable?)
@@ -31,12 +31,12 @@ This is an implementation of the same idea, but also adding support for operator
    (->* (string? string? chido-readtable?)
         (#:wrapper (or/c #f symbol? (-> syntax? syntax?))
          #:inside-readtable (or/c #f chido-readtable? (-> chido-readtable?))
-         #:readtable-symbol-affect symbol-affect/c)
+         #:readtable-symbol-effect symbol-effect/c)
         chido-readtable?)]
   [chido-readtable-add-raw-string-parser
    (->* (string? string? chido-readtable?)
         (#:wrapper (or/c #f symbol? (-> syntax? syntax?))
-         #:readtable-symbol-affect symbol-affect/c)
+         #:readtable-symbol-effect symbol-effect/c)
         chido-readtable?)]
   [chido-readtable->read1 (-> chido-readtable? any/c)]
   [chido-readtable->read1/layout (-> chido-readtable? any/c)]
@@ -61,6 +61,7 @@ This is an implementation of the same idea, but also adding support for operator
          #:associativity (or/c 'left 'right #f))
         any/c)]
   )
+ (rename-out [symbol-effect/c chido-readtable-symbol-effect/c])
  chido-readtable?
  chido-readtable-name
  extend-chido-readtable*
@@ -111,9 +112,9 @@ This is an implementation of the same idea, but also adding support for operator
 
    ;;; Options
 
-   ;; If symbol support is off, then terminating, soft-terminating, and nonterminating parsers are indistinguishable.  The difference is only how it affects the built-in symbol parser.
-   ;; For readtable-style extension, symbols need to be built-in so adding parsers affects the symbol parser implicitly.
-   ;; TODO - I should add more ways to affect the built-in symbol parser.  Eg. maybe soft-terminating-failure and nonterminating-failure parsers, which delimit symbols a la soft-terminating and nonterminating, making the symbol parser fail or not run when they succeed, but that don't create a derivation.  IE they make the symbol parser fail with a message saying that the other parser succeeded.  Basically programatic filters for symbols beyond just having a blacklist.  Eg. this would allow a convention for operator names (eg. they must be in <> like <+>, or they must be in : like :+: or :where:, etc, then fail symbols that match that pattern.)
+   ;; If symbol support is off, then terminating, soft-terminating, and nonterminating parsers are indistinguishable.  The difference is only how it effects the built-in symbol parser.
+   ;; For readtable-style extension, symbols need to be built-in so adding parsers effects the symbol parser implicitly.
+   ;; TODO - I should add more ways to effect the built-in symbol parser.  Eg. maybe soft-terminating-failure and nonterminating-failure parsers, which delimit symbols a la soft-terminating and nonterminating, making the symbol parser fail or not run when they succeed, but that don't create a derivation.  IE they make the symbol parser fail with a message saying that the other parser succeeded.  Basically programatic filters for symbols beyond just having a blacklist.  Eg. this would allow a convention for operator names (eg. they must be in <> like <+>, or they must be in : like :+: or :where:, etc, then fail symbols that match that pattern.)
    ;; TODO - operator precedence programability -- if you have an operator family, such as an operator that reads the operator string as some family of symbols like :+:, :where:, etc, does it make sense to have some more complicated and programmable way of doing precedence and associativity?
    symbol-support?
    symbol-result-transformer
@@ -250,35 +251,35 @@ This is an implementation of the same idea, but also adding support for operator
 (define (chido-readtable-dict-set rt key val)
   (dict-set rt key val))
 
-(define (extend-chido-readtable symbol-affect parser rt
-                                ;; TODO - better name for symbol-affect, and make it a keyword argument.
+(define (extend-chido-readtable symbol-effect parser rt
+                                ;; TODO - better name for symbol-effect, and make it a keyword argument.
                                 #:operator [operator #f]
                                 #:precedence-less-than [precedence-less-than '()]
                                 #:precedence-greater-than [precedence-greater-than '()]
                                 #:associativity [associativity #f]
                                 #:symbol-blacklist [symbol-blacklist #f]
                                 )
-  ;; symbol-affect is 'terminating, 'soft-terminating, 'nonterminating, 'left-recursive-nonterminating,  'terminating-layout, 'soft-terminating-layout, or 'nonterminating-layout
+  ;; symbol-effect is 'terminating, 'soft-terminating, 'nonterminating, 'left-recursive-nonterminating,  'terminating-layout, 'soft-terminating-layout, or 'nonterminating-layout
   ;; operator is #f, 'infix, 'prefix, or 'postfix
   ;; associativity is #f, 'left, or 'right
   ;; precedence lists are for names of other operators that are immediately greater or lesser in the precedence lattice.
   ;; symbol-blacklist can be #f to do nothing, #t to add the parser name to the symbol blacklist (for the common case that the operator name is the parser name), or a list of symbols or strings to blacklist.
   ;; TODO - maybe symbol-blacklist doesn't belong here, but its primary motivation is to blacklist operator names...
 
-  #| TODO - make symbol-affect a keyword argument, make the default nonterminating? |#
-  (when (and (member symbol-affect '(terminating-layout
+  #| TODO - make symbol-effect a keyword argument, make the default nonterminating? |#
+  (when (and (member symbol-effect '(terminating-layout
                                      soft-terminating-layout
                                      nonterminating-layout))
              operator)
     (error 'extend-chido-readtable
            "can't add operator parsers to layout parsers"))
   (when (and (member operator '(infix postfix))
-             (not (eq? symbol-affect 'left-recursive-nonterminating)))
+             (not (eq? symbol-effect 'left-recursive-nonterminating)))
     (error 'extend-chido-readtable
            "infix and postfix operators must be added as left-recursive-nonterminating parsers"))
 
   (define pre-blacklist
-    (match symbol-affect
+    (match symbol-effect
       ['terminating
        (struct-copy
         chido-readtable
@@ -845,7 +846,7 @@ This is an implementation of the same idea, but also adding support for operator
          left right rt
          #:wrapper [wrapper #f]
          #:inside-readtable [inside-readtable #f]
-         #:readtable-symbol-affect [rt-add-type 'terminating]
+         #:readtable-symbol-effect [rt-add-type 'terminating]
          )
   (define (inner-parser)
     (proc-parser #:name (format "list-inner-parser-~a-~a" left right)
@@ -1100,7 +1101,7 @@ This is an implementation of the same idea, but also adding support for operator
 (define (chido-readtable-add-raw-string-parser
          left right rt
          #:wrapper [wrapper #f]
-         #:readtable-symbol-affect [rt-add-type 'terminating]
+         #:readtable-symbol-effect [rt-add-type 'terminating]
          )
   (define right-parser
     (proc-parser #:name (format "trailing-right-delimiter_~a" right)
@@ -1297,9 +1298,9 @@ This is an implementation of the same idea, but also adding support for operator
          (chido-readtable-add-raw-string-parser
           "<<" ">>"
           (chido-readtable-add-list-parser
-           "##{" "}##" #:readtable-symbol-affect 'terminating-layout
+           "##{" "}##" #:readtable-symbol-effect 'terminating-layout
            (chido-readtable-add-raw-string-parser
-            "#|" "|#" #:readtable-symbol-affect 'terminating-layout
+            "#|" "|#" #:readtable-symbol-effect 'terminating-layout
             (chido-readtable-add-list-parser
              "$(" ")" #:wrapper '#%dollar-paren
              (chido-readtable-add-list-parser
@@ -1529,9 +1530,9 @@ Make submodules providing some pre-made readtables:
   (define an-s-exp-readtable
     (extend-chido-readtable*
      (chido-readtable-add-list-parser
-      "##{" "}##" #:readtable-symbol-affect 'terminating-layout
+      "##{" "}##" #:readtable-symbol-effect 'terminating-layout
       (chido-readtable-add-raw-string-parser
-       "#|" "|#" #:readtable-symbol-affect 'terminating-layout
+       "#|" "|#" #:readtable-symbol-effect 'terminating-layout
        (chido-readtable-add-raw-string-parser
         "«" "»"
         (chido-readtable-add-list-parser

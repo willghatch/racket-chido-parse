@@ -293,7 +293,7 @@
                        [(list #t #f) 'prefix]
                        [(list #t #t) 'infix]))
                    (define extension-type
-                     ;; TODO - I should have an option for symbol support, and if symbols are supported divide the parsers.  But when symbol support is undesired, it would be better to make everything either left-recursive-nonterminating or make everything NOT left-recursive-nonterminating.  If the user adds a custom procedure NOT built using the built-in binding-sequence of define-bnf-arm, and makes it left-recursive but doesn't mark it left-recursive-nonterminating, it WON'T see the results of things that ARE marked left-recursive-nonterminating.  If symbol support is on, then users need to take care to mark alternates explicitly to affect symbol parsing.
+                     ;; TODO - I should have an option for symbol support, and if symbols are supported divide the parsers.  But when symbol support is undesired, it would be better to make everything either left-recursive-nonterminating or make everything NOT left-recursive-nonterminating.  If the user adds a custom procedure NOT built using the built-in binding-sequence of define-bnf-arm, and makes it left-recursive but doesn't mark it left-recursive-nonterminating, it WON'T see the results of things that ARE marked left-recursive-nonterminating.  If symbol support is on, then users need to take care to mark alternates explicitly to effect symbol parsing.
                      'left-recursive-nonterminating
                      #;(if (member op-type '(infix postfix))
                            'left-recursive-nonterminating
