@@ -814,14 +814,12 @@ This prevents ambiguous parses where you have a parse with the operator as an op
 @;}
 
 @defproc[(set-chido-readtable-symbol-result-transformer [crt chido-readtable?]
-                                                        [transformer procedure?])
+                                                        [transformer (-> syntax? any/c)])
          chido-readtable?]{
 Parse results from the built-in symbol and number parsers are syntax objects by default.
 By setting a transformer, you can change the result (eg, perhaps you want datums instead of syntax objects).
 
 The default transformer is the identify function.
-
-TODO - document better.
 }
 
 @; TODO - this isn't really supported yet.
@@ -837,12 +835,34 @@ TODO - document better.
 
 @;TODO - should I have a procedure for setting or disabling the character that acts like backslash for symbols?
 
+@defproc[(set-chido-readtable-symbol-support [rt chido-readtable?]
+                                             [v any/c])
+chido-readtable?]{
+Turn off or on the built-in symbol parser.
+Why would you want to turn it off?
+Mostly to re-use the declarative operator precidence and associativity support built into chido-readtables for alternates where you actually don't want a symbol included.
 
-TODO - set-chido-readtable-symbol-support
-TODO - chido-readtable-symbol-support?
-TODO - chido-readtable-blacklist-symbols
-TODO - set-chido-readtable-name
-TODO - chido-readtable-name
+In particular, the BNF DSL is implemented on top of readtables that (generally) have symbol support turned off.
+}
+@defproc[(chido-readtable-symbol-support? [rt chido-readtable?]) any/c]{
+Predicate for whether symbol support is on or off.
+}
+
+@defproc[(chido-readtable-blacklist-symbols [symbols (listof (or/c symbol? string?))]
+                                            [rt chido-readtable?])
+chido-readtable?]{
+Produce a readtable where certain symbols are disallowed.
+In other words, the built-in symbol parser has a filter on it that checks whether the symbols read are in the blacklist.
+}
+
+@defproc[(chido-readtable-name [rt chido-readtable?]) (or/c #f string?)]{
+Get the name of the readtable.
+}
+@defproc[(set-chido-readtable-name [rt chido-readtable?] [name string?])
+chido-readtable?]{
+Set the name of the chido-readtable (functionally).
+}
+
 
 TODO - other APIs or parsers?
 
