@@ -130,7 +130,7 @@ Returns the start position number of the derivation.
 Returns the end position number of the derivation.
 }
 @defproc[(parse-derivation-subderivations [pd parse-derivation?]) (listof parse-derivation?)]{
-Returns the list of subderivations used in constructing @racket[pd].  Useful for filtering operator precidence and such.
+Returns the list of subderivations used in constructing @racket[pd].  Useful for filtering operator precedence and such.
 }
 
 
@@ -150,7 +150,7 @@ Returns the list of subderivations used in constructing @racket[pd].  Useful for
                              [#:inner-failure inner-failure (or/c parse-failure? #f) #f]
                              [#:failures failures (or/c (listof parse-failure?) #f)#f])
          parse-failure?]{
-Make a @racket[parse-failure].
+Make a @racket[parse-failure?].
 Can only be called during the dynamic extent of a @racket[parser?].
 The @racket[message] and @racket[position] are used to help the user figure out what went wrong.
 Inner failures are also used to improve the message, and provide a chain of failures.
@@ -558,28 +558,28 @@ If @racket[replace-result?] is true, derivations are replaced with derivations w
 
 
 
-@section{Chido-Readtable Parsers}
+@section[#:tag "chido-readtables"]{Chido-Readtable Parsers}
 
-Chido-readtables have an interface similar to Rackets @tech{readtable}s.
+Chido-readtables have an interface similar to Rackets readtables (see @secref["readtable" #:doc '(lib "scribblings/guide/guide.scrbl")] in the Racket Guide)
 
 Chido-readtables are a fancy kind of alternative parser.
-Among their alternatives, chido-readtables have built-in symbol and number parsers whose behavior is modified by the other parsers.
+Among their alternatives, chido-readtables have a built-in symbol parser whose behavior is modified by the other parsers.
 Chido-readtables are extended with parsers and a symbol denoting an effect on the built-in symbol parser, such as @racket['terminating] or @racket['nonterminating-layout].
 
 When the built-in symbol parser is used by a chido-readtable, the symbol continues until reaching the prefix of a @racket['terminating] or @racket['terminating-layout] parser or a successful parse from a @racket['soft-terminating] or @racket['soft-terminating-layout] parser.
 
-Layout parsers are whitespace or comment parsers that delimit symbols and numbers, and are generally allowed between other parsers inside lists.
+Layout parsers are whitespace or comment parsers that delimit symbols and are generally allowed between other parsers inside lists.
 Results from layout parsers are ignored when creating parse results from readtable parsers, only the fact that they succeed at parsing is relevant.
 They come in @racket['terminating-layout], @racket['soft-terminating-layout], and @racket['nonterminating-layout] varieties, which match the symbol effects of @racket['terminating], @racket['soft-terminating], and @racket['nonterminating] parsers, respectively.
 
-Terminating parsers are parsing alternatives that also delimit symbols and numbers (IE they terminate the built-in symbol/number parsing).
-In other words no space is necessary between a symbol or number and a following terminating parser.
+Terminating parsers are parsing alternatives that also delimit symbols (IE they terminate the built-in symbol parsing).
+In other words no space is necessary between a symbol and a following terminating parser.
 @racket['soft-terminating] parsers terminate a symbol only of they parse successfully.
 Hard terminating (@racket['terminating]) parsers terminate a symbol when their prefix matches, whether or not they parse successfully.
 Therefore the prefixes of hard terminating parsers are disallowed anywhere within symbols.
 
 Nonterminating parsers are alternatives that do not delimit a symbol.
-Layout (whitespace) is required between a symbol or number and a following nonterminating parser.
+Layout (whitespace) is required between a symbol and a following nonterminating parser.
 
 Terminating and nonterminating parsers can follow each other with no layout in between, though layout is allowed between them, and usually good style to have.
 
@@ -675,11 +675,21 @@ The same as
 
 @defproc[(extend-chido-readtable [mode chido-readtable-symbol-effect/c]
                                  [parser parser/c]
-                                 [rt chido-readtable?])
+                                 [rt chido-readtable?]
+                                 [#:operator operator-type
+                                 (or/c #f 'infix 'prefix 'postfix) #f]
+                                 [#:precedence-less-than precedence-less-than
+                                 (or/c any/c (listof any/c)) #f]
+                                 [#:precedence-greater-than precedence-greater-than
+                                 (or/c any/c (listof any/c)) #f]
+                                 [#:associativity associativity
+                                 (or/c #f 'left 'right) #f])
          chido-readtable?]{
-TODO -- optional keyword arguments (for operators).
-
 Extend @racket[rt] with @racket[parser] and given @racket[mode].
+To understand the various modes, see @secref["chido-readtables"].
+
+Also, chido-readtables support operators.
+You can use the optional arguments to do so, but better yet see @racket[chido-readtable-add-mixfix-operator].
 }
 
 @defproc[(extend-chido-readtable* [rt chido-readtable?]
@@ -795,13 +805,13 @@ But I added it for the sake of completeness.
 The @racket[associativity] argument should not need much explanation.
 But it should be extended to allow associativity groups, which it currently doesn't support.
 
-The @racket[precidence-greater-than] and @racket[precidence-less-than] allow you to specify relative precidence of operators.
-Using these, your operator precidence forms a partial order, and any operators with no ordering between them require disambiguation (IE it's an error to put them together).
+The @racket[precedence-greater-than] and @racket[precedence-less-than] allow you to specify relative precedence of operators.
+Using these, your operator precedence forms a partial order, and any operators with no ordering between them require disambiguation (IE it's an error to put them together).
 (I could have left it ambiguous, but really who wants that?)
-I could have written this with numeric precidence instead, but I like partial-order precidence a lot better, so that's what you get in this implementation.
+I could have written this with numeric precedence instead, but I like partial-order precedence a lot better, so that's what you get in this implementation.
 (I mean, it could be extended to have the option of doing either, or maybe both!  But that's more work than I currently want to bother with.)
 
-The symbol pieces of the operator name are blacklisted from the symbol parser.  So if you add the operator @racket['<>=<_>>#>_<$+¢>_] (channeling Haskell), the symbols @racket['<>=<], @racket['>>#>], and @racket[<$+¢>] would be unreadable by the readtable.
+The symbol pieces of the operator name are blacklisted from the symbol parser.  So if you add the operator @racket['<>=<_>>#>_<$+¢>_] (channeling Haskell), the symbols @racket['<>=<], @racket['>>#>], and @racket['<$+¢>] would be unreadable by the readtable.
 This prevents ambiguous parses where you have a parse with the operator as an operator and a parse where you just have the operator name as a symbol in a list of forms.
 }
 
@@ -816,7 +826,7 @@ This prevents ambiguous parses where you have a parse with the operator as an op
 @defproc[(set-chido-readtable-symbol-result-transformer [crt chido-readtable?]
                                                         [transformer (-> syntax? any/c)])
          chido-readtable?]{
-Parse results from the built-in symbol and number parsers are syntax objects by default.
+Parse results from the built-in symbol parsers are syntax objects by default.
 By setting a transformer, you can change the result (eg, perhaps you want datums instead of syntax objects).
 
 The default transformer is the identify function.
@@ -840,7 +850,7 @@ The default transformer is the identify function.
 chido-readtable?]{
 Turn off or on the built-in symbol parser.
 Why would you want to turn it off?
-Mostly to re-use the declarative operator precidence and associativity support built into chido-readtables for alternates where you actually don't want a symbol included.
+Mostly to re-use the declarative operator precedence and associativity support built into chido-readtables for alternates where you actually don't want a symbol included.
 
 In particular, the BNF DSL is implemented on top of readtables that (generally) have symbol support turned off.
 }
@@ -872,6 +882,17 @@ TODO - other APIs or parsers?
 
 @; TODO - I should provide some canned readtables -- eg. a racket-equivalent readtable and a recommended default readtable (with cool additions like «» strings)
 
+
+
+
+
+
+
+
+
+
+
+
 @section{BNF DSL}
 
-TODO -- I'm not entirely sure what I want here.  Maybe I just want a BNF-like macro among the combinators that lets me specify alt parsers with various built-in filters (precidence, associativity, follow).  Something similar to what other GLL/GLR parser provide, like spoofax's parser and Iguana.  Or maybe I want custom syntax as well -- for a #lang chido-bnf or a chido-bnf macro that parses a string at expansion time.  Either way, I would want the results to be convineintly extensible as well.  (Maybe that means rather than just defining a parser, this will need to define parameters for the parsers of the several nonterminal alternatives that can be extended.)
+TODO -- I'm not entirely sure what I want here.  Maybe I just want a BNF-like macro among the combinators that lets me specify alt parsers with various built-in filters (precedence, associativity, follow).  Something similar to what other GLL/GLR parser provide, like spoofax's parser and Iguana.  Or maybe I want custom syntax as well -- for a #lang chido-bnf or a chido-bnf macro that parses a string at expansion time.  Either way, I would want the results to be convineintly extensible as well.  (Maybe that means rather than just defining a parser, this will need to define parameters for the parsers of the several nonterminal alternatives that can be extended.)
