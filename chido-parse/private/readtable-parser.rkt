@@ -967,7 +967,7 @@ This is an implementation of the same idea, but also adding support for operator
     (cond [(eq? (parse-derivation-parser derivation) uncomment-parser)
            (list derivation)]
           [else (apply append (map find-uncomments
-                                   (parse-derivation-derivation-list derivation)))]))
+                                   (parse-derivation-subderivations derivation)))]))
   (define (make-quasicomment-parser all-layout?)
     (proc-parser
      #:prefix prefix
