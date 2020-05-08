@@ -895,4 +895,23 @@ TODO - other APIs or parsers?
 
 @section{BNF DSL}
 
-TODO -- I'm not entirely sure what I want here.  Maybe I just want a BNF-like macro among the combinators that lets me specify alt parsers with various built-in filters (precedence, associativity, follow).  Something similar to what other GLL/GLR parser provide, like spoofax's parser and Iguana.  Or maybe I want custom syntax as well -- for a #lang chido-bnf or a chido-bnf macro that parses a string at expansion time.  Either way, I would want the results to be convineintly extensible as well.  (Maybe that means rather than just defining a parser, this will need to define parameters for the parsers of the several nonterminal alternatives that can be extended.)
+
+TODO - document these
+
+ define-bnf-arm
+ readtable-extend-as-bnf-arm
+
+ define-bnf
+ extend-bnf
+ define-bnf/quick
+
+ bnf-parser->with-surrounding-layout
+ bnf-parser->arm-parser
+
+
+
+ define-bnf/syntactic
+ define-bnf/syntactic/parsed
+
+
+ #lang chido-parse/bnf-syntactic
