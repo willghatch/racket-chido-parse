@@ -327,6 +327,20 @@ If you are making a combinator, you might want to use this to determine whether 
 Note that this has to force thunks.
 }
 
+@section{Literal Parsers}
+
+You can use @racket[string?]s as literal parsers.
+You can always create @racket[proc-parser]s that parse literals.
+The other literal parsers here are just @racket[proc-parser]s that are convenient enough to be in the standard parser library.
+
+@defthing[eof-parser parser?]{
+Parser that succeeds when reading a port would return an @racket[eof-object?].
+}
+
+@defthing[any-char-parser parser?]{
+A parser that parses any single character.
+}
+
 
 @section{Combinators}
 
@@ -438,10 +452,6 @@ Parser that parses the empty string.
 You can provide a custom name and result (IE the result for @racket[make-derivation]).
 }
 
-@defthing[eof-parser parser?]{
-Parser that succeeds when reading a port would return an @racket[eof-object?].
-}
-
 @defproc[(not-parser [parser parser?]
                      [#:name name string? (format "not_~a" (parser-name parser))]
                      [#:result result any/c #f])
@@ -474,10 +484,6 @@ You can supply a string of length 2 for @racket[min] and don't provide @racket[m
 The first character must have a lower code point value than the second.
 }
 
-@defthing[any-char-parser parser?]{
-A parser that parses any single character.
-}
-
 @defproc[(regexp->parser [rx regexp?] [#:name name (or/c #f string?) #f]) parser?]{
 Returns a parser that parses a regexp.
 The derivation's result field is the result returned by @racket[regexp-match].
@@ -501,12 +507,55 @@ Creates a parser that applies @racket[wrap-func] to the derivations returned by 
 
 @subsection{Filters}
 
+@defproc[(parse-filter [p parser?]
+                       [filter-func (-> port derivation (or/c any/c parse-derivation?))]
+                       [#:replace-derivation? replace-derivation? any/c #f]
+                       [#:include-failures? include-failures? any/c #t])
+         parser?]{
+This is probably not your go-to filter combinator, but it is the most general.
+
+The @racket[filter-func] receieves the input port at the position @emph{after} the parser's derivation, as well as the derivation itself.
+If the @racket[filter-func] returns false, that derivation is removed from the result stream of the filtered parser.
+If @racket[replace-derivation?] is true, the @racket[filter-func]'s non-false results must be new parse derivations, which replace the original derivations in the parse stream.
+Otherwise the original parse derivations are used even if the truthy value returned by @racket[filter-func] is itself a parse derivation.
+
+If @racket[include-failures?] is true, each filtered derivation will be replaced in the stream by a @racket[parse-failure?] with a message about the filtered derivation.
+It's really only useful if you want to track all failures with @racket[chido-parse-keep-multiple-failures?].
+}
+
+@defproc[(follow-filter [main-parser parser?] [not-follow-parser parser?]
+                        [#:include-failures? include-failures? any/c #t])
+         parser?]{
+Filters out derivations if @racket[not-follow-parser] can succeed immediately after the derivation.
+
+Eg. @racket[(follow-filter "abc" "d")] parses the strings @racket["abc"] and @racket["abce"] but not the string @racket["abcd"]
+}
+
+@defproc[(derivation-filter [p parser?]
+                            [filter-func (-> parse-derivation? (or/c any/c parse-derivation?))]
+                            [#:replace-derivation? replace-derivation? any/c #f]
+                            [#:include-failures? include-failures? any/c #t])
+         parser?]{
+Filter out derivations that don't pass @racket[filter-func], also replace the derivations if @racket[replace-derivation?] is true.
+}
+
+@defproc[(result-filter [p parser?]
+                        [filter-func (-> any/c any/c)]
+                        [#:replace-result? replace-result? any/c #f]
+                        [#:include-failures? include-failures? any/c #t])
+         parser?]{
+Filter out derivations whose @racket[derivation-result] does not pass @racket[filter-func].
+If @racket[replace-result?] is true, derivations are replaced with derivations whose result is the value returned by @racket[filter-func].
+}
 
 
- parse-filter
- follow-filter
- derivation-filter
- result-filter
+
+
+
+
+
+
+
 
 
 @section{Chido-Readtable Parsers}
@@ -544,36 +593,74 @@ One final parser flag is @racket['left-recursive-nonterminating].
 Parsers with the @racket['left-recursive-nonterminating] flag are run @emph{after} the symbol parser and do not affect symbol parsing.
 While chido-parse doesn't normally need a flag to handle left-recursive parsers, because most readtable parsers are run before the symbol parser and used to affect the symbol parser, left-recursive parsers need a special flag in the readtable parser.
 
-@defproc[(chido-readtable->read1-parser [rt chido-readtable?]) parser/c]{
-Turns a @racket[chido-readtable] into an opaque parser that parses a single form (with NO leading whitespace allowed).
-The parser is equivalent to using the readtable directly as a parser.
-}
-@defproc[(chido-readtable->read1-parser/layout [rt chido-readtable?]) parser/c]{
-Like @racket[chido-readtable->read1-parser], but with leading layout (using the layout parsers within the readtable).
-}
-@defproc[(chido-readtable->read*-parser [rt chido-readtable?]) parser/c]{
-Turns a @racket[chido-readtable?] into an opaque parser that parses a sequence of forms, returning a list.
-This is preferable to using a chido-readtable directly inside a kleene-star combinator because it consistently handles layout parsing and allows trailing layout.
-The parser allows both leading and trailing layout, and can successfully parse an empty list of forms.
+@subsection{chido-readtable objects}
 
-Note that this does NOT parse parentheses at the start/end of a list -- rather, this is a procedure that could be used on the inside of a list.
+@defthing[current-chido-readtable chido-parse-parameter?]{
+A @racket[chido-parse-parameter] holding a @racket[chido-readtable?].
+Use this in any parser that needs to recur by parsing a chido readtable.
+Using it allows extension parsers to be written independently and combined while allowing each one to reference the combined readtable, rather than having to re-construct each extension with a reference to the proper extended readtable.
 }
-@defproc[(chido-readtable->read+-parser [rt chido-readtable?]) parser/c]{
-Like @racket[chido-readtable->read*-parser] but it requires at least one form.
-In other words, it fails on empty lists.
+
+@defthing[empty-chido-readtable chido-readtable?]{
+A @racket[chido-readtable?] with NO parsers of ANY kind attached, except the built-in symbol parser.
+
+TODO - list the flags that the table starts with, eg. @racket[chido-readtable-symbol-support?].
 }
+
 
 @defproc[(chido-readtable? [x any/c]) any/c]{
 Predicate for chido-readtables.
 }
 
-@defthing[empty-chido-readtable]{
-A @racket[chido-readtable?] with NO parsers of ANY kind attached, except the built-in symbol parser.
+@subsection{Variations on chido-readtable parsers}
 
+@defproc[(chido-readtable->read1 [rt chido-readtable?]) parser?]{
+Returns an opaque parser that parses a single form using @racket[rt] (with NO leading whitespace allowed).
+The parser is equivalent to using the readtable directly as a parser.
+}
+@defproc[(chido-readtable->read1/layout [rt chido-readtable?]) parser?]{
+Like @racket[chido-readtable->read1], but with leading layout (using the layout parsers within the readtable).
+}
+@defproc[(chido-readtable->read* [rt chido-readtable?]) parser?]{
+Returns an opaque parser that parses a sequence of forms using @racket[rt], returning a list.
+This is preferable to using a chido-readtable directly inside a kleene-star combinator because it consistently handles layout parsing and allows trailing layout.
+The parser allows both leading and trailing layout, and can successfully parse an empty list of forms.
 
-TODO - list the flags that the table starts with, eg. @racket[chido-readtable-symbol-support?].
+Note that this does NOT parse parentheses at the start/end of a list -- rather, this is a procedure that could be used on the inside of a list.
+}
+@defproc[(chido-readtable->read+ [rt chido-readtable?]) parser?]{
+Like @racket[chido-readtable->read*-parser] but it requires at least one form.
+In other words, it fails on empty lists.
+}
+@defproc[(chido-readtable->layout1 [rt chido-readtable?]) parser?]{
+Returns an opaque parser that parses a single piece of layout using @racket[rt].
+}
+@defproc[(chido-readtable->layout* [rt chido-readtable?]) parser?]{
+Returns an opaque parser that parses any amount of layout using @racket[rt].
+}
+@defproc[(chido-readtable->layout+ [rt chido-readtable?]) parser?]{
+Returns an opaque parser that parses one or more pieces of layout using @racket[rt].
 }
 
+@defthing[current-chido-readtable-read1-parser parser?]{
+Parser that applies @racket[chido-readtable->read1] to @racket[current-chido-readtable].
+}
+@defthing[current-chido-readtable-layout*-parser parser?]{
+Parser that applies @racket[chido-readtable->layout*] to @racket[current-chido-readtable].
+}
+@defthing[current-chido-readtable-layout+-parser parser?]{
+Parser that applies @racket[chido-readtable->layout+] to @racket[current-chido-readtable].
+}
+
+@defthing[current-chido-readtable-symbol-parser parser?]{
+Parses symbols using the symbol parser of @racket[current-chido-readtable].
+IE it uses all the extensions to determine what symbols can be parsed, but it is @emph{ONLY} the symbol parser.
+}
+
+@subsection{Extending and modifying chido-readtables}
+
+All readtable “modifiers” are functional.
+They do not actually mutate a readtable, they merely return a new modified readtable.
 
 @defproc[(extend-chido-readtable [mode (or/c 'terminating
                                              'soft-terminating
@@ -590,31 +677,56 @@ TODO -- optional keyword arguments (for operators).
 Extend @racket[rt] with @racket[parser] and given @racket[mode].
 }
 
+
+TODO - extend-chido-readtable*
+TODO - chido-readtable-add-list-parser
+TODO - chido-readtable-add-raw-string-parser
+TODO - chido-readtable-add-mixfix-operator
+TODO - chido-readtable-add-mixfix-operators
+
 @; TODO - I waffled on whether or not number parsing needed to be built-in, but ultimately decided it doesn't.  So I should remove everything about built-in number support.
 @;@defthing[set-chido-readtable-complex-number-support]{
 @;Set whether the built-in number parser accepts complex numbers (as default Racket allows).
 @;}
 
-@defthing[set-chido-readtable-symbol-result-transformer]{
+@defproc[(set-chido-readtable-symbol-result-transformer [crt chido-readtable?]
+                                                        [transformer procedure?])
+         chido-readtable?]{
 Parse results from the built-in symbol and number parsers are syntax objects by default.
 By setting a transformer, you can change the result (eg, perhaps you want datums instead of syntax objects).
 
 The default transformer is the identify function.
+
+TODO - document better.
 }
 
-@defproc[(set-chido-readtable-symbol-literal-delimiters
-[crt chido-readtable?]
-[l (or/c string? false/c)]
-[r (or/c string? false/c)])
-chido-readtable?]{
-Between these delimiters, symbols characters are literal and layout/terminating parsers are ignored.
-By default both delimiters are pipe characters.
-If #f is given for the delimiters then no delimiters cause this behavior.
-}
+@; TODO - this isn't really supported yet.
+@;@defproc[(set-chido-readtable-symbol-literal-delimiters
+@;          [crt chido-readtable?]
+@;          [l (or/c string? false/c)]
+@;          [r (or/c string? false/c)])
+@;         chido-readtable?]{
+@;Between these delimiters, symbols characters are literal and layout/terminating parsers are ignored.
+@;By default both delimiters are pipe characters.
+@;If #f is given for the delimiters then no delimiters cause this behavior.
+@;}
 
-TODO - should I have a procedure for setting or disabling the character that acts like backslash for symbols?
+@;TODO - should I have a procedure for setting or disabling the character that acts like backslash for symbols?
 
-TODO - other APIs?
+
+TODO - set-chido-readtable-symbol-support
+TODO - chido-readtable-symbol-support?
+TODO - chido-readtable-blacklist-symbols
+TODO - set-chido-readtable-name
+TODO - chido-readtable-name
+
+TODO - other APIs or parsers?
+
+@; TODO - document the readtable-as-dict stuff
+@;chido-readtable-dict-ref
+@;chido-readtable-dict-set
+
+@; TODO - I should provide some canned readtables -- eg. a racket-equivalent readtable and a recommended default readtable (with cool additions like «» strings)
 
 @section{BNF DSL}
 

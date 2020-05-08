@@ -61,6 +61,7 @@ This is an implementation of the same idea, but also adding support for operator
          #:associativity (or/c 'left 'right #f))
         any/c)]
   )
+ chido-readtable?
  chido-readtable-name
  extend-chido-readtable*
  chido-readtable-add-mixfix-operators
