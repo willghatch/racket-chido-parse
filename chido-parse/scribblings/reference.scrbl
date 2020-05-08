@@ -63,6 +63,7 @@ Don't use @racket[stream-cons] or other stream constructors, use @racket[parse-s
   However, @racket[parse*-direct] captures the current (delimited) continuation of the parser and returns a stream which applies the continuation to every derivation returned by @racket[parse*].
   The overall return of the parser will be the stream created by @racket[parse*-direct].
   You can use multiple calls to @racket[parse*-direct] within a function and it will nest the streams appropriately.
+  When @racket[parse*-direct] returns, the port argument of the parsing procedure will be set to the end-position of the derivation returned, so you don't need to supply start positions to future calls of parse*-direct.
 
   For example, here is a parser that parses the string @racket["abc"].
   @racketblock[(define abc-parser
@@ -331,31 +332,176 @@ Note that this has to force thunks.
 
 The alternation combinator @racket[alt-parser] is documented in another section.
 
- sequence
- repetition
- kleene-star
- kleene-plus
- kleene-question
- epsilon-parser
- eof-parser
- not-parser
- peek-parser
+@defproc[(sequence [#:name name (or/c #f string?) #f]
+                   [#:derive derive procedure? #f]
+                   [#:result/bare make-result/bare procedure? #f]
+                   [#:result/stx make-result/stx procedure? #f]
+                   [#:between between (or/c #f parser?) #f]
+                   [#:before before (or/c #f parser?) #f]
+                   [#:after after (or/c #f parser?) #f]
+                   [parser parser?] ...)
+         parser?]{
+Sequence combinator.
+You can add optional parsers between members of the sequence with @racket[between].
+The @racket[between] parser is @emph{not} put between the first and last normal parsers and the @racket[before] and @racket[after] parsers.
+For example @racket[(sequence #:before "<" "a" "b" #:after ">" #:between "-")] would parse @racket["<a-b>"] but not @racket["<-a-b->"].
+
+The @racket[derive], @racket[result/bare], and @racket[result/stx] arguments are for building the result derivation, and only one may be given (a non-@racket[#f] value).
+They are all procedures that must accept one value for each of @racket[parser], but @emph{not} the @racket[before], @racket[between], or @racket[after] parsers.
+
+@racket[derive] should be a function that accepts one derivation for each @racket[parser], and should return a @racket[parse-derivation?].
+
+@racket[result/bare] should be a function that accepts the result values (IE using @racket[parse-derivation-result]) from each @racket[parser] and should return a value to be used as the result field of @racket[make-parse-derivation].
+You can also provide @racket[#t] instead of a procedure to just get the results in a list.
+
+@racket[result/stx] is like @racket[result/bare], but it wraps the result you return as a syntax object with appropriate source location info.
+You can also provide @racket[#t] instead of a procedure to just get the results in a syntax list.
+
+If none of the result options are given, the default is as if @racket[result/stx] is @racket[#t].
+
+TODO - example usage.
+}
+
+@defproc[(repetition [#:name name (or/c #f string?) #f]
+                     [#:derive derive procedure? #f]
+                     [#:result/bare make-result/bare procedure? #f]
+                     [#:result/stx make-result/stx procedure? #f]
+                     [#:min min number? 0]
+                     [#:max max number? +inf.0]
+                     [#:greedy? greedy? (or/c #f parser?) #f]
+                     [#:between between (or/c #f parser?) #f]
+                     [#:before before (or/c #f parser?) #f]
+                     [#:after after (or/c #f parser?) #f]
+                     [parser parser?])
+         parser?]{
+Repetition combinator.
+Parse @racket[parser] repeatedly.
+
+The optional argument API is like @racket[sequence].
+@racket[between] is used between iterations of @racket[parser], @racket[before] and @racket[after] are parsed before/after the first/last repetition of @racket[parser].
+
+@racket[derive], @racket[result/bare], and @racket[result/stx] act like @racket[sequence] but should accept a single argument which will be a list of derivations returned by @racket[parser] (in order).
+Again, @racket[result/bare] and @racket[result/stx] may be @racket[#t] instead of a procedure, in which case the results will be put in a list or syntax list.
+If none of the options are non-false, @racket[result/stx] is treated as @racket[#t].
+
+You can specify the minimum and maximum number of acceptible repetitions with @racket[min] and @racket[max].
+If @racket[greedy?] is non-false, derivations will only be returned if they parsed the @racket[max] number of repetitions or no more repetitions can be parsed after the last one.
+Note that the result may still be ambiguous depending on whether @racket[parser] or @racket[before]/@racket[between]/@racket[after] are ambiguous.
+If @racket[greedy?] is false, all derivations with a number of repetitions between @racket[min] and @racket[max], inclusive, are returned.
+
+UNSTABLE - I might change the default value of @racket[greedy?], because really you @emph{do} want to use it, because having so many ambiguous results is @emph{slow}.
+
+TODO - usage example.
+}
+
+@defproc[(kleene-star  [#:name name (or/c #f string?) #f]
+                       [#:derive derive procedure? #f]
+                       [#:result/bare make-result/bare procedure? #f]
+                       [#:result/stx make-result/stx procedure? #f]
+                       [#:greedy? greedy? (or/c #f parser?) #f]
+                       [#:between between (or/c #f parser?) #f]
+                       [#:before before (or/c #f parser?) #f]
+                       [#:after after (or/c #f parser?) #f]
+                       [parser parser?])
+         parser?]{
+Like @racket[repetition] with min 0 and max infinity.
+}
+@defproc[(kleene-plus  [#:name name (or/c #f string?) #f]
+                       [#:derive derive procedure? #f]
+                       [#:result/bare make-result/bare procedure? #f]
+                       [#:result/stx make-result/stx procedure? #f]
+                       [#:greedy? greedy? (or/c #f parser?) #f]
+                       [#:between between (or/c #f parser?) #f]
+                       [#:before before (or/c #f parser?) #f]
+                       [#:after after (or/c #f parser?) #f]
+                       [parser parser?])
+         parser?]{
+Like @racket[repetition] with min 1 and max infinity.
+}
+@defproc[(kleene-question  [#:name name (or/c #f string?) #f]
+                           [#:derive derive procedure? #f]
+                           [#:result/bare make-result/bare procedure? #f]
+                           [#:result/stx make-result/stx procedure? #f]
+                           [#:greedy? greedy? (or/c #f parser?) #f]
+                           [#:between between (or/c #f parser?) #f]
+                           [#:before before (or/c #f parser?) #f]
+                           [#:after after (or/c #f parser?) #f]
+                           [parser parser?])
+         parser?]{
+Like @racket[repetition] with min 0 and max 1.
+}
+
+@defproc[(epsilon-parser [#:name name string? "epsilon"]
+                         [#:result result (or/c #f any/c) #f])
+         parser?]{
+Parser that parses the empty string.
+You can provide a custom name and result (IE the result for @racket[make-derivation]).
+}
+
+@defthing[eof-parser parser?]{
+Parser that succeeds when reading a port would return an @racket[eof-object?].
+}
+
+@defproc[(not-parser [parser parser?]
+                     [#:name name string? (format "not_~a" (parser-name parser))]
+                     [#:result result any/c #f])
+         parser?]{
+Create a parser that succeeds when @racket[parser] fails.
+In other words, if the result of @racket[parser] is a stream with any derivations, the not-parser fails.
+If the result of @racket[parser] is a parse failure (IE empty stream), this parser succeeds.
+
+You can supply @racket[result] as the result field for @racket[make-parse-derivation].
+}
+
+@defproc[(peek-parser [parser parser?]) parser?]{
+Return a parser that parses with @racket[parser] but wraps the resulting derivation in another derivation whose end point is its start point.
+The wrapped derivation will have the same result as the inner derivation returned by @racket[parser].
+
+You could use this with eg. @racket[parse*-direct] to peek ahead without actually affecting the input port.
+}
+
+@;@defproc[(char-parser [c (or/c char? string?)]) parser?]{
+@;Make a parser that parses a character.
+@;I'm not really sure why I wrote this.
+@;You can also just use a literal string.
+@;}
+
+@defproc[(char-range-parser [min (or/c char? string?)]
+                            [max (or/c #f char? string?) #f])
+         parser?]{
+Parses characters in the given range.
+You can supply a string of length 2 for @racket[min] and don't provide @racket[max], or you can supply two characters or strings of length 1.
+The first character must have a lower code point value than the second.
+}
+
+@defthing[any-char-parser parser?]{
+A parser that parses any single character.
+}
+
+@defproc[(regexp->parser [rx regexp?] [#:name name (or/c #f string?) #f]) parser?]{
+Returns a parser that parses a regexp.
+The derivation's result field is the result returned by @racket[regexp-match].
+}
 
 
- char-parser
- char-range-parser
- any-char-parser
- regexp->parser
+@defproc[(as-syntax [p parser?]) parser?]{
+Returns a parser whose derivation result is the same as @racket[p]'s, but wrapped up as a syntax object with appropriate source location info.
+}
+
+@defproc[(wrap-derivation [p parser?]
+                          [wrap-func (-> parse-derivation? parse-derivation?)]
+                          [#:name name (or/c #f string?) #f])
+         parser?]{
+Creates a parser that applies @racket[wrap-func] to the derivations returned by @racket[p].
+}
+
+@; TODO - I don't really like this one.
+@;traditional-read-func->parse-result-func
 
 
-
- ;; TODO - These are not great, should probably be replaced
- traditional-read-func->parse-result-func
- wrap-derivation
- as-syntax
+@subsection{Filters}
 
 
-@section{Filters}
 
  parse-filter
  follow-filter
