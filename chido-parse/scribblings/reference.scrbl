@@ -610,6 +610,9 @@ TODO - list the flags that the table starts with, eg. @racket[chido-readtable-sy
 
 @defproc[(chido-readtable? [x any/c]) any/c]{
 Predicate for chido-readtables.
+Note that if @racket[chido-readtable?] is true, then @racket[parser?] is true too.
+When used directly as parsers, chido-readtables parse once with no leading or trailing layout.
+To properly parse multiple times with a chido-readtable, use @racket[chido-readtable->read*] to use the readtable's layout configuration.
 }
 
 @subsection{Variations on chido-readtable parsers}
@@ -624,9 +627,12 @@ Like @racket[chido-readtable->read1], but with leading layout (using the layout 
 @defproc[(chido-readtable->read* [rt chido-readtable?]) parser?]{
 Returns an opaque parser that parses a sequence of forms using @racket[rt], returning a list.
 This is preferable to using a chido-readtable directly inside a kleene-star combinator because it consistently handles layout parsing and allows trailing layout.
-The parser allows both leading and trailing layout, and can successfully parse an empty list of forms.
+The parser allows leading, middle, and trailing layout per the layout parser configuration in @racket[rt], and can successfully parse an empty list of forms (which may still have layout).
 
 Note that this does NOT parse parentheses at the start/end of a list -- rather, this is a procedure that could be used on the inside of a list.
+Rather, if you want to parse several (potentially extended) s-expressions within a file that potentially has layout (whitespace) before, between, and after the forms, you would use this parser.
+Of course, you can also make a list parser with @racket[(sequence "(" (chido-readtable->read* rt) ")")].
+But @racket[chido-readtable-add-list-parser] also handles the extra details of adding the list parser to the readtable for recursive parses, adding a terminating and failing parser for the right delimiter, properly using the @racket[current-chido-readtable], and other conveniences, so probably just use it instead.
 }
 @defproc[(chido-readtable->read+ [rt chido-readtable?]) parser?]{
 Like @racket[chido-readtable->read*-parser] but it requires at least one form.
@@ -728,6 +734,9 @@ You can also use a procedure for @racket[wrapper], in which case the procedure t
 
 Note that if @racket[l-delim] and @racket[r-delim] are the same character, you can't nest lists.
 It's a constant annoyance to me that people ever choose to use the same (likely single character) string as both left and right delimiters for things, because of course you can't nest such things without some kind of escaping.
+
+The @racket[readtable-symbol-effect] should generally be @racket['terminating], but another reasonable choice is @racket['terminating-layout] to get an s-expression comment form.
+I'm not sure it's a terribly useful comment form, but it's interesting at least.
 }
 
 @defproc[(chido-readtable-add-raw-string-parser
@@ -764,6 +773,8 @@ In other words, they are also nice for writing regular expressions (IE a special
 
 Note that if @racket[l-delim] and @racket[r-delim] are the same character, you can't nest raw strings.
 It's a constant annoyance to me that people ever choose to use the same (likely single character) string as both left and right delimiters for things, because of course you can't nest such things without some kind of escaping.
+
+The @racket[readtable-symbol-effect] should generally be @racket['terminating], but another reasonable choice is @racket['terminating-layout] to get a nestable multi-line comment form.
 }
 
 @defproc[(chido-readtable-add-mixfix-operator
