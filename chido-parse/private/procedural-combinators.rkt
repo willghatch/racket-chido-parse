@@ -240,7 +240,9 @@
       (if (and greedy?
                (stream-empty? next-stream)
                (<= min n-results))
-          (finalize derivations next-stream)
+          (if (and between (not in-between?) (not (null? derivations)))
+              (finalize (cdr derivations) next-stream)
+              (finalize derivations next-stream))
           (for/parse ([derivation next-stream])
                      (if in-between?
                          (get-more-streams n-results
