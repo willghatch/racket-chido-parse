@@ -85,6 +85,7 @@
              #:attr repeat-max #'(~? repeat-max-given #f)
              #:attr repeat-greedy #'(~? repeat-greedy-given #f)
              )
+    ;; TODO - I want to make greedy-repeat default to #t, but doing so breaks stuff.  I should find out why, and maybe explicitly write-in non-greedy as necessary for things that actually require non-greedy repetition, and otherwise fix any bugs behind it.
     (pattern parser:expr
              #:attr name #f
              #:attr ignore #'#f
