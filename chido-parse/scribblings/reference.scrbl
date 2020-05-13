@@ -583,7 +583,7 @@ Layout (whitespace) is required between a symbol and a following nonterminating 
 
 Terminating and nonterminating parsers can follow each other with no layout in between, though layout is allowed between them, and usually good style to have.
 
-Note that when using a chido-readtable as a parser directly, it parses only ONE form, equivalent to using @racket[chido-readtable->read1-parser].  When you want to parse a sequence using chido-readtables, instead of using a kleene star combinator, you should use @racket[chido-readtable->read*-parser].
+Note that when using a chido-readtable as a parser directly, it parses only ONE form, equivalent to using @racket[chido-readtable->read1].  When you want to parse a sequence using chido-readtables, instead of using a kleene star combinator, you should use @racket[chido-readtable->read*].
 
 Ambiguous results are possible from parsing with a chido-readtable when terminating/nonterminating parsers themselves return ambiguous results or when multiple terminating/nonterminating parsers are successful at a given position.
 If another parser is successful, the symbol parser is not tried.
