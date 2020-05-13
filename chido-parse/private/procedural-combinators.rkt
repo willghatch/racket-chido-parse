@@ -172,7 +172,7 @@
                     #:result/stx [make-result/stx #f]
                     #:min [min 0]
                     #:max [max +inf.0]
-                    #:greedy? [greedy? #f]
+                    #:greedy? [greedy? #t]
                     #:between [between #f]
                     #:before [before #f]
                     #:after [after #f]
@@ -238,7 +238,6 @@
                                           #f
                                           (car derivations))))
       (if (and greedy?
-               (not in-between?)
                (stream-empty? next-stream)
                (<= min n-results))
           (finalize derivations next-stream)
@@ -274,7 +273,7 @@
                      #:derive [derive #f]
                      #:result/bare [make-result/bare #f]
                      #:result/stx [make-result/stx #f]
-                     #:greedy? [greedy? #f]
+                     #:greedy? [greedy? #t]
                      #:between [between #f]
                      #:before [before #f]
                      #:after [after #f]
@@ -294,7 +293,7 @@
                      #:derive [derive #f]
                      #:result/bare [make-result/bare #f]
                      #:result/stx [make-result/stx #f]
-                     #:greedy? [greedy? #f]
+                     #:greedy? [greedy? #t]
                      #:between [between #f]
                      #:before [before #f]
                      #:after [after #f]
@@ -314,7 +313,7 @@
                          #:derive [derive #f]
                          #:result/bare [make-result/bare #f]
                          #:result/stx [make-result/stx #f]
-                         #:greedy? [greedy? #f]
+                         #:greedy? [greedy? #t]
                          #:between [between #f]
                          #:before [before #f]
                          #:after [after #f]
@@ -479,22 +478,25 @@
   (c check-equal?
      (p*/r "qqq"
            (kleene-star "q"
-                        #:result/bare (λ (elems) (string-join elems ""))))
+                        #:result/bare (λ (elems) (string-join elems ""))
+                        #:greedy? #f))
      (list "" "q" "qq" "qqq"))
   (c check-equal?
      (p*/r "qqq"
            (kleene-plus "q"
-                        #:result/bare (λ (elems) (string-join elems ""))))
+                        #:result/bare (λ (elems) (string-join elems ""))
+                        #:greedy? #f))
      (list "q" "qq" "qqq"))
   (c check-equal?
      (p*/r "q"
            (kleene-question "q"
-                            #:result/bare (λ (elems) (string-join elems ""))))
+                            #:result/bare (λ (elems) (string-join elems ""))
+                            #:greedy? #f))
      (list "" "q"))
   (c check-equal?
      (p*/r "qqqqqqqqqqqqqqqqqqqqqqq"
            (repetition "q" #:result/bare (λ (elems) (string-join elems ""))
-                       #:min 3 #:max 5))
+                       #:min 3 #:max 5 #:greedy? #f))
      (list "qqq" "qqqq" "qqqqq"))
 
   ;;; repetition with between parsers
@@ -502,44 +504,49 @@
      (p*/r "qaqaq"
            (repetition "q"
                        #:result/bare (λ (elems) (string-join elems ""))
-                       #:between "a"))
+                       #:between "a"
+                       #:greedy? #f))
      (list "" "q" "qq" "qqq"))
   (c check-equal?
      (p*/r "bqaqaq"
            (repetition "q" #:result/bare (λ (elems) (string-join elems ""))
                        #:before "b"
-                       #:between "a"))
+                       #:between "a"
+                       #:greedy? #f))
      (list "" "q" "qq" "qqq"))
   (c check-equal?
      (p*/r "bqaqaq"
            (repetition "q" #:result/bare (λ (elems) (string-join elems ""))
                        #:before "b"
-                       #:between "a"))
+                       #:between "a"
+                       #:greedy? #f))
      (list "" "q" "qq" "qqq"))
   (c check-equal?
      (p*/r "bqaqaqz"
            (repetition "q" #:result/bare (λ (elems) (string-join elems ""))
                        #:before "b"
                        #:after "z"
-                       #:between "a"))
+                       #:between "a"
+                       #:greedy? #f))
      (list "qqq"))
   (c check-equal?
      (p*/r "aqaqaqa"
            (repetition "q" #:result/bare (λ (elems) (string-join elems ""))
                        #:before #t
                        #:after #t
-                       #:between "a"))
+                       #:between "a"
+                       #:greedy? #f))
      ;; no empty string, because it must parse before AND after...
      (list "q" "qq" "qqq"))
   (c check-equal?
      (p*/r "bqqq"
            (repetition "q" #:result/bare (λ (elems) (string-join elems ""))
-                       #:before "b"))
+                       #:before "b" #:greedy? #f))
      (list "" "q" "qq" "qqq"))
   (c check se?
      (p*/r "qqqz"
            (repetition "q" #:result/stx (λ (elems) (string-join elems ""))
-                       #:after "z"))
+                       #:after "z" #:greedy? #f))
      (list (datum->syntax #f "qqq" (list 'string 1 0 1 4))))
 
   ;;; sequence with begin/before/after
@@ -619,6 +626,7 @@
                                           symbol-char-func))
   (define symbol-parser (kleene-plus symbol-char-parser
                                      #:name "symbol"
+                                     #:greedy? #f
                                      #:result/bare (λ (chars)
                                                      (string->symbol
                                                       (apply string chars)))))
@@ -628,14 +636,17 @@
                                                   vals)
                                   "("
                                   (kleene-star whitespace-char-parser
-                                               #:result/bare (λ (ws) #f))
+                                               #:result/bare (λ (ws) #f)
+                                               #:greedy? #f)
                                   (kleene-star basic-s-exp
                                                #:between (kleene-plus
                                                           whitespace-char-parser
                                                           #:result/bare #t)
-                                               #:result/bare #t)
+                                               #:result/bare #t
+                                               #:greedy? #f)
                                   (kleene-star whitespace-char-parser
-                                               #:result/bare (λ (ws) #f))
+                                               #:result/bare (λ (ws) #f)
+                                               #:greedy? #f)
                                   ")"))
 
   (define (basic-s-exp)
@@ -678,6 +689,32 @@
   (c check-equal?
      (p*/r "aaaa"
            (repetition "a" #:greedy? #t
+                       #:result/bare #t))
+     (list (list "a" "a" "a" "a")))
+  (c check-equal?
+     (p*/r "_aaaa"
+           (repetition "a" #:greedy? #t
+                       #:before "_"
+                       #:result/bare #t))
+     (list (list "a" "a" "a" "a")))
+  (c check-equal?
+     (p*/r "aaaa_"
+           (repetition "a" #:greedy? #t
+                       #:after "_"
+                       #:result/bare #t))
+     (list (list "a" "a" "a" "a")))
+  (c check-equal?
+     (p*/r "a-a-a-a"
+           (repetition "a" #:greedy? #t
+                       #:between "-"
+                       #:result/bare #t))
+     (list (list "a" "a" "a" "a")))
+  (c check-equal?
+     (p*/r "_a-a-a-a_"
+           (repetition "a" #:greedy? #t
+                       #:between "-"
+                       #:before "_"
+                       #:after "_"
                        #:result/bare #t))
      (list (list "a" "a" "a" "a")))
 

@@ -382,7 +382,7 @@ TODO - example usage.
                      [#:result/stx make-result/stx procedure? #f]
                      [#:min min number? 0]
                      [#:max max number? +inf.0]
-                     [#:greedy? greedy? (or/c #f parser?) #f]
+                     [#:greedy? greedy? any/c #t]
                      [#:between between (or/c #f parser?) #f]
                      [#:before before (or/c #f parser?) #f]
                      [#:after after (or/c #f parser?) #f]
@@ -403,7 +403,8 @@ If @racket[greedy?] is non-false, derivations will only be returned if they pars
 Note that the result may still be ambiguous depending on whether @racket[parser] or @racket[before]/@racket[between]/@racket[after] are ambiguous.
 If @racket[greedy?] is false, all derivations with a number of repetitions between @racket[min] and @racket[max], inclusive, are returned.
 
-UNSTABLE - I might change the default value of @racket[greedy?], because really you @emph{do} want to use it, because having so many ambiguous results is @emph{slow}.
+While perhaps logically the default value of @racket[greedy?] should be true, realistically the extra ambiguity has a real performance cost for work that you are just throwing away.
+So the default is to be greedy, with an option to turn it off and have the more general parser.
 
 TODO - usage example.
 }
@@ -412,7 +413,7 @@ TODO - usage example.
                        [#:derive derive procedure? #f]
                        [#:result/bare make-result/bare procedure? #f]
                        [#:result/stx make-result/stx procedure? #f]
-                       [#:greedy? greedy? (or/c #f parser?) #f]
+                       [#:greedy? greedy? any/c #t]
                        [#:between between (or/c #f parser?) #f]
                        [#:before before (or/c #f parser?) #f]
                        [#:after after (or/c #f parser?) #f]
@@ -424,7 +425,7 @@ Like @racket[repetition] with min 0 and max infinity.
                        [#:derive derive procedure? #f]
                        [#:result/bare make-result/bare procedure? #f]
                        [#:result/stx make-result/stx procedure? #f]
-                       [#:greedy? greedy? (or/c #f parser?) #f]
+                       [#:greedy? greedy? any/c #t]
                        [#:between between (or/c #f parser?) #f]
                        [#:before before (or/c #f parser?) #f]
                        [#:after after (or/c #f parser?) #f]
@@ -436,7 +437,7 @@ Like @racket[repetition] with min 1 and max infinity.
                            [#:derive derive procedure? #f]
                            [#:result/bare make-result/bare procedure? #f]
                            [#:result/stx make-result/stx procedure? #f]
-                           [#:greedy? greedy? (or/c #f parser?) #f]
+                           [#:greedy? greedy? any/c #t]
                            [#:between between (or/c #f parser?) #f]
                            [#:before before (or/c #f parser?) #f]
                            [#:after after (or/c #f parser?) #f]

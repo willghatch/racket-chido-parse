@@ -321,7 +321,8 @@
                       (binding-sequence [: #:splice 1 (kleene-star
                                                        "a"
                                                        #:between "-"
-                                                       #:result/bare #t)]
+                                                       #:result/bare #t
+                                                       #:greedy? #t)]
                                         "b"
                                         #:between "_"
                                         #:result/bare #t))
