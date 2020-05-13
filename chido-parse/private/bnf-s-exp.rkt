@@ -763,7 +763,7 @@
           [expr "badmirror" expr]
           ["q" @ "1" *]
           ["p" @ "2" ?]
-          ["r" @ #(/ "3" expr +) ?]
+          ["r" @@@ #(/ "3" expr +) ?]
           [@ (|| "#1" "#2" #("one" "two")) + "#3"]
           [first = expr "mirror" (result-filter
                                   expr
@@ -790,14 +790,13 @@
   (check se/datum?
          (wp*/r "r" quick-simple)
          (list #'(stmt (expr "r"))))
-  (fail "there are 3 commented-out failing tests here, I just want a smaller fail footprint while I work on other things.")
-  #;(check se/datum?
+  (check se/datum?
          (wp*/r "r3(p)" quick-simple)
-         (list #'(stmt (expr "r" (expr (LIST (expr "p")))))))
-  #;(check se/datum?
+         (list #'(stmt (expr "r" (LIST (expr "p"))))))
+  (check se/datum?
          (wp*/r "r3p" quick-simple)
          (list #'(stmt (expr "r" (expr "p")))))
-  #;(check se/datum?
+  (check se/datum?
          (wp*/r "r3p2pp2" quick-simple)
          (list #'(stmt (expr "r" (expr "p" "2") (expr "p") (expr "p" "2")))))
   (check se/datum?
