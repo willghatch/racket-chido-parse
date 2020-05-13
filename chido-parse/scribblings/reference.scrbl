@@ -506,6 +506,8 @@ Creates a parser that applies @racket[wrap-func] to the derivations returned by 
 @;traditional-read-func->parse-result-func
 
 
+TODO - document binding-sequence
+
 @subsection{Filters}
 
 @defproc[(parse-filter [p parser?]
