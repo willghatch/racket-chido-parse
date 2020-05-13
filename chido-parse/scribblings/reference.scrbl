@@ -531,7 +531,7 @@ It's really only useful if you want to track all failures with @racket[chido-par
          parser?]{
 Filters out derivations if @racket[not-follow-parser] can succeed immediately after the derivation.
 
-Eg. @racket[(follow-filter "abc" "d")] parses the strings @racket["abc"] and @racket["abce"] but not the string @racket["abcd"]
+Eg. @racket[(follow-filter "abc" "d")] parses the strings @racket["abc"] and (the first three characters of) @racket["abce"] but not the string @racket["abcd"]
 }
 
 @defproc[(derivation-filter [p parser?]
