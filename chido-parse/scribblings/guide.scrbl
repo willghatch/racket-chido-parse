@@ -49,7 +49,7 @@ While parsers can return a tree of streams, they are flattened and @racket[parse
 
 For example:
 
-@racketblock|{
+@racketblock[
 (define plus
   (proc-parser
    (λ (port)
@@ -60,13 +60,13 @@ For example:
                      `(+ ,(parse-derivation-result l)
                          ,(parse-derivation-result r))
                      #:derivations (list l op r))))))))
-}|
+]
 
 Note that @racket[parse*] does not actually consume input from the port, so successive parses need the @racket[#:start] keyword.
 But there's an easier way.
 Instead of @racket[parse*], you can use @racket[parse*-direct], which uses delimited continuation magic to loop over a stream while looking like straight-line code:
 
-@racketblock|{
+@racketblock[
 (define plus
   (proc-parser
    (λ (port)
@@ -77,17 +77,17 @@ Instead of @racket[parse*], you can use @racket[parse*-direct], which uses delim
       `(+ ,(parse-derivation-result l)
           ,(parse-derivation-result r))
       #:derivations (list l op r)))))
-}|
+]
 
 Note that if we define the expression parser like so:
 
-@racketblock|{
+@racketblock[
 (define expression
   (alt-parser plus number))
 (define number
-  ;; 4 is a perfectly acceptable number.
+  (code:comment "4 is a perfectly acceptable number.")
   "4")
-}|
+]
 
 It turns out that our procedural plus parser is left-recursive!
 Everybody knows that if you make a left-recursive procedural parser you get infinite recursion!
@@ -100,7 +100,7 @@ However, at present Chido Parse doesn't guarantee any order to cycle breaking, s
 
 Chido Parse also has BNF forms, of course:
 
-@racketblock|{
+@racketblock[
 (define-bnf dumb-statement-parser
     [statement ["pass"]
                ["for" id "in" expression "do" statement]
@@ -112,9 +112,9 @@ Chido Parse also has BNF forms, of course:
                 [expression "*" expression
                             #:associativity 'right
                             #:precedence-greater-than '("+")]]
-    ;; Obviously this is a bad identifier parser, but I'm making dumb examples in a hurry.
+    (code:comment "Obviously this is a bad identifier parser, but I'm making dumb examples in a hurry.")
     [id [[: #:repeat-min 1 (char-range "az")]]])
-}|
+]
 
 The @racket[define-bnf] form has a bunch of optional arguments for specifying automatic layout insertion (IE allowing whitespace between things).
 Note that these things are all just parsers.
@@ -123,11 +123,11 @@ You can use a procedural parser anywhere in your BNF definition, you can stick a
 Of course, the real reason I started Chido Parse was because I wanted better readtables.
 So Chido Parse has a readtable-style abstraction for making and extending fancy s-expression parsers.
 
-@racketblock|{
+@racketblock[
 (define cool-s-exp
   (chido-readtable-add-list-parser "$(" ")" basic-chido-readtable
                                    #:wrap '#%dollar-paren))
-}|
+]
 
 Now @tt{cool-s-exp} can parse
 
