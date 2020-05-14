@@ -85,8 +85,8 @@ Note that if we define the expression parser like so:
 (define expression
   (alt-parser plus number))
 (define number
-  (code:comment "4 is a perfectly acceptable number.")
-  "4")
+  (kleene-plus (char-range-parser "09")
+               #:result/bare (λ (ds) (string->number (apply string ds)))))
 ]
 
 It turns out that our procedural plus parser is left-recursive!
