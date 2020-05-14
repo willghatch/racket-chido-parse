@@ -6,6 +6,7 @@
  kleene-star
  kleene-plus
  kleene-question
+ permutation
  epsilon-parser
  eof-parser
  not-parser
@@ -165,6 +166,24 @@
         [after (reverse (cdr (reverse derivations)))]
         [else derivations]))
 
+(define (permutation #:name [name #f]
+                     #:derive [derive #f]
+                     #:result/bare [make-result/bare #f]
+                     #:result/stx [make-result/stx #f]
+                     #:between [between #f]
+                     #:before [before #f]
+                     #:after [after #f]
+                     . parsers)
+  (define sequences (map (λ (perm) (apply sequence
+                                          #:derive derive
+                                          #:result/bare make-result/bare
+                                          #:result/stx make-result/stx
+                                          #:between between
+                                          #:before before
+                                          #:after after
+                                          perm))
+                         (permutations parsers)))
+  (apply alt-parser #:name name sequences))
 
 (define (repetition #:name [name #f]
                     #:derive [derive #f]
@@ -587,6 +606,19 @@
            (sequence (peek-parser "abc") "abc"))
      (list #'("abc" "abc")))
 
+  (define abc-permuted (permutation "a" "b" "c"))
+  (c se/datum?
+     (p*/r "abc" abc-permuted)
+     (list '("abc")))
+  (c se/datum?
+     (p*/r "acb" abc-permuted)
+     (list '("acb")))
+  (c se/datum?
+     (p*/r "cba" abc-permuted)
+     (list '("cba")))
+  (c se/datum?
+     (p*/r "cbc" abc-permuted)
+     (list '()))
 
   ;;;;;;;;;;;;;;;;;;;
 

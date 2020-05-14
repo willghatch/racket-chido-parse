@@ -446,6 +446,20 @@ Like @racket[repetition] with min 1 and max infinity.
 Like @racket[repetition] with min 0 and max 1.
 }
 
+
+@defproc[(permutation [#:name name (or/c #f string?) #f]
+                      [#:derive derive procedure? #f]
+                      [#:result/bare make-result/bare procedure? #f]
+                      [#:result/stx make-result/stx procedure? #f]
+                      [#:between between (or/c #f parser?) #f]
+                      [#:before before (or/c #f parser?) #f]
+                      [#:after after (or/c #f parser?) #f]
+                      [parser parser?] ...)
+         parser?]{
+Permutation combinator.
+The interface is essentially the same as @racket[sequence], but the parser accepts all permutations of the sequence of @racket[parser]s.
+}
+
 @defproc[(epsilon-parser [#:name name string? "epsilon"]
                          [#:result result (or/c #f any/c) #f])
          parser?]{
