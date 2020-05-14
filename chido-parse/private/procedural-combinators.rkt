@@ -332,18 +332,6 @@
               #:min 0
               #:max 1))
 
-(define (optional #:name [name #f]
-                  #:derive [derive #f]
-                  #:result/bare [make-result/bare #f]
-                  #:result/stx [make-result/stx #f]
-                  parser)
-  (repetition parser
-              #:name (or name (format "~a?" (parser-name parser)))
-              #:derive derive
-              #:result/bare make-result/bare
-              #:result/stx make-result/stx
-              #:max 1))
-
 
 (define (epsilon-parser #:name [name "epsilon"]
                         #:result [result #f])
