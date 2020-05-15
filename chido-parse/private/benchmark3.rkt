@@ -5,7 +5,7 @@
    "core-use.rkt"
    "procedural-combinators.rkt"
    "readtable-parser.rkt"
-   (submod "readtable-parser.rkt" an-s-exp-readtable)
+   (submod "readtable-parser.rkt" racket-like-readtable)
    "parameters.rkt"
    racket/cmdline
    racket/port
@@ -14,7 +14,7 @@
    rackunit
    )
 
-  (define my-parser (chido-readtable->read* an-s-exp-readtable))
+  (define my-parser (chido-readtable->read* racket-like-readtable))
 
   (define f (command-line #:args (filename) filename))
 
