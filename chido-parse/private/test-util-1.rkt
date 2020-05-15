@@ -18,6 +18,8 @@
           [(list (list ai ...) (list bi ...))
            (and (equal? (length ai) (length bi))
                 (andmap rec ai bi))]
+          [(list (vector ai ...) (vector bi ...))
+           (rec ai bi)]
           [else (equal? a b)]))
    (and (syntax? a)
         (syntax? b)
