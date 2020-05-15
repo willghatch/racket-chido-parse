@@ -897,16 +897,21 @@ This is an implementation of the same idea, but also adding support for operator
    rt-add-type right-parser
    (extend-chido-readtable rt-add-type left-parser rt)))
 
+(define list->vector-syntax-wrapper
+  (λ (stx) (datum->syntax #f (list->vector (syntax->list stx)) stx)))
 
-(define racket-style-string-parser
-  (proc-parser #:name "racket-style-string-parser"
-               #:prefix "\""
+
+(define (make-racket-read-wrapper prefix)
+  (proc-parser #:name (format "wrapped-racket-parser:~a" prefix)
+               #:prefix prefix
                (λ (port)
-                 (define r (read-syntax (object-name port) port))
-                 (define-values (line col pos) (port-next-location port))
-                 (make-parse-derivation r #:end pos))
+                 (with-handlers ([exn:fail? exn->failure])
+                   (define r (read-syntax (object-name port) port))
+                   (define-values (line col pos) (port-next-location port))
+                   (make-parse-derivation r #:end pos)))
                #:promise-no-left-recursion? #t
                #:preserve-prefix? #t))
+(define racket-style-string-parser (make-racket-read-wrapper "\""))
 
 (define (mk-stx v derivation)
   (datum->syntax #f v (list (parse-derivation-source-name derivation)
@@ -930,19 +935,35 @@ This is an implementation of the same idea, but also adding support for operator
    (λ (port)
      (parse* port (chido-readtable->read1/layout (current-chido-readtable))))))
 
-(define (make-quote-parser prefix quotey-symbol)
-  (sequence #:name (symbol->string quotey-symbol)
+(define (make-quote-parser prefix quotey-symbol/transformer)
+  (sequence #:name (if (symbol? quotey-symbol/transformer)
+                       (symbol->string quotey-symbol/transformer)
+                       ;; TODO - this is a poor choice
+                       (object-name quotey-symbol/transformer))
             prefix
             post-quote-read-1
             #:derive (λ derivations
                        (make-parse-derivation
                         (λ (src line col pos span derivations)
-                          (datum->syntax
-                           #f
-                           (list (mk-stx quotey-symbol (first derivations))
-                                 (parse-derivation-result (second derivations)))
-                           (list src line col pos span)))
+                          (cond
+                            [(symbol? quotey-symbol/transformer)
+                             (datum->syntax
+                              #f
+                              (list (mk-stx quotey-symbol/transformer
+                                            (first derivations))
+                                    (parse-derivation-result (second derivations)))
+                              (list src line col pos span))]
+                            [(procedure? quotey-symbol/transformer)
+                             (quotey-symbol/transformer
+                              (parse-derivation-result (second derivations)))]
+                            [else (error 'make-quote-parser
+                                         "bad symbol/transformer value: ~v"
+                                         quotey-symbol/transformer)]))
                         #:derivations derivations))))
+
+(define box-syntax-quote-transformer
+  (λ (stx)
+    (datum->syntax #f (box-immutable stx) stx)))
 
 (define (add-quasi-expression-comment prefix uncomment-prefix rt)
   (define current-quasi-expression-comment-active (chido-parse-parameter #f))
@@ -1256,6 +1277,10 @@ This is an implementation of the same idea, but also adding support for operator
     [(? string?) (string->symbol symstr)]
     [(? symbol?) symstr]))
 
+(define (make-failing-parser prefix message)
+  (proc-parser #:prefix prefix
+               (λ (port) (make-parse-failure #:message message))))
+
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;;; Testing
@@ -1302,10 +1327,12 @@ This is an implementation of the same idea, but also adding support for operator
            (chido-readtable-add-raw-string-parser
             "#|" "|#" #:readtable-symbol-effect 'terminating-layout
             (chido-readtable-add-list-parser
-             "$(" ")" #:wrapper '#%dollar-paren
+             "#[" "]" #:wrapper list->vector-syntax-wrapper
              (chido-readtable-add-list-parser
-              "[" "]"
-              (chido-readtable-add-list-parser "(" ")" empty-chido-readtable))))))))))
+              "$(" ")" #:wrapper '#%dollar-paren
+              (chido-readtable-add-list-parser
+               "[" "]"
+               (chido-readtable-add-list-parser "(" ")" empty-chido-readtable)))))))))))
      'terminating "##"
      'terminating racket-style-string-parser
      'nonterminating hash-t-parser
@@ -1368,6 +1395,7 @@ This is an implementation of the same idea, but also adding support for operator
    (check se/datum? (p*/r "( testing)" r1) (list #'(testing)))
    (check se/datum? (p*/r "(testing )" r1) (list #'(testing)))
    (check se/datum? (p*/r "( testing )" r1) (list #'(testing)))
+   (check se/datum? (p*/r "#[testing]" r1) (list #'#(testing)))
    (check se/datum? (p*/r "( testing #|in comment here|# foo)" r1)
           (list #'(testing foo)))
    (check se/datum? (p*/r "( testing ##{testing (a b c) foo}## foo)" r1)
@@ -1588,4 +1616,99 @@ Make submodules providing some pre-made readtables:
                                               (stream->list result)))
                (error 'my-read "ambiguous parse")])))
     )
+  )
+
+(module+ racket-like-readtable
+  (provide racket-like-readtable)
+  (define racket-like-readtable
+    (extend-chido-readtable*
+     (chido-readtable-add-raw-string-parser
+      "#|" "|#" #:readtable-symbol-effect 'terminating-layout
+      (chido-readtable-add-list-parser
+       "#{" "}" #:wrapper list->vector-syntax-wrapper
+       (chido-readtable-add-list-parser
+        "#[" "]" #:wrapper list->vector-syntax-wrapper
+        (chido-readtable-add-list-parser
+         "#(" ")" #:wrapper list->vector-syntax-wrapper
+         (chido-readtable-add-list-parser
+          "{" "}"
+          (chido-readtable-add-list-parser
+           "[" "]"
+           (chido-readtable-add-list-parser "(" ")" empty-chido-readtable)))))))
+     ;; TODO - symbols with backslash and symbols with pipe guards
+     ;; TODO - list dot, list double-dot-operator-switcheroo!
+     'nonterminating hash-t-parser
+     'nonterminating hash-f-parser
+     'terminating (make-quote-parser "'" 'quote)
+     'terminating (make-quote-parser "`" 'quasiquote)
+     'terminating (make-quote-parser (not-follow-filter "," "@") 'unquote)
+     'terminating (make-quote-parser ",@" 'unquote-splicing)
+     'terminating (make-quote-parser "#'" 'syntax)
+     'terminating (make-quote-parser "#`" 'quasisyntax)
+     'terminating (make-quote-parser (not-follow-filter "#," "@") 'unsyntax)
+     'terminating (make-quote-parser "#,@" 'unsyntax-splicing)
+     'terminating (make-keyword-parser "#:")
+     'terminating-layout " "
+     'terminating-layout "\n"
+     'terminating-layout "\t"
+     ;; creative use of string-append to get emacs to color properly...
+     'nonterminating-layout (make-quote-parser (string-append "#" ";") 'comment-quote)
+     'terminating-layout (make-line-comment-parser ";")
+     'terminating-layout (make-line-comment-parser "#! ")
+     'terminating-layout (make-line-comment-parser "#!/")
+
+     'terminating (make-quote-parser "#&" box-syntax-quote-transformer)
+
+     ;; Cheat for the rest of the Racket parsers.  Why re-implement obscure parsers when you can just wrap them?
+     'terminating (make-racket-read-wrapper "#fl")
+     'terminating (make-racket-read-wrapper "#fL")
+     'terminating (make-racket-read-wrapper "#Fl")
+     'terminating (make-racket-read-wrapper "#FL")
+     'terminating (make-racket-read-wrapper "#fx")
+     'terminating (make-racket-read-wrapper "#fX")
+     'terminating (make-racket-read-wrapper "#Fx")
+     'terminating (make-racket-read-wrapper "#FX")
+
+     'terminating (make-racket-read-wrapper "#\\")
+     'terminating (make-racket-read-wrapper "\"")
+     'terminating (make-racket-read-wrapper "#\"")
+     ;; TODO - NOT #% -- that already just works, although also anything with # that isn't specialized also works as a symbol now...
+     'terminating (make-failing-parser "#!" "No current support for recursive #!")
+     'terminating (make-failing-parser "#lang" "No current support for recursive #lang")
+     'terminating (make-failing-parser "#~" "No current support for reading compiled code")
+     'terminating (make-racket-read-wrapper "#i")
+     'terminating (make-racket-read-wrapper "#I")
+     'terminating (make-racket-read-wrapper "#e")
+     'terminating (make-racket-read-wrapper "#E")
+     'terminating (make-racket-read-wrapper "#x")
+     'terminating (make-racket-read-wrapper "#X")
+     'terminating (make-racket-read-wrapper "#o")
+     'terminating (make-racket-read-wrapper "#O")
+     'terminating (make-racket-read-wrapper "#d")
+     'terminating (make-racket-read-wrapper "#D")
+     'terminating (make-racket-read-wrapper "#b")
+     'terminating (make-racket-read-wrapper "#B")
+     'terminating (make-racket-read-wrapper "#<<")
+     'terminating (make-racket-read-wrapper "#rx")
+     'terminating (make-racket-read-wrapper "#px")
+     'terminating (make-racket-read-wrapper "#px")
+     'terminating (make-failing-parser "#ci" "No current support for case sensitivity toggling")
+     'terminating (make-failing-parser "#cI" "No current support for case sensitivity toggling")
+     'terminating (make-failing-parser "#Ci" "No current support for case sensitivity toggling")
+     'terminating (make-failing-parser "#CI" "No current support for case sensitivity toggling")
+     'terminating (make-failing-parser "#cs" "No current support for case sensitivity toggling")
+     'terminating (make-failing-parser "#cS" "No current support for case sensitivity toggling")
+     'terminating (make-failing-parser "#Cs" "No current support for case sensitivity toggling")
+     'terminating (make-failing-parser "#CS" "No current support for case sensitivity toggling")
+     'terminating (make-racket-read-wrapper "#reader")
+
+     ;; TODO - these are actually recursive, so... I should re-implement these.
+     'terminating (make-racket-read-wrapper "#s(")
+     'terminating (make-racket-read-wrapper "#s[")
+     'terminating (make-racket-read-wrapper "#s{")
+     'terminating (make-racket-read-wrapper "#hash")
+     ;; TODO - #<digit10>+(/[/{ vectors
+     ;; TODO - #<digit10>+= graph bind (should be just failure in this implementation)
+     ;; TODO - #<digit10>+# graph tag (should be just failure in this implementation)
+     ))
   )
