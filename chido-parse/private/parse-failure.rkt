@@ -6,6 +6,7 @@
  parse-failure-greater-than?
  parse-failure->chain
  parse-failure->first-message
+ parse-failure->string/location-triple
  )
 (require
  racket/stream
@@ -27,6 +28,11 @@
    inner-failure-list
    )
   ;#:transparent
+  #:methods gen:custom-write
+  [(define (write-proc this-failure port mode)
+     ;; mode is #t for write, #f for display, 0 or 1 (quote depth) for print
+     (fprintf port "#<parse-failure:~a>"
+              (parse-failure->string/location-triple this-failure)))]
   #:methods gen:stream
   [(define (stream-empty? s) #t)
    ;; TODO - better error messages
@@ -35,6 +41,11 @@
    (define (stream-rest s)
      (error 'stream-rest "empty stream"))])
 
+(define (parse-failure->string/location-triple pf)
+  (format "~a:~a:~a"
+          (parse-failure-report-line pf)
+          (parse-failure-report-column pf)
+          (parse-failure-report-position pf)))
 
 (define (parse-failure-greater-than? greater lesser)
   ;; TODO - is this the best way to decide this?

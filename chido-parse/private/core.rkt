@@ -395,11 +395,6 @@
                     (and (chido-parse-keep-multiple-failures?)
                          all-failures))]))
 
-(define (parse-failure->string/location-triple pf)
-  (format "~a:~a:~a"
-          (parse-failure-report-line pf)
-          (parse-failure-report-column pf)
-          (parse-failure-report-position pf)))
 (define (format-parser+message parser message)
   (if message
       (format "~a: ~a" (parser-name parser) message)
