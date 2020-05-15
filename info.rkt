@@ -13,6 +13,8 @@
     "web-server-lib"
     ;; for at-exp demo
     "at-exp-lib"
+    ;; for linea-wrap demo (though I should just re-implement linea in chido-parse)
+    "linea"
 
     ;; Temporarily, to do profiling
     "profile-lib"
