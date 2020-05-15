@@ -405,6 +405,8 @@ If @racket[greedy?] is false, all derivations with a number of repetitions betwe
 Frankly, for any realistic use, you want @racket[greedy?] to be true, because the extra ambiguity of non-greedy makes a lot of work for the system, even though most of it is immediately thrown away.
 
 TODO - usage example.
+
+UNSTABLE - I might change the default option for @racket[greedy?].  On the one hand, false gives the more general parser and what most people would probably expect at first.  But non-greedy repetition is just so much slower that any practical use really needs to reach for greedy.
 }
 
 @defproc[(kleene-star  [#:name name (or/c #f string?) #f]
@@ -418,6 +420,8 @@ TODO - usage example.
                        [parser parser?])
          parser?]{
 Like @racket[repetition] with min 0 and max infinity.
+
+UNSTABLE - I might change the default option for @racket[greedy?].
 }
 @defproc[(kleene-plus  [#:name name (or/c #f string?) #f]
                        [#:derive derive procedure? #f]
@@ -430,6 +434,8 @@ Like @racket[repetition] with min 0 and max infinity.
                        [parser parser?])
          parser?]{
 Like @racket[repetition] with min 1 and max infinity.
+
+UNSTABLE - I might change the default option for @racket[greedy?].
 }
 @defproc[(kleene-question  [#:name name (or/c #f string?) #f]
                            [#:derive derive procedure? #f]
@@ -442,6 +448,8 @@ Like @racket[repetition] with min 1 and max infinity.
                            [parser parser?])
          parser?]{
 Like @racket[repetition] with min 0 and max 1.
+
+UNSTABLE - I might change the default option for @racket[greedy?].
 }
 
 
