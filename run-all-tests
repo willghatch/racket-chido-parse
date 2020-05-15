@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+# Run all tests, including silenced tests that I don't want to worry about
+# for ongoing development or build server warnings.
+raco test --no-run-if-absent --submodule test --submodule silenced-test --package chido-parse
