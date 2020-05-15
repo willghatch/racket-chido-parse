@@ -3,7 +3,7 @@
 stmt : "pass"
      | expr
      | "{" @ stmt + "}"
-expr : @$(follow-filter bnumber bnumber)
+expr : @$(not-follow-filter bnumber bnumber)
      | expr "+" expr & left
      | expr "*" expr & left > "+"
 /bnumber : ($zero-str | "1") +

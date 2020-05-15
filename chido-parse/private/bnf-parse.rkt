@@ -156,7 +156,7 @@ stmt : \"pass\"
      | expr ; a comment
      | \"{\" stmt + \"}\"
 ;; another comment
-expr : @ $(follow-filter bnumber bnumber)
+expr : @ $(not-follow-filter bnumber bnumber)
      | expr \"+\" expr & left
      | expr \"*\" expr & left > \"+\"
      | m1 = expr \"mirror\"
@@ -193,7 +193,7 @@ expr : @ $(follow-filter bnumber bnumber)
                         ()}]
                   [arm expr ":"
                        {alt ([elem () () ("@")
-                                   (follow-filter bnumber bnumber)
+                                   (not-follow-filter bnumber bnumber)
                                    () () ()]) ()}
                        {alt
                         ([elem () () () expr () () ()]

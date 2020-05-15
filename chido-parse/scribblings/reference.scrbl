@@ -540,12 +540,19 @@ If @racket[include-failures?] is true, each filtered derivation will be replaced
 It's really only useful if you want to track all failures with @racket[chido-parse-keep-multiple-failures?].
 }
 
-@defproc[(follow-filter [main-parser parser?] [not-follow-parser parser?]
-                        [#:include-failures? include-failures? any/c #t])
+@defproc[(not-follow-filter [main-parser parser?] [not-follow-parser parser?]
+                            [#:include-failures? include-failures? any/c #t])
          parser?]{
 Filters out derivations if @racket[not-follow-parser] can succeed immediately after the derivation.
 
-Eg. @racket[(follow-filter "abc" "d")] parses the strings @racket["abc"] and (the first three characters of) @racket["abce"] but not the string @racket["abcd"]
+Eg. @racket[(not-follow-filter "abc" "d")] parses the strings @racket["abc"] and (the first three characters of) @racket["abce"] but not the string @racket["abcd"]
+}
+@defproc[(must-follow-filter [main-parser parser?] [must-follow-parser parser?]
+                             [#:include-failures? include-failures? any/c #t])
+         parser?]{
+Filters out derivations if @racket[must-follow-parser] can not succeed immediately after the derivation.
+
+Eg. @racket[(must-follow-filter "abc" "d")] parses the first three characters of the string @racket["abcd"], but does not parse the strings @racket["abc"] or @racket["abce"].
 }
 
 @defproc[(derivation-filter [p parser?]

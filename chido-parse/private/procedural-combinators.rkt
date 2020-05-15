@@ -22,7 +22,8 @@
 
  ;; filters
  parse-filter
- follow-filter
+ not-follow-filter
+ must-follow-filter
  derivation-filter
  result-filter
 
@@ -826,12 +827,19 @@ TODO - what kind of filters do I need?
    #:promise-no-left-recursion? (and (not (parser-potentially-left-recursive? parser))
                                      (not (parser-potentially-null? parser)))))
 
-(define (follow-filter main-parser not-follow-parser
-                       #:include-failures? [include-failures? #t])
+(define (not-follow-filter main-parser not-follow-parser
+                           #:include-failures? [include-failures? #t])
   (parse-filter main-parser
                 (λ (port result)
                   (define r-follow (parse* port not-follow-parser #:start result))
                   (if (parse-failure? r-follow) #t #f))
+                #:include-failures? include-failures?))
+(define (must-follow-filter main-parser must-follow-parser
+                            #:include-failures? [include-failures? #t])
+  (parse-filter main-parser
+                (λ (port result)
+                  (define r-follow (parse* port must-follow-parser #:start result))
+                  (if (parse-failure? r-follow) #f #t))
                 #:include-failures? include-failures?))
 
 (define (derivation-filter parser filter-func
@@ -862,8 +870,13 @@ TODO - what kind of filters do I need?
 
   (c check-equal?
      (p*/r "aaab"
-           (repetition (follow-filter "a" "b") #:greedy? #t #:result/bare #t))
+           (repetition (not-follow-filter "a" "b") #:greedy? #t #:result/bare #t))
      (list (list "a" "a")))
+  (c check-equal?
+     (p*/r "aaab"
+           (must-follow-filter (repetition "a" #:greedy? #f #:result/bare #t)
+                               "b"))
+     (list (list "a" "a" "a")))
 
   (c check-equal?
      (p*/r "testing"
@@ -1001,8 +1014,8 @@ TODO - what kind of filters do I need?
 
 (define (whole-parse* port/pbw parser
                       #:start [start #f])
-  (parse* port/pbw (follow-filter parser (not-parser eof-parser)
-                                  #:include-failures? #f)))
+  (parse* port/pbw (not-follow-filter parser (not-parser eof-parser)
+                                      #:include-failures? #f)))
 
 (define (no-ambiguity+read-port! port result errname)
   (define result*

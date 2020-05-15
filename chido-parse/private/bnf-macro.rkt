@@ -145,7 +145,7 @@
 stmt : \"pass\"
      | expr
      | \"{\" @ stmt + \"}\"
-expr : @ $(follow-filter bnumber bnumber)
+expr : @ $(not-follow-filter bnumber bnumber)
      | expr \"+\" expr & left
      | expr \"*\" expr & left > \"+\"
 /bnumber : (\"0\" | \"1\") +
@@ -183,7 +183,7 @@ stmt : \"pass\"
      | expr
      | \"{\" @ stmt + \"}\"
      | \"st\"+
-% expr : @ $(follow-filter bnumber bnumber)
+% expr : @ $(not-follow-filter bnumber bnumber)
        | expr \"+\" expr & left
        | expr \"*\" expr & left > \"+\"
        | \"ex\"+
@@ -208,7 +208,7 @@ stmt : \"pass\"
 stmt : \"pass\"
      | expr
      | \"{\" @ stmt + \"}\"
-expr : @ $(follow-filter bnumber bnumber)
+expr : @ $(not-follow-filter bnumber bnumber)
      | expr \"+\" expr & left
      | expr \"*\" expr & left > \"+\"
      | m1 = expr \"mirror\"

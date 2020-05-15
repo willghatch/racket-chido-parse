@@ -917,12 +917,12 @@ This is an implementation of the same idea, but also adding support for operator
                                (parse-derivation-start-position derivation)))))
 
 (define hash-t-parser
-  (wrap-derivation (follow-filter "#t"
-                                  current-chido-readtable-symbol-parser)
+  (wrap-derivation (not-follow-filter "#t"
+                                      current-chido-readtable-symbol-parser)
                    (λ(x)(mk-stx #t x))))
 (define hash-f-parser
-  (wrap-derivation (follow-filter "#f"
-                                  current-chido-readtable-symbol-parser)
+  (wrap-derivation (not-follow-filter "#f"
+                                      current-chido-readtable-symbol-parser)
                    (λ(x)(mk-stx #f x))))
 
 (define post-quote-read-1
@@ -1312,11 +1312,11 @@ This is an implementation of the same idea, but also adding support for operator
      'nonterminating hash-f-parser
      'terminating (make-quote-parser "'" 'quote)
      'terminating (make-quote-parser "`" 'quasiquote)
-     'terminating (make-quote-parser (follow-filter "," "@") 'unquote)
+     'terminating (make-quote-parser (not-follow-filter "," "@") 'unquote)
      'terminating (make-quote-parser ",@" 'unquote-splicing)
      'terminating (make-quote-parser "#'" 'syntax)
      'terminating (make-quote-parser "#`" 'quasisyntax)
-     'terminating (make-quote-parser (follow-filter "#," "@") 'unsyntax)
+     'terminating (make-quote-parser (not-follow-filter "#," "@") 'unsyntax)
      'terminating (make-quote-parser "#,@" 'unsyntax-splicing)
      'terminating (make-keyword-parser "#:")
      ;; two of these, to test that I'm getting sequences back properly
@@ -1545,11 +1545,11 @@ Make submodules providing some pre-made readtables:
      'terminating racket-style-string-parser
      'terminating (make-quote-parser "'" 'quote)
      'terminating (make-quote-parser "`" 'quasiquote)
-     'terminating (make-quote-parser (follow-filter "," "@") 'unquote)
+     'terminating (make-quote-parser (not-follow-filter "," "@") 'unquote)
      'terminating (make-quote-parser ",@" 'unquote-splicing)
      'terminating (make-quote-parser "#'" 'syntax)
      'terminating (make-quote-parser "#`" 'quasisyntax)
-     'terminating (make-quote-parser (follow-filter "#," "@") 'unsyntax)
+     'terminating (make-quote-parser (not-follow-filter "#," "@") 'unsyntax)
      'terminating (make-quote-parser "#,@" 'unsyntax-splicing)
      'terminating (make-keyword-parser "#:")
      'terminating-layout " "
