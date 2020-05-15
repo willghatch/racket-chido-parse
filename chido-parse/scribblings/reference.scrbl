@@ -683,6 +683,9 @@ Parser that applies @racket[chido-readtable->layout+] to @racket[current-chido-r
 @defthing[current-chido-readtable-symbol-parser parser?]{
 Parses symbols using the symbol parser of @racket[current-chido-readtable].
 IE it uses all the extensions to determine what symbols can be parsed, but it is @emph{ONLY} the symbol parser.
+
+UNSTABLE - chido readtables don't yet support symbols with escapes (IE with backslash) or as literals with pipes around them as Racket's built-in readtable does.
+At some point there will be options to set on the readtable itself to toggle options about those.
 }
 
 @subsection{Extending and modifying chido-readtables}
@@ -759,6 +762,9 @@ It's a constant annoyance to me that people ever choose to use the same (likely 
 
 The @racket[readtable-symbol-effect] should generally be @racket['terminating], but another reasonable choice is @racket['terminating-layout] to get an s-expression comment form.
 I'm not sure it's a terribly useful comment form, but it's interesting at least.
+
+UNSTABLE - these list forms do not yet support dots for improper lists or for operator moving (a la @racket['(l . op . r)]).
+I will eventually add them as optional keyword arguments (without using the keyword, no dots will be supported).
 }
 
 @defproc[(chido-readtable-add-raw-string-parser
