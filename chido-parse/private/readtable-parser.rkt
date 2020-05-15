@@ -121,6 +121,7 @@ This is an implementation of the same idea, but also adding support for operator
    literal-left-delimiter
    literal-right-delimiter
    symbol-escape ;; IE backslash
+   ;; TODO - I need to take these out.  When I started writing this I thought number parsing had to be tied up with symbol parsing, but I disagree with that now.
    number-support?
    complex-number-support?
 
@@ -906,12 +907,89 @@ This is an implementation of the same idea, but also adding support for operator
                #:prefix prefix
                (λ (port)
                  (with-handlers ([exn:fail? exn->failure])
-                   (define r (read-syntax (object-name port) port))
+                   (define r (parameterize ([current-readtable #f])
+                               (read-syntax (object-name port) port)))
                    (define-values (line col pos) (port-next-location port))
                    (make-parse-derivation r #:end pos)))
                #:promise-no-left-recursion? #t
                #:preserve-prefix? #t))
 (define racket-style-string-parser (make-racket-read-wrapper "\""))
+
+(define racket-full-number-support-parser-proc
+  ;; This is a very complicated parser.  It supports complex numbers, rationals. floats, etc.
+  (λ (port)
+    (with-handlers ([exn:fail? (λ (e) (make-parse-failure))])
+      (define r (parameterize ([current-readtable #f])
+                  (read-syntax (object-name port) port)))
+      (if (number? (syntax-e r))
+          (let ()
+            (define-values (line col pos) (port-next-location port))
+            (make-parse-derivation r #:end pos))
+          (make-parse-failure)))))
+
+(define racket-full-number-support-parser
+  (proc-parser racket-full-number-support-parser-proc))
+
+(define (chido-readtable-add-faster-racket-full-number-support-parser rt)
+  ;; Numbers don't have a single prefix, but they do have a small set of prefixes.
+  ;; Using the prefix trie is a lot faster than actually getting in and parsing.
+  (define (prefixed-parser prefix)
+    (proc-parser #:prefix prefix
+                 #:preserve-prefix? #t
+                 racket-full-number-support-parser-proc))
+  (extend-chido-readtable* rt
+                           'nonterminating (prefixed-parser "0")
+                           'nonterminating (prefixed-parser "1")
+                           'nonterminating (prefixed-parser "2")
+                           'nonterminating (prefixed-parser "3")
+                           'nonterminating (prefixed-parser "4")
+                           'nonterminating (prefixed-parser "5")
+                           'nonterminating (prefixed-parser "6")
+                           'nonterminating (prefixed-parser "7")
+                           'nonterminating (prefixed-parser "8")
+                           'nonterminating (prefixed-parser "9")
+                           'nonterminating (prefixed-parser ".")
+                           'nonterminating (prefixed-parser "+")
+                           'nonterminating (prefixed-parser "-")))
+
+(define basic-number-parser
+  ;; Just parse integers and floats.
+  ;; But don't parse 123abc as the number 123, let it be a symbol.
+  (let ([basic-number-parser/pre-follow
+         (sequence (kleene-question "-" #:greedy? #t)
+                   (kleene-plus (char-range-parser "09") #:greedy? #t)
+                   (kleene-question (sequence "."
+                                              (kleene-star (char-range-parser "09")
+                                                           #:greedy? #t))
+                                    #:greedy? #t)
+                   #:result/stx
+                   (λ (maybe-sign pre-dot dot-post)
+                     (string->number
+                      (apply string (flatten
+                                     (list maybe-sign pre-dot dot-post))))))])
+    (not-follow-filter basic-number-parser/pre-follow
+                       current-chido-readtable-symbol-parser)))
+
+(define (chido-readtable-add-faster-basic-number-parser rt)
+  ;; Numbers don't have a single prefix, but they do have a small set of prefixes.
+  ;; Using the prefix trie is a lot faster than actually getting in and parsing.
+  (define (prefixed-basic-number-parser prefix)
+    (proc-parser #:prefix prefix
+                 #:use-port? #f
+                 #:preserve-prefix? #t
+                 (λ (input) (parse* input basic-number-parser))))
+  (extend-chido-readtable* rt
+                           'nonterminating (prefixed-basic-number-parser "0")
+                           'nonterminating (prefixed-basic-number-parser "1")
+                           'nonterminating (prefixed-basic-number-parser "2")
+                           'nonterminating (prefixed-basic-number-parser "3")
+                           'nonterminating (prefixed-basic-number-parser "4")
+                           'nonterminating (prefixed-basic-number-parser "5")
+                           'nonterminating (prefixed-basic-number-parser "6")
+                           'nonterminating (prefixed-basic-number-parser "7")
+                           'nonterminating (prefixed-basic-number-parser "8")
+                           'nonterminating (prefixed-basic-number-parser "9")
+                           'nonterminating (prefixed-basic-number-parser "-")))
 
 (define (mk-stx v derivation)
   (datum->syntax #f v (list (parse-derivation-source-name derivation)
@@ -1620,7 +1698,7 @@ Make submodules providing some pre-made readtables:
 
 (module+ racket-like-readtable
   (provide racket-like-readtable)
-  (define racket-like-readtable
+  (define racket-like-readtable/base
     (extend-chido-readtable*
      (chido-readtable-add-raw-string-parser
       "#|" "|#" #:readtable-symbol-effect 'terminating-layout
@@ -1711,4 +1789,8 @@ Make submodules providing some pre-made readtables:
      ;; TODO - #<digit10>+= graph bind (should be just failure in this implementation)
      ;; TODO - #<digit10>+# graph tag (should be just failure in this implementation)
      ))
+
+  (define racket-like-readtable
+    (chido-readtable-add-faster-racket-full-number-support-parser
+     racket-like-readtable/base))
   )
