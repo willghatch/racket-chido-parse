@@ -9,6 +9,12 @@
     "kw-make-struct"
     "quickcheck"
 
+    ;; For parenhp demo
+    "web-server-lib"
+    ;; for at-exp demo
+    "at-exp-lib"
+
+    ;; Temporarily, to do profiling
     "profile-lib"
     ))
 
