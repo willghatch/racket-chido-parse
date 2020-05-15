@@ -20,13 +20,13 @@
 
 
 (define (alist-ref dict key default)
-  (define vp (assq key dict))
+  (define vp (assoc key dict))
   (if vp (cdr vp) (do-default default)))
 
 (define (alist-clear-key dict key)
   (remove key
           dict
-          (λ (key p) (eq? key (car p)))))
+          (λ (key p) (equal? key (car p)))))
 
 (define (alist-set dict key val)
   (cons (cons key val)
