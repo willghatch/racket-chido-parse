@@ -526,7 +526,43 @@ Creates a parser that applies @racket[wrap-func] to the derivations returned by 
 @;traditional-read-func->parse-result-func
 
 
-TODO - document binding-sequence
+@defform[(binding-sequence elem ...
+                           global-option ...)
+#:grammar
+[(elem parser
+       [: parser elem-optional ...])
+ (global-option (code:line #:name parser-name)
+                (code:line #:derive derive)
+                (code:line #:result/bare result/bare)
+                (code:line #:result/stx result/stx)
+                (code:line #:splice splice-global)
+                (code:line #:inherit-between inherit-between)
+                (code:line #:between between-parser))
+ (elem-optional (code:line #:bind binding-name)
+                (code:line #:ignore ignore)
+                (code:line #:splice splice-number)
+                (code:line #:repeat-min repeat-min)
+                (code:line #:repeat-max repeat-max)
+                (code:line #:repeat-greedy? repeat-greedy?))]]{
+Produce a sequence parser that can bind intermediate results and reference them in parsers later in the sequence.
+Each element is evaluated to construct parsers @emph{after} the previous parser has returned a derivation, so @racket[binding-sequence] can be used to construct data-dependent parsers.
+
+To bind the derivation as a result, use the @racket[#:bind] keyword to bind the derivation to @racket[name].
+Then just refer to @racket[name] later!
+
+Global options affect the entire sequence.
+@racket[between-parser] is inserted between each element in the sequence.
+If @racket[between-parser] is not specified but @racket[inherit-between] is truthy, then the sequence inherits the @racket[between-parser] from any @racket[binding-sequence] that surrounds this one.
+If @racket[splice-global] is a number greater than 0, the resulting list is spliced that many times (which is only useful if your sequence only has a single non-ignored element).
+The @racket[derive], @racket[result/bare], and @racket[result/stx] arguments are similar to the similar arguments in @racket[sequence], though note that splices and ignores affect the list of arguments that will be passed to them.
+The default derivation result will be a syntax list of the results of the elements (taking into account splices and ignores).
+
+Each element in the sequence may have extra options about binding, splicing, or repetition.
+The @racket[binding-name] argument is bound to the derivation of that element for future elements in the sequence.
+The @racket[splice-number] argument should be a positive integer, and the result list of that parser will be spliced that number of times into the outer result list.
+If the @racket[ignore] argument is true, that element is not included in the result list.
+The repetition arguments act as in @racket[repetition], though the @racket[between-parser] is inserted between repetitions.
+}
 
 @subsection{Filters}
 
@@ -942,23 +978,113 @@ TODO - other APIs or parsers?
 
 @section{BNF DSL}
 
+Frankly, the BNF DSL is a little rougher than the rest of the system.
+It's more likely to see some minor changes than the rest of the system.
+
+@defform[(define-bnf-arm arm-name top-level-optional ... arm-alt-spec ...)
+#:grammar
+[(top-level-optional (code:line #:layout layout-flag)
+                     (code:line #:layout-parsers layout-parsers)
+                     (code:line #:ignore-arm-name? ignore-arm-name?)
+                     (code:line #:result/stx result/stx)
+                     (code:line #:result/bare result/bare))
+ (layout-flag 'required
+              'optional
+              'none)
+ (bnf-arm-alt-spec (code:line binding-sequence-elem ...)
+                   (code:line arm-alt-optional ...))
+ (arm-alt-optional (code:line #:name name)
+                   (code:line #:associativity associativity)
+                   (code:line #:precedence-less-than plt)
+                   (code:line #:precedence-greater-than pgt)
+                   (code:line #:result/stx result/stx)
+                   (code:line #:result/bare result/bare))]]{
+Construct a @racket[chido-readtable?] that acts like one arm of a BNF grammar.
+The result has @racket[chido-readtable-symbol-support?] off.
+If @racket[layout-flag] is @racket['required], layout parsers are automatically inserted between parser elements.
+If @racket[layout-flag] is @racket['optional], layout-or-epsilon parsers are automatically inserted between parser elements.
+The default @racket[layout-flag] is 'optional.
+
+In reality, a parser is always inserted between, but it checks a flag stored on the readtable...
+
+The @racket[layout-parsers] argument should be a list of parsers, and if unspecified defaults to the list @racket['(" " "\t" "\r" "\n")].
+Note that these are simply layout parsers on the resulting readtable, so this list can be extended later.
+
+The @racket[result/stx] and @racket[result/bare] arguments act as in the various combinators, but both a global default for the arm and per-alt overrides can be supplied.
+If @racket[ignore-arm-name?] is false, the name of the arm is prepended to the result list by the default result constructior.
+
+Each alternative in the “arm” is essentially a @racket[binding-sequence], but with different whole-sequence options.
+In particular, if the leftmost or rightmost sequence members are @racket[arm-name], the alternate is determined to be an operator, and the associativity and precedence arguments are used.
+
+TODO - example.
+}
+
+@defform[(readtable-extend-as-bnf-arm rt
+                                      option ...
+                                      bnf-arm-alt-spec ...)
+#:grammar
+[(option (code:line #:arm-name arm-name)
+         (code:line #:ignore-arm-name? ignore-arm-name?)
+         (code:line #:result/stx result/stx)
+         (code:line #:result/bare result/bare))]]{
+Extend @racket[rt] in the manner of @racket[define-bnf-arm].
+Each @racket[bnf-arm-alt-spec] is as defined for @racket[define-bnf-arm].
+
+TODO - example.
+}
+
+@defform[(define-bnf name
+           global-options ...
+           [arm-name bnf-arm-option ... bnf-arm-alt-spec ...]
+           ...)
+#:grammar
+[(global-options (code:line #:layout-parsers layout-parsers)
+                 (code:line #:layout global-layout-flag))
+ (bnf-arm-option (code:line #:main-arm main-arm)
+                 (code:line #:layout layout-flag-for-arm)
+                 (code:line #:ignore-arm-name? ignore-arm-name)
+                 (code:line #:result/stx result/stx)
+                 (code:line #:result/bare result/bare))]]{
+Define a @racket[bnf-parser?] (which is also a @racket[parser?]) using a BNF grammar.
+When the result parser is used directly, the @racket[main-arm] is the parser that is actually used.
+The @racket[main-arm] defaults to the top arm.
+Note that if you use the parser directly it does NOT parse surrounding layout.
+If you want a parser that accepts leading and trailing layout, use @racket[bnf-parser->with-surrounding-layout]?
+
+The @racket[bnf-arm-alt-spec]s you can use in each arm are the same as in @racket[define-bnf-arm].
+The layout flag can be set globally but overridden per-arm, with values of @racket['required], @racket['optional], or @racket['none] as per @racket[define-bnf-arm].
+The @racket[layout-parsers] again default to @racket['(" " "\t" "\r" "\n")]?
+
+Each arm is a @racket[chido-readtable], as built with @racket[define-bnf-arm], and they can be accessed with @racket[bnf-parser->arm-parser].
+
+TODO - example.
+}
+
+@defproc[(bnf-parser? [x any/c]) boolean?]{
+Predicate for parsers defined with @racket[define-bnf].
+}
+
+@defproc[(bnf-parser->with-surrounding-layout [p bnf-parser?]) parser?]{
+Returns a parser like @racket[p] but that allows leading/trailing layout.
+}
+
+@defproc[(bnf-parser->arm-parser [p bnf-parser?] [arm-name symbol?])
+chido-readtable?]{
+Returns the parser for the given arm of the BNF.
+It's a @racket[chido-readtable], though probably not one that's necessarily like you might make directly (except through @racket[define-bnf-arm]).
+}
 
 TODO - document these
 
- define-bnf-arm
- readtable-extend-as-bnf-arm
+@itemlist[
 
- define-bnf
- extend-bnf
- define-bnf/quick
-
- bnf-parser->with-surrounding-layout
- bnf-parser->arm-parser
+ @item{extend-bnf -- a form to extend BNFs with an API similar to @racket[define-bnf].}
+ @item{define-bnf/quick -- a form to define BNFs like @racket[define-bnf], but using short symbols instead of verbose keyword arguments.}
 
 
+ @item{define-bnf/syntactic -- a form that defines a BNF using custom concrete syntax that looks more like traditional BNF notation.  It takes a string literal and parses it at macro expansion time.}
+ @item{define-bnf/syntactic/parsed -- this actually should be private, I think, but I'm leaving this in the list for the moment...}
 
- define-bnf/syntactic
- define-bnf/syntactic/parsed
 
-
- #lang chido-parse/bnf-syntactic
+ @item{#lang chido-parse/bnf-syntactic -- like @tt{define-bnf/syntactic} but as a #lang.  It allows trailing s-expression definitions and provides the defined bnf as @tt{parser}.}
+]

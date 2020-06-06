@@ -15,6 +15,8 @@
  extend-bnf/quick
  |#
 
+ bnf-parser?
+
  bnf-parser->with-surrounding-layout
  bnf-parser->arm-parser
  )
