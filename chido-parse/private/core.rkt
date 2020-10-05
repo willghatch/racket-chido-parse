@@ -119,7 +119,8 @@
 ;;;; Structs
 
 (struct parse-derivation
-  ;; TODO - document from notes
+  ;; • result is the parse result when result-forced? is true, otherwise it is a procedure that produces the result (-> source line column start-pos span derivation-list result).
+  ;; • derivation-list is a list of derivations for sub-components.
   (
    [result #:mutable] [result-forced? #:mutable]
    parser
@@ -223,7 +224,11 @@
 (struct parser-struct (name) #:transparent)
 
 (struct proc-parser parser-struct
-  ;; TODO - document from notes
+  ;; • prefix is a string that is the static prefix of the parser.
+  ;; • procedure is the parsing procedure (-> port parse-derivation)
+  ;; • preserve-prefix? is a flag that determines whether the system consumes the prefix before applying the procedure.  Normally you don't want to look at the prefix in the procedure (it's static, after all), but at times it's useful, eg. for wrapping existing functions.
+  ;; • promise-no-left-recursion? is an optimization flag -- it can avoid overhead with delimited continuations.  It's really only faster in Racket-BC, though, not Racket-CS.  It's potentially unsafe in that it can cause infinite recursion when used incorrectly.
+  ;; • use-port? is a flag for whether the procedure accepts a port or a port-broker-wrapper.  I think it's not really exposed publicly.  TODO - what do I want to do about it?
   (prefix procedure preserve-prefix? promise-no-left-recursion? use-port?)
   #:transparent)
 (define (make-proc-parser
