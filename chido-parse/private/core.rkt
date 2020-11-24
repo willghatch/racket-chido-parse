@@ -1170,6 +1170,7 @@ But I still need to encapsulate the port and give a start position.
                  (set-parser-job-worker! job #f)
                  (run-scheduler scheduler))])])]))
 
+(define (recursion-handler) recursive-enter-flag)
 (define (do-run! scheduler thunk/k job continuation-run? k-arg)
   (when (not job)
     (error 'chido-parse "Internal error - trying to recur with no job"))
@@ -1177,7 +1178,6 @@ But I still need to encapsulate the port and give a start position.
   When continuation-run? is true, we are running a continuation (instead of a fresh thunk) and we want to supply k-arg.
   This keeps us from growing the continuation at all when recurring.
   |#
-  (define (recursion-handler) recursive-enter-flag)
   (define result
     (if continuation-run?
         (call-with-continuation-prompt thunk/k
@@ -1191,21 +1191,25 @@ But I still need to encapsulate the port and give a start position.
                                             parse*-direct-prompt)))
          chido-parse-prompt
          recursion-handler)))
-  (let flatten-loop ([result result])
-    (if (eq? result recursive-enter-flag)
-        (run-scheduler scheduler)
-        (if (and (stream? result)
-                 (not (flattened-stream? result))
-                 (not (parse-failure? result)))
-            (flatten-loop
-             (call-with-continuation-prompt
-              (λ () (parameterize ([current-chido-parse-job job])
-                      (delimit-parse*-direct
-                       (stream-flatten result))))
-              chido-parse-prompt
-              recursion-handler))
-            (begin (cache-result-and-ready-dependents! scheduler job result)
-                   (run-scheduler scheduler))))))
+  (result-check-loop scheduler job result))
+
+(define (result-check-loop scheduler job result)
+  (cond [(eq? result recursive-enter-flag) (run-scheduler scheduler)]
+        [(and (stream? result)
+              (not (flattened-stream? result))
+              (not (parse-failure? result)))
+         (result-check-loop
+          scheduler
+          job
+          (call-with-continuation-prompt
+           (λ () (parameterize ([current-chido-parse-job job])
+                   (delimit-parse*-direct
+                    (stream-flatten result))))
+           chido-parse-prompt
+           recursion-handler))]
+        [else (begin (cache-result-and-ready-dependents! scheduler job result)
+                     (run-scheduler scheduler))]))
+
 
 (define (ready-dependents! job)
   (for ([dep (parser-job-dependents job)])
