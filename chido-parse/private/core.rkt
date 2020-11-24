@@ -689,7 +689,12 @@ The job cache is a multi-level dictionary with the following keys / implementati
                            (start-pos-add-cache-layer! start-pos-referenced))]
       [else
        (define c/parser start-pos-referenced)
-       (define parser-referenced (hash-ref c/parser parser #f))
+       (define parser-referenced-mutated? #f)
+       (define parser-referenced
+         (hash-ref! c/parser parser
+                    (λ ()
+                      (set! parser-referenced-mutated? #t)
+                      (make-fresh-parser-job parser))))
        (define (parser-add-cache-layer! old-job)
          (inc-cache-cp-param-conflict!)
          (define new-cache-layer (make-cp-params-cache))
@@ -699,21 +704,13 @@ The job cache is a multi-level dictionary with the following keys / implementati
          (hash-set! c/parser parser new-cache-layer)
          new-job)
        (match parser-referenced
-         [#f
-          (define new-job (make-fresh-parser-job parser))
-          (hash-set! c/parser parser new-job)
-          new-job]
-         [(? parser-job?) (if (job-match? parser-referenced)
+         [(? parser-job?) (if (or parser-referenced-mutated?
+                                  (job-match? parser-referenced))
                               parser-referenced
                               (parser-add-cache-layer! parser-referenced))]
          [else
-          (define c/cp-params parser-referenced)
-          (define cp-params-referenced (hash-ref c/cp-params cp-params #f))
-          (if cp-params-referenced
-              cp-params-referenced
-              (let ([new-job (make-fresh-parser-job parser)])
-                (hash-set! c/cp-params cp-params new-job)
-                new-job))])])
+          (hash-ref! parser-referenced cp-params
+                     (λ () (make-fresh-parser-job parser)))])])
     )
 
   (define usable (parser->usable parser))
