@@ -1023,11 +1023,10 @@ But I still need to encapsulate the port and give a start position.
            #:start-position start-position #:cp-params cp-params)
      (match k/worker
        [(s/kw continuation-worker #:job job #:dependency dependency #:k k)
-        (do-run! scheduler
-                 k
-                 job
-                 #t
-                 (job->result dependency))]
+        (do-run!/continuation scheduler
+                              job
+                              k
+                              (job->result dependency))]
        [(s/kw alt-worker #:job job
               #:ready-jobs (list ready-job rjs ...)
               #:remaining-jobs remaining-jobs
@@ -1072,10 +1071,9 @@ But I still need to encapsulate the port and give a start position.
         (cache-result-and-ready-dependents! scheduler job result)
         (run-scheduler scheduler)]
        [(stream-worker result-stream)
-        (do-run! scheduler
-                 (λ () (stream-rest result-stream))
-                 job
-                 #f #f)]
+        (do-run!/thunk scheduler
+                       job
+                       (λ () (stream-rest result-stream)))]
        [#f
         (cond [(equal? 0 result-index)
                (match parser
@@ -1099,13 +1097,13 @@ But I still need to encapsulate the port and give a start position.
                     (set-parser-job-port! job proc-input))
                   ;; TODO - optimize this peek for alt parsers, at least...
                   (if (port-broker-substring? port-broker start-position prefix)
-                      (do-run! scheduler
-                               (λ ()
-                                 (parameterize ([current-chido-parse-parameters
-                                                 cp-params])
-                                   (procedure proc-input)))
-                               job
-                               #f #f)
+                      (do-run!/thunk
+                       scheduler
+                       job
+                       (λ ()
+                         (parameterize ([current-chido-parse-parameters
+                                         cp-params])
+                           (procedure proc-input))))
                       (begin (prefix-fail! scheduler job)
                              (run-scheduler scheduler)))]
                  [(s/kw alt-parser #:trie trie #:parsers parsers)
@@ -1170,29 +1168,26 @@ But I still need to encapsulate the port and give a start position.
                  (set-parser-job-worker! job #f)
                  (run-scheduler scheduler))])])]))
 
-(define (recursion-handler) recursive-enter-flag)
-(define (do-run! scheduler thunk/k job continuation-run? k-arg)
-  (when (not job)
-    (error 'chido-parse "Internal error - trying to recur with no job"))
-  #|
-  When continuation-run? is true, we are running a continuation (instead of a fresh thunk) and we want to supply k-arg.
-  This keeps us from growing the continuation at all when recurring.
-  |#
+(define (do-run!/thunk scheduler job thunk)
   (define result
-    (if continuation-run?
-        (call-with-continuation-prompt thunk/k
-                                       chido-parse-prompt
-                                       recursion-handler
-                                       k-arg)
-        (call-with-continuation-prompt
-         (λ ()
-           (parameterize ([current-chido-parse-job job])
-             (call-with-continuation-prompt thunk/k
-                                            parse*-direct-prompt)))
-         chido-parse-prompt
-         recursion-handler)))
+    (call-with-continuation-prompt
+     (λ ()
+       (parameterize ([current-chido-parse-job job])
+         (call-with-continuation-prompt thunk
+                                        parse*-direct-prompt)))
+     chido-parse-prompt
+     recursion-handler))
   (result-check-loop scheduler job result))
 
+(define (do-run!/continuation scheduler job continuation k-arg)
+  (define result
+    (call-with-continuation-prompt continuation
+                                   chido-parse-prompt
+                                   recursion-handler
+                                   k-arg))
+  (result-check-loop scheduler job result))
+
+(define (recursion-handler) recursive-enter-flag)
 (define (result-check-loop scheduler job result)
   (cond [(eq? result recursive-enter-flag) (run-scheduler scheduler)]
         [(and (stream? result)
