@@ -112,9 +112,6 @@
    rackunit
    ))
 
-;; TODO - explanation from notes about the big picture of how this parsing library works
-
-;; TODO - procedures with the contract (-> parser) should be accepted as parsers
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;; Structs
@@ -159,6 +156,8 @@
   (car (reverse (parse-derivation-derivation-list derivation))))
 
 
+;; This counter stuff is just for help in figuring out performance information.
+;; IE debug info.
 (define-syntax (define-counters stx)
   (syntax-parse stx
     [(_ get-counts-name! [name ...])
@@ -264,6 +263,7 @@
 (define-values (prop:custom-parser custom-parser? custom-parser-ref)
   ;; TODO - document -- the property should be a function that accepts a `self` argument and returns a parser.
   ;; TODO - Is this really a good idea?  Perhaps I really just want to have objects that users can convert into parsing procedures, eg. readtable-like-object with ->single-read, ->multi-read functions.
+  ;; TODO - custom parsers should be able to give certain info without evaluating the function that returns a desugared parser, such as name info (eg. to break naming cycles for automatic naming), whether the parser is potentially left-recursive, etc.  Maybe the property should provide a hash table of (maybe optional) custom parser methods.
   (make-struct-type-property 'custom-parser))
 
 (define (parser? p)
@@ -271,6 +271,7 @@
         [(custom-parser? p)]
         [(string? p)]
         ;; TODO - this is not a great predicate...
+        ;; The contract really should be (-> parser?)
         [(procedure? p)]
         [else #f]))
 
@@ -507,15 +508,13 @@
 #|
 Schedulers keep track of parse work that needs to be done and have caches of results.
 
-The demand stack can contain:
-* continuation-workers, which have an outer job that they represent (or #f for the original outside caller) and a single dependency.
-* alt-workers, which are special workers for alt-parsers.  Alt-workers are spawned instead of normal continuations for alt-parsers.
+• job-info->job-cache is a multi-layered cache (of hashes and other data structures) that allows a parser, position, etc to be resolved into a job.
 
-The job-cache is a multi-tier hash of parser->extra-args-list->start-position->result-number->parser-job
-The job->result-cache is a map from parser-job structs -> parser-stream OR parse-error
+• The done-k-stack is a stack (of continuation-workers) that is pushed to for each non-left-recursive entry to the scheduler.  When that continuation is ready, the scheduler can return.
+• The top-job-stack is a stack (of jobs) that is pushed to for each non-left-recursive entry like the done-k-stack.  One of these two should be removed, because they are basically redundant.
+• hint-stack-stack - a stack (one for each non-left-recursive entry to the scheduler) of stacks of hints to the scheduler to quickly pick a next job.
 |#
 (struct scheduler
-  ;; TODO - document
   (port-broker top-job-stack done-k-stack hint-stack-stack job-info->job-cache)
   #:mutable
   #:transparent)
@@ -532,9 +531,8 @@ The job->result-cache is a map from parser-job structs -> parser-stream OR parse
                                                    (cdr hss))))
 
 (struct parser-job
-  ;; TODO - document from notes
   (
-   ;; parser is either a parser struct or an alt-parser struct
+   ;; parser is either a proc-parser struct or an alt-parser struct
    parser
    scheduler
    ;; chido-parse-parameters
@@ -542,6 +540,8 @@ The job->result-cache is a map from parser-job structs -> parser-stream OR parse
    start-position
    result-index
    ;; gvector of siblings indexed by result-index
+   ;; IE jobs reference their siblings as the final layer of job caching so
+   ;; that you can easily get another (IE the next) job in the series.
    siblings
    [port #:mutable]
    [worker #:mutable]
