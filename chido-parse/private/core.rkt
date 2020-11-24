@@ -3,7 +3,8 @@
 (provide
  make-parse-derivation
  parse-derivation?
- (contract-out
+ (rename-out [parse-derivation-result! parse-derivation-result])
+ #;(contract-out
   (rename parse-derivation-result! parse-derivation-result
           (-> parse-derivation? any/c)))
  parse-derivation-parser
