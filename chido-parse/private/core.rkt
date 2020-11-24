@@ -560,6 +560,7 @@ Schedulers keep track of parse work that needs to be done and have caches of res
             [#f #t]
             [(s/kw continuation-worker #:ready? (? (λ(x)x))) #t]
             [(s/kw alt-worker #:ready-jobs (? (λ(x) (not (null? x))))) #t]
+            [(stream-worker result-stream) #t]
             [else #f])])))
 
 (define (push-parser-job-dependent! job new-dependent)
