@@ -507,7 +507,7 @@
 Schedulers keep track of parse work that needs to be done and have caches of results.
 
 The demand stack can contain:
-* scheduled-continuations, which have an outer job that they represent (or #f for the original outside caller) and a single dependency.
+* continuation-workers, which have an outer job that they represent (or #f for the original outside caller) and a single dependency.
 * alt-workers, which are special workers for alt-parsers.  Alt-workers are spawned instead of normal continuations for alt-parsers.
 
 The job-cache is a multi-tier hash of parser->extra-args-list->start-position->result-number->parser-job
@@ -543,24 +543,21 @@ The job->result-cache is a map from parser-job structs -> parser-stream OR parse
    ;; gvector of siblings indexed by result-index
    siblings
    [port #:mutable]
-   [continuation/worker #:mutable]
-   ;; dependents are scheduled-continuations or alt-workers
+   [worker #:mutable]
+   ;; dependents are continuation-workers or alt-workers
    [dependents #:mutable]
    ;; The actual result.
    [result #:mutable]
-   ;; This one is not used for alt-parsers, but is used to keep track of the
-   ;; stream from a procedure.
-   [result-stream #:mutable]
    )
   #:transparent)
 
 (define (job-immediately-actionable? job)
   (and (not (job->result job))
        (match job
-         [(s/kw parser-job #:continuation/worker c/w)
+         [(s/kw parser-job #:worker c/w)
           (match c/w
             [#f #t]
-            [(s/kw scheduled-continuation #:ready? (? (λ(x)x))) #t]
+            [(s/kw continuation-worker #:ready? (? (λ(x)x))) #t]
             [(s/kw alt-worker #:ready-jobs (? (λ(x) (not (null? x))))) #t]
             [else #f])])))
 
@@ -581,14 +578,18 @@ The job->result-cache is a map from parser-job structs -> parser-stream OR parse
   (job remaining-jobs ready-jobs failures successful?)
   #:mutable #:transparent)
 
-(struct scheduled-continuation
+(struct continuation-worker
   ;; The dependency is only mutated to break cycles.
   (job k [dependency #:mutable] [ready? #:mutable])
   #:transparent)
 
+(struct stream-worker
+  (stream)
+  #:transparent)
 
-(define (make-scheduled-continuation-for-job j k dep)
-  (scheduled-continuation j k dep #f))
+
+(define (make-continuation-worker-for-job j k dep)
+  (continuation-worker j k dep #f))
 
 
 (define (job->parser-name job)
@@ -647,7 +648,7 @@ The job cache is a multi-level dictionary with the following keys / implementati
     (define siblings-vec (make-gvector))
     (define job
       (parser-job usable s cp-params start-position
-                  0 siblings-vec #f #f '() #f #f))
+                  0 siblings-vec #f #f '() #f))
     (gvector-add! siblings-vec job)
     job)
   (define (traverse-cache parser)
@@ -727,7 +728,7 @@ The job cache is a multi-level dictionary with the following keys / implementati
      (if (< next-index (gvector-count siblings))
          (gvector-ref siblings next-index)
          (let ([new-job (parser-job parser scheduler cp-params start-position
-                                    next-index siblings port #f '() #f #f)])
+                                    next-index siblings port #f '() #f)])
            (gvector-add! siblings new-job)
            new-job))]))
 
@@ -804,8 +805,8 @@ But I still need to encapsulate the port and give a start position.
               (call-with-composable-continuation
                (λ (k)
                  (define sched-k
-                   (make-scheduled-continuation-for-job parent-job k job))
-                 (set-parser-job-continuation/worker! parent-job sched-k)
+                   (make-continuation-worker-for-job parent-job k job))
+                 (set-parser-job-worker! parent-job sched-k)
                  (push-parser-job-dependent! job sched-k)
                  ;(push-hint! scheduler sched-k)
                  (abort-current-continuation chido-parse-prompt))
@@ -815,7 +816,7 @@ But I still need to encapsulate the port and give a start position.
             (let ()
               (define result
                 (let ()
-                  (define k-job (scheduled-continuation #f #f job #f))
+                  (define k-job (continuation-worker #f #f job #f))
                   (push-parser-job-dependent! job k-job)
                   ;; As a fresh entry into the parser, we start a fresh hint stack.
                   (set-scheduler-hint-stack-stack!
@@ -852,33 +853,6 @@ But I still need to encapsulate the port and give a start position.
   ;; s is a scheduler
   ;; job-stacks is a list of these dependency stacks
 
-  #|
-  TODO - fail-chain-dependent!, do-alt-fail!, and anything about finding the last alt was an attempt at optimizing that wasn't very useful, so it's all commented out or unused.  Maybe I should delete it.  At any rate I want the code checked into my repo history.  Maybe later I'll realize that the code is useful but I did something that ruined it.  Or maybe I'll delete it later.  I don't know.
-  |#
-  #;(define (fail-chain-dependent! job stack)
-    (define dep
-      (match (parser-job-continuation/worker job)
-        [(s/kw scheduled-continuation #:dependency dep) dep]
-        [else (error
-               'find-work
-               "TODO - this shouldn't happen -- alt-job in fail-chain-dependent")]))
-    (if (memq dep stack)
-        (match (parser-job-continuation/worker dep)
-          [(and sk (s/kw scheduled-continuation #:dependency dep-dep))
-           (set-scheduled-continuation-dependency! sk
-                                                   (cycle-breaker-job dep-dep))
-           (set-scheduled-continuation-ready?! sk #t)]
-          [(and aw (s/kw alt-worker))
-           (set-alt-worker-remaining-jobs! aw '())])
-        (fail-chain-dependent! dep (cons dep stack))))
-  #;(define (do-alt-fail! alt-stack)
-    (define last-alt (car alt-stack))
-    (match (parser-job-continuation/worker last-alt)
-      [(s/kw alt-worker #:remaining-jobs remaining-jobs)
-       (for ([rj remaining-jobs])
-         (fail-chain-dependent! rj alt-stack))
-       (find-work s alt-stack)]))
-
   (inc-find-work!)
   (let loop ([stacks (list job-stack)]
              [blocked '()]
@@ -886,18 +860,12 @@ But I still need to encapsulate the port and give a start position.
     (inc-find-work-loop!)
     (if (null? stacks)
         #f
-        #;(if last-alt-stack
-            (do-alt-fail! last-alt-stack)
-            #f)
         (let* ([jstack (car stacks)]
-               [j (car jstack)]
-               #;[last-alt (and last-alt-stack (car last-alt-stack))]
-               #;[alt-fail (and last-alt (not (memq last-alt jstack)))])
-          (cond #;[alt-fail (do-alt-fail! last-alt-stack)]
-                [(memq j blocked) (loop (cdr stacks) blocked last-alt-stack)]
-                ;; if it has a continuation/worker, add dependencies to jobs
-                [else (match (parser-job-continuation/worker j)
-                        [(s/kw scheduled-continuation
+               [j (car jstack)])
+          (cond [(memq j blocked) (loop (cdr stacks) blocked last-alt-stack)]
+                ;; if it has a worker, add dependencies to jobs
+                [else (match (parser-job-worker j)
+                        [(s/kw continuation-worker
                                #:dependency dependency
                                #:ready? ready?)
                          (cond [ready? jstack]
@@ -915,6 +883,7 @@ But I still need to encapsulate the port and give a start position.
                                                    (cdr stacks))
                                            (cons j blocked)
                                            jstack)])]
+                        [(stream-worker result-stream) jstack]
                         [#f jstack])])))))
 
 (define (find-and-run-actionable-job s hint-stack using-hint?)
@@ -950,11 +919,11 @@ But I still need to encapsulate the port and give a start position.
 
 (define (run-scheduler s)
   (define done-k (car (scheduler-done-k-stack s)))
-  (define scheduler-done? (scheduled-continuation-ready? done-k))
+  (define scheduler-done? (continuation-worker-ready? done-k))
   (cond
     [scheduler-done?
      ;; Escape the mad world of delimited-continuation-based parsing!
-     (job->result (scheduled-continuation-dependency done-k))]
+     (job->result (continuation-worker-dependency done-k))]
     [else
      (inc-run-scheduler!)
      (define using-hint? #t)
@@ -963,7 +932,7 @@ But I still need to encapsulate the port and give a start position.
        (set! using-hint? #f)
        (push-hint! s (car (scheduler-top-job-stack s))))
      (define hint-stack (car (scheduler-hint-stack-stack s)))
-     (define hint-worker (parser-job-continuation/worker (car hint-stack)))
+     (define hint-worker (parser-job-worker (car hint-stack)))
      (define (run-actionable-job? j)
        ;; TODO - this is probably not great, but for now I just want to get things working again...
        (if (job->result j)
@@ -975,10 +944,10 @@ But I still need to encapsulate the port and give a start position.
                (begin (pop-hint! s)
                       (run-scheduler s))
                (run-actionable-job? (car hint-stack)))]
-       [(s/kw scheduled-continuation #:job job #:ready? #t)
+       [(s/kw continuation-worker #:job job #:ready? #t)
         ;(pop-hint! s)
         (run-actionable-job? job)]
-       [(s/kw scheduled-continuation)
+       [(s/kw continuation-worker)
         (find-and-run-actionable-job s hint-stack using-hint?)]
        [(s/kw alt-worker #:job job #:ready-jobs (list ready-job rjs ...))
         (run-actionable-job? job)]
@@ -987,6 +956,7 @@ But I still need to encapsulate the port and give a start position.
        [(s/kw alt-worker)
         ;; No ready jobs
         (find-and-run-actionable-job s hint-stack using-hint?)]
+       [(stream-worker result-stream) (run-actionable-job? (car hint-stack))]
        )]))
 
 
@@ -1001,15 +971,15 @@ But I still need to encapsulate the port and give a start position.
        ;; If I'm in a situation to have to break a cycle, all remaining-jobs
        ;; are cyclic.  So let's just break the first one for now.
        (define next-job (car remaining-jobs))
-       (rec (parser-job-continuation/worker next-job) (cons job jobs))]
-      [(s/kw scheduled-continuation #:job job #:dependency dependency)
+       (rec (parser-job-worker next-job) (cons job jobs))]
+      [(s/kw continuation-worker #:job job #:dependency dependency)
        (if (memq dependency jobs)
            (begin
-             (set-scheduled-continuation-dependency!
+             (set-continuation-worker-dependency!
               goal
               (cycle-breaker-job dependency jobs))
-             (set-scheduled-continuation-ready?! goal #t))
-           (rec (parser-job-continuation/worker dependency)
+             (set-continuation-worker-ready?! goal #t))
+           (rec (parser-job-worker dependency)
                 (cons job jobs)))]))
   (rec (car (scheduler-done-k-stack scheduler)) '()))
 
@@ -1050,11 +1020,11 @@ But I still need to encapsulate the port and give a start position.
            "internal error - run-actionable-job got a job that was already done: ~a"
            (job->display job)))
   (match job
-    [(s/kw parser-job #:parser parser #:continuation/worker k/worker
-           #:result-stream result-stream #:result-index result-index
+    [(s/kw parser-job #:parser parser #:worker k/worker
+           #:result-index result-index
            #:start-position start-position #:cp-params cp-params)
      (match k/worker
-       [(s/kw scheduled-continuation #:job job #:dependency dependency #:k k)
+       [(s/kw continuation-worker #:job job #:dependency dependency #:k k)
         (do-run! scheduler
                  k
                  job
@@ -1079,8 +1049,8 @@ But I still need to encapsulate the port and give a start position.
              (cache-result-and-ready-dependents! scheduler job result-stream)
              (set-alt-worker-successful?! k/worker #t)
              (set-alt-worker-job! k/worker this-next-job)
-             (set-parser-job-continuation/worker! this-next-job k/worker)
-             (set-parser-job-continuation/worker! job #f)
+             (set-parser-job-worker! this-next-job k/worker)
+             (set-parser-job-worker! job #f)
              (push-parser-job-dependent! dep-next-job k/worker)
              (set-alt-worker-remaining-jobs!
               k/worker
@@ -1103,13 +1073,13 @@ But I still need to encapsulate the port and give a start position.
         (define result (alt-worker->failure k/worker))
         (cache-result-and-ready-dependents! scheduler job result)
         (run-scheduler scheduler)]
+       [(stream-worker result-stream)
+        (do-run! scheduler
+                 (λ () (stream-rest result-stream))
+                 job
+                 #f #f)]
        [#f
-        (cond [(stream? result-stream)
-               (do-run! scheduler
-                        (λ () (stream-rest result-stream))
-                        job
-                        #f #f)]
-              [(equal? 0 result-index)
+        (cond [(equal? 0 result-index)
                (match parser
                  [(s/kw proc-parser
                         #:name name
@@ -1168,7 +1138,7 @@ But I still need to encapsulate the port and give a start position.
                     (alt-worker job unready-deps ready-deps '() #f))
                   (for ([dep unready-deps])
                     (push-parser-job-dependent! dep worker))
-                  (set-parser-job-continuation/worker! job worker)
+                  (set-parser-job-worker! job worker)
                   (cond [(not (null? ready-deps))
                          ;; There is a result ready, so we just run this same job again to set the result.
                          (run-actionable-job scheduler job)]
@@ -1199,7 +1169,7 @@ But I still need to encapsulate the port and give a start position.
                  (cache-result-and-ready-dependents! scheduler
                                                      job
                                                      end-failure)
-                 (set-parser-job-continuation/worker! job #f)
+                 (set-parser-job-worker! job #f)
                  (run-scheduler scheduler))])])]))
 
 (define (do-run! scheduler thunk/k job continuation-run? k-arg)
@@ -1244,8 +1214,8 @@ But I still need to encapsulate the port and give a start position.
     (match dep
       [(s/kw alt-worker #:ready-jobs ready-jobs)
        (set-alt-worker-ready-jobs! dep (cons job ready-jobs))]
-      [(s/kw scheduled-continuation)
-       (set-scheduled-continuation-ready?! dep #t)]))
+      [(s/kw continuation-worker)
+       (set-continuation-worker-ready?! dep #t)]))
   (set-parser-job-dependents! job '()))
 
 (define (cache-result-and-ready-dependents! scheduler job result)
@@ -1268,8 +1238,8 @@ But I still need to encapsulate the port and give a start position.
 
 (define (cache-result-and-ready-dependents!/procedure-job
          scheduler job result)
-  ;; Clear the result-stream, if there is one, because it's not needed anymore.
-  (set-parser-job-result-stream! job #f)
+  ;; We can delete the worker from a procedural job, because it will never be used again (IE continuation-worker or stream-worker, never alt-worker).
+  (set-parser-job-worker! job #f)
   (match result
     [(s/kw parse-failure)
      (set-parser-job-result! job result)
@@ -1303,7 +1273,7 @@ But I still need to encapsulate the port and give a start position.
     [(? stream?)
      ;; Recur with stream-first, setting the stream as the result-stream
      (define next-job (get-next-job! job))
-     (set-parser-job-result-stream! next-job result)
+     (set-parser-job-worker! next-job (stream-worker result))
      (cache-result-and-ready-dependents!/procedure-job
       scheduler job (reject-raw-results job (stream-first result)))]
     [(s/kw parse-derivation)
