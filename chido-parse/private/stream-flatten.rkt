@@ -150,7 +150,7 @@ A flattened stream is flattened depth-first, a la `flatten` for lists.
                               (choose-with-frequencies
                                (list
                                 (cons 1 (choose-stream-tree (sub1 depth-limit)))
-                                (cons 1 arbitrary-integer)))
+                                (cons 1 (choose-integer -10000 10000))))
                               len)])
                            the-stream))
                   (cons 1 (choose-integer 0 1000))))])
