@@ -1074,6 +1074,8 @@ Returns the parser for the given arm of the BNF.
 It's a @racket[chido-readtable], though probably not one that's necessarily like you might make directly (except through @racket[define-bnf-arm]).
 }
 
+
+@section{TODO}
 TODO - document these
 
 @itemlist[
