@@ -318,7 +318,7 @@
 (struct non-cached-parser-thunk (proc)
   #:property prop:procedure (struct-field-index proc))
 
-(define parser-cache (make-weak-hasheq))
+(define parser-cache (make-ephemeron-hasheq))
 (define (parser->usable p)
   (cond [(parser-struct? p) p]
         [(custom-parser? p)
@@ -336,17 +336,11 @@
                (parser->usable result)))]
         [else (error 'chido-parse "not a parser: ~s" p)]))
 
-(struct parse-stream
-  (result next-job scheduler)
-  #:methods gen:stream
-  [(define (stream-empty? s) #f)
-   (define (stream-first s)
-     (parse-stream-result s))
-   (define (stream-rest s)
-     (if (parse-stream-next-job s)
-         (enter-the-parser/job (parse-stream-scheduler s)
-                               (parse-stream-next-job s))
-         empty-stream))])
+(define parse-stream? stream?)
+(define (parse-stream result next-job scheduler)
+  (if next-job
+      (stream-cons #:eager result (enter-the-parser/job scheduler next-job))
+      (list result)))
 
 (define progress-default (gensym))
 ;; TODO - Maybe I should have a `keep-all?` parameter and a `keep-ties?` parameter to keep multiple failures when they tie for greatest.
@@ -614,7 +608,7 @@ Schedulers keep track of parse work that needs to be done and have caches of res
 Scheduler cache (IE global cache containing scheduler objects):
 A weak hash port-broker->ephemeron with scheduler.
 |#
-(define the-scheduler-cache (make-weak-hasheq))
+(define the-scheduler-cache (make-ephemeron-hasheq))
 (define port-broker-scheduler
   (make-ephemeron-cache-lookup the-scheduler-cache make-scheduler))
 
@@ -1036,8 +1030,8 @@ But I still need to encapsulate the port and give a start position.
         (set-alt-worker-ready-jobs! k/worker rjs)
         (define result (job->result ready-job))
         (cond
-          [(parse-failure? result)
-           (set-alt-worker-failures! k/worker (cons result failures))]
+          [(parse-failure? (stream-force result))
+           (set-alt-worker-failures! k/worker (cons (stream-force result) failures))]
           [(parse-stream? result)
            (let ([result-contents (stream-first result)]
                  [this-next-job (get-next-job! job)]
@@ -1102,8 +1096,8 @@ But I still need to encapsulate the port and give a start position.
                        scheduler
                        job
                        (λ ()
-                         (parameterize ([current-chido-parse-parameters
-                                         cp-params])
+                         (with-chido-parse-parameters
+                           cp-params
                            (procedure proc-input))))
                       (begin (prefix-fail! scheduler job)
                              (run-scheduler scheduler)))]
@@ -1193,7 +1187,7 @@ But I still need to encapsulate the port and give a start position.
   (cond [(eq? result recursive-enter-flag) (run-scheduler scheduler)]
         [(and (stream? result)
               (not (flattened-stream? result))
-              (not (parse-failure? result)))
+              (not (parse-failure? (stream-force result))))
          (result-check-loop
           scheduler
           job
@@ -1225,7 +1219,7 @@ But I still need to encapsulate the port and give a start position.
 
 (define (cache-result-and-ready-dependents!/builtin scheduler job result)
   ;; This version only gets pre-sanitized results, and is straightforward.
-  (when (and (not (parse-failure? result))
+  (when (and (not (parse-failure? (stream-force result)))
              (not (parse-stream? result)))
     (error 'chido-parse-cache-result-and-ready-dependents/builtin!
            "trying to cache something for job ~s with a bad type: ~s\n"
@@ -1340,6 +1334,9 @@ But I still need to encapsulate the port and give a start position.
                parser
                start))
 
+
+(define default-failure-proc (λ (f) f (make-parse-failure #:inner-failure f)))
+
 (define-syntax (for/parse stx)
   (syntax-parse stx
     [(_ ([arg-name input-stream]
@@ -1347,8 +1344,7 @@ But I still need to encapsulate the port and give a start position.
         body ...+)
      #'(for/parse-proc (λ (arg-name) body ...)
                        (λ () input-stream)
-                       (~? failure-arg
-                           (λ (f) f (make-parse-failure #:inner-failure f))))]))
+                       (~? failure-arg default-failure-proc))]))
 
 (define (parse*-direct port parser
                       #:start [start #f]
@@ -1370,13 +1366,14 @@ But I still need to encapsulate the port and give a start position.
           (λ () (for/parse ([d (parse* port parser #:start core-start)]
                             #:failure (λ (f)
                                         (parameterize
-                                            ([current-chido-parse-job job]
-                                             [current-chido-parse-parameters params])
-                                          (or (and failure-arg
-                                                   (failure-arg f))
-                                              (make-parse-failure
-                                               #:inner-failure f)))))
-                           (k d)))))
+                                            ([current-chido-parse-job job])
+                                          (with-chido-parse-parameters
+                                            params
+                                            (or (and failure-arg
+                                                     (failure-arg f))
+                                                (make-parse-failure
+                                                 #:inner-failure f))))))
+                  (k d)))))
        parse*-direct-prompt))
     (define new-pos (parse-derivation-end-position new-derivation))
     (port-broker-port-reset-position! port new-pos)

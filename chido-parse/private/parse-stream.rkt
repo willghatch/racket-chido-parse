@@ -40,25 +40,17 @@ later elements in the streams will get different parameterizations.
   (syntax-parse stx
     [(_ head:expr tail:expr)
      #'(let* ([cp-params (current-chido-parse-parameters)]
-              [h (parameterize ([current-chido-parse-parameters cp-params])
-                   (delimit-parse*-direct head))])
-         ;; Note:  I previously used stream-cons here, which would be, uh,
-         ;; more correct.  But stream cons onto a *custom* empty stream seems
-         ;; to replace the custom empty stream with the canonical empty stream.
-         ;; I get failure info out of some custom empty streams, so this is
-         ;; unacceptable.  But I don't like using `stream` here either, because
-         ;; now I'm making a stream tree instead of a flat stream.
-         ;; It ultimately works out for me, because I flatten stream trees
-         ;; (into the very custom stream that I get failure info from).
-         ;; But if this could change, that would be great.
-         (stream h
-                 (parameterize ([current-chido-parse-parameters cp-params])
-                   tail)))]))
+              [h (delimit-parse*-direct head)])
+         (stream-cons #:eager h
+                      (with-chido-parse-parameters
+                        cp-params
+                        tail)))]))
 
 (define (for/parse-proc body-proc arg-stream-thunk failure-proc)
   (let loop ([stream (arg-stream-thunk)])
-    (cond [(parse-failure? stream) (failure-proc stream)]
+    (cond [(parse-failure? (stream-force stream)) (failure-proc (stream-force stream))]
           [(stream-empty? stream) stream]
-          [else (let ([v1 (stream-first stream)])
+          [else (let ([v1 (stream-first stream)]
+                      [r (stream-rest stream)])
                   (parse-stream-cons (body-proc v1)
-                                     (loop (stream-rest stream))))])))
+                                     (loop r)))])))
