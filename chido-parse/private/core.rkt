@@ -1102,8 +1102,8 @@ But I still need to encapsulate the port and give a start position.
                        scheduler
                        job
                        (λ ()
-                         (parameterize ([current-chido-parse-parameters
-                                         cp-params])
+                         (with-chido-parse-parameters
+                           cp-params
                            (procedure proc-input))))
                       (begin (prefix-fail! scheduler job)
                              (run-scheduler scheduler)))]
@@ -1370,13 +1370,14 @@ But I still need to encapsulate the port and give a start position.
           (λ () (for/parse ([d (parse* port parser #:start core-start)]
                             #:failure (λ (f)
                                         (parameterize
-                                            ([current-chido-parse-job job]
-                                             [current-chido-parse-parameters params])
-                                          (or (and failure-arg
-                                                   (failure-arg f))
-                                              (make-parse-failure
-                                               #:inner-failure f)))))
-                           (k d)))))
+                                            ([current-chido-parse-job job])
+                                          (with-chido-parse-parameters
+                                            params
+                                            (or (and failure-arg
+                                                     (failure-arg f))
+                                                (make-parse-failure
+                                                 #:inner-failure f))))))
+                  (k d)))))
        parse*-direct-prompt))
     (define new-pos (parse-derivation-end-position new-derivation))
     (port-broker-port-reset-position! port new-pos)
