@@ -219,7 +219,7 @@
                        line column start-position end-use
                        derivation-list)]
     [else (error 'make-parse-derivation
-                 "Not called during the dynamic extent of chido-parse...")]))
+                 "Not called during the dynamic extent of chido-parse.\nGiven result: ~v\n" result)]))
 
 (struct parser-struct (name) #:transparent)
 
