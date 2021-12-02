@@ -318,7 +318,7 @@
 (struct non-cached-parser-thunk (proc)
   #:property prop:procedure (struct-field-index proc))
 
-(define parser-cache (make-weak-hasheq))
+(define parser-cache (make-ephemeron-hasheq))
 (define (parser->usable p)
   (cond [(parser-struct? p) p]
         [(custom-parser? p)
@@ -614,7 +614,7 @@ Schedulers keep track of parse work that needs to be done and have caches of res
 Scheduler cache (IE global cache containing scheduler objects):
 A weak hash port-broker->ephemeron with scheduler.
 |#
-(define the-scheduler-cache (make-weak-hasheq))
+(define the-scheduler-cache (make-ephemeron-hasheq))
 (define port-broker-scheduler
   (make-ephemeron-cache-lookup the-scheduler-cache make-scheduler))
 
