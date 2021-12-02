@@ -407,10 +407,10 @@
                  (define s (parse* port parser))
                  (if (parse-failure? s)
                      s
-                     (stream-map (λ (d) (make-parse-derivation
-                                         (wrap-func d)
-                                         #:derivations (list d) ))
-                                 s)))
+                     (for/parse ([d s])
+                       (make-parse-derivation
+                        (wrap-func d)
+                        #:derivations (list d) ))))
                #:preserve-prefix? #t
                #:promise-no-left-recursion?
                (not (parser-potentially-left-recursive? parser))
