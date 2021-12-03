@@ -349,17 +349,17 @@ A wrapped port should be able to give a handle to the broker it is wrapping.
 
 ;; broker -> original port (via ephemeron)
 (define broker-cache
-  (make-weak-hasheq))
+  (make-ephemeron-hasheq))
 
 (define cache-port-broker
   (make-ephemeron-cache-lookup broker-cache make-port-broker))
 
 ;; wrapper port -> port broker
 (define wrapper-cache
-  (make-weak-hasheq))
+  (make-ephemeron-hasheq))
 
 (define port->reset-proc
-  (make-weak-hasheq))
+  (make-ephemeron-hasheq))
 
 (define (port-broker->wrapped-port/cached pb offset)
   (define p (port-broker->wrapped-port pb offset))

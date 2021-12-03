@@ -40,7 +40,7 @@ later elements in the streams will get different parameterizations.
   (syntax-parse stx
     [(_ head:expr tail:expr)
      #'(let* ([cp-params (current-chido-parse-parameters)]
-              [h (parameterize ([current-chido-parse-parameters cp-params])
+              [h (with-chido-parse-parameters cp-params
                    (delimit-parse*-direct head))])
          ;; Note:  I previously used stream-cons here, which would be, uh,
          ;; more correct.  But stream cons onto a *custom* empty stream seems
@@ -52,8 +52,7 @@ later elements in the streams will get different parameterizations.
          ;; (into the very custom stream that I get failure info from).
          ;; But if this could change, that would be great.
          (stream h
-                 (parameterize ([current-chido-parse-parameters cp-params])
-                   tail)))]))
+                 (with-chido-parse-parameters cp-params tail)))]))
 
 (define (for/parse-proc body-proc arg-stream-thunk failure-proc)
   (let loop ([stream (arg-stream-thunk)])
