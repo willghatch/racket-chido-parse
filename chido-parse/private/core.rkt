@@ -336,17 +336,11 @@
                (parser->usable result)))]
         [else (error 'chido-parse "not a parser: ~s" p)]))
 
-(struct parse-stream
-  (result next-job scheduler)
-  #:methods gen:stream
-  [(define (stream-empty? s) #f)
-   (define (stream-first s)
-     (parse-stream-result s))
-   (define (stream-rest s)
-     (if (parse-stream-next-job s)
-         (enter-the-parser/job (parse-stream-scheduler s)
-                               (parse-stream-next-job s))
-         empty-stream))])
+(define parse-stream? stream?)
+(define (parse-stream result next-job scheduler)
+  (if next-job
+      (stream-cons #:eager result (enter-the-parser/job scheduler next-job))
+      (list result)))
 
 (define progress-default (gensym))
 ;; TODO - Maybe I should have a `keep-all?` parameter and a `keep-ties?` parameter to keep multiple failures when they tie for greatest.
@@ -1036,8 +1030,8 @@ But I still need to encapsulate the port and give a start position.
         (set-alt-worker-ready-jobs! k/worker rjs)
         (define result (job->result ready-job))
         (cond
-          [(parse-failure? result)
-           (set-alt-worker-failures! k/worker (cons result failures))]
+          [(parse-failure? (stream-force result))
+           (set-alt-worker-failures! k/worker (cons (stream-force result) failures))]
           [(parse-stream? result)
            (let ([result-contents (stream-first result)]
                  [this-next-job (get-next-job! job)]
@@ -1193,7 +1187,7 @@ But I still need to encapsulate the port and give a start position.
   (cond [(eq? result recursive-enter-flag) (run-scheduler scheduler)]
         [(and (stream? result)
               (not (flattened-stream? result))
-              (not (parse-failure? result)))
+              (not (parse-failure? (stream-force result))))
          (result-check-loop
           scheduler
           job
@@ -1225,7 +1219,7 @@ But I still need to encapsulate the port and give a start position.
 
 (define (cache-result-and-ready-dependents!/builtin scheduler job result)
   ;; This version only gets pre-sanitized results, and is straightforward.
-  (when (and (not (parse-failure? result))
+  (when (and (not (parse-failure? (stream-force result)))
              (not (parse-stream? result)))
     (error 'chido-parse-cache-result-and-ready-dependents/builtin!
            "trying to cache something for job ~s with a bad type: ~s\n"
