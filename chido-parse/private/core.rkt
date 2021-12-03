@@ -1340,6 +1340,9 @@ But I still need to encapsulate the port and give a start position.
                parser
                start))
 
+
+(define default-failure-proc (λ (f) f (make-parse-failure #:inner-failure f)))
+
 (define-syntax (for/parse stx)
   (syntax-parse stx
     [(_ ([arg-name input-stream]
@@ -1347,8 +1350,7 @@ But I still need to encapsulate the port and give a start position.
         body ...+)
      #'(for/parse-proc (λ (arg-name) body ...)
                        (λ () input-stream)
-                       (~? failure-arg
-                           (λ (f) f (make-parse-failure #:inner-failure f))))]))
+                       (~? failure-arg default-failure-proc))]))
 
 (define (parse*-direct port parser
                       #:start [start #f]
