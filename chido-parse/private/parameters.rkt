@@ -5,6 +5,7 @@
  chido-parse-parameter?
  chido-parse-parameter
  chido-parse-parameterize
+ with-chido-parse-parameters
  )
 
 (require
@@ -13,7 +14,15 @@
   syntax/parse
   ))
 
-(define current-chido-parse-parameters (make-parameter (hash)))
+(define chido-parse-param-key 'chido-parse)
+
+(define (current-chido-parse-parameters)
+  (continuation-mark-set-first #f chido-parse-param-key #hasheq()))
+
+(define-syntax-rule (with-chido-parse-parameters params body ...)
+  (with-continuation-mark
+   chido-parse-param-key params
+   (let () body ...)))
 
 (struct chido-parse-parameter (default)
   #:property prop:procedure
@@ -29,11 +38,11 @@
            (and (or (chido-parse-parameter? pv)
                     (error 'chido-parse-parameterize "not a chido-parse-parameter: ~a" pv))
                 ...)
-           (parameterize ([current-chido-parse-parameters
-                           (for/fold ([h (current-chido-parse-parameters)])
-                                     ([p (list pv ...)]
-                                      [v (list val ...)])
-                             (hash-set h p v))])
+           (with-chido-parse-parameters
+             (for/fold ([h (current-chido-parse-parameters)])
+                       ([p (list pv ...)]
+                        [v (list val ...)])
+               (hash-set h p v))
              body ...)))]))
 
 
